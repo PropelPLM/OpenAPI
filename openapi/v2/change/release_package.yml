@@ -1,12 +1,12 @@
 ---
 openapi: 3.0.0
 info:
-  version: '3.0'
+  version: '2.0'
   title: Release Package REST API
   license:
     name: MIT
 servers:
-- url: http://{orgId}.salesforce.com/services/apexrest/{namespace}/v3
+- url: http://{orgId}.salesforce.com/services/apexrest/{namespace}/v2
   variables:
     namespace: 
       default: PDLM
@@ -40,16 +40,16 @@ paths:
           default: false
       - name: bom
         in: query
-        description: Include the BOM for each affected item in the payload, only includes the
+        description: Include BOMs for each affected item in the payload, only includes the
           first level. affectedItems parameter must be true.
         required: false
         schema:
           type: boolean
           format: boolean
           default: false
-      - name: amls
+      - name: aml
         in: query
-        description: Include AMLs for each affected item in the payload. affectedItems
+        description: Include AML for each affected item in the payload. affectedItems
           parameter must be true.
         required: false
         schema:
@@ -74,17 +74,9 @@ paths:
           type: boolean
           format: boolean
           default: false
-      - name: limit
-        in: query
-        description: Used to limit the number of affected items included in the response
-        required: false
-        schema:
-          type: integer
-          format: integer
-          default: 0
       - name: page
         in: query
-        description: Page number to provide if number of affected items exceeds limit provided or Propel limit of 1000
+        description: Page number when number of affected items 
         required: false
         schema:
           type: integer
@@ -97,13 +89,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/ReleasePackage'
+                '$ref': '#/components/schemas/ReleasePackage'
         '404':
           description: Change Order not found
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'
+                '$ref': '#/components/schemas/Error'
   '/bom/{itemNumber}':
     get:
       summary: BOM 
@@ -152,13 +144,13 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Assembly'
+                '$ref': '#/components/schemas/Assembly'
         '404':
           description: Change Order not found
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Error'
+                '$ref': '#/components/schemas/Error'
 components:
   schemas:
     ReleasePackage:
@@ -167,59 +159,47 @@ components:
       - id
       - name
       properties:
-        Id:
-          type: integer
-          format: int64
-        Name:
+        id:
+          type: string
+        name:
           type: string
         affectedItems:
           type: array
           items:
-            $ref: '#/components/schemas/AffectedItem'
+            '$ref': '#/components/schemas/AffectedItem'
         attachments:
           type: array
           items:
-            $ref: '#/components/schemas/Attachment'
+            '$ref': '#/components/schemas/Attachment'
         next:
           type: string
-          description: URL to retrieve the next page of affected items associated to this release package. Will only be provided if number of affected items exceeds provided limit or Propel limit of 1000
-    attributes:
-      type: object
-      required: 
-      - type
-      - url
-      properties:
-        type: 
-          type: string
-        url:
-          type: string
+          description: URL to retrieve the next page of affected items associated 
+            to this release package
     AffectedItem:
       type: object
       required:
       - id
       - name
       properties:
-        Id:
+        id:
           type: string
-          description: Id of the associated Item Revision record
-        Name:
+        name:
           type: string
-          description: Name of the item record associated to the affected item
         Custom_Field__c:
           type: string
           description: Placeholder for any custom fields an org may have on the Change__c object.
         bom:
           type: array
           items:
-            $ref: '#/components/schemas/Assembly'
+            '$ref': '#/components/schemas/Assembly'
         aml:
           type: array
           items:
-            $ref: '#/components/schemas/Manufacturer'
+            '$ref': '#/components/schemas/Manufacturer'
         attachments:
           type: array
           items:
-            $ref: '#/components/schemas/Document'
+            '$ref': '#/components/schemas/Document'
     Assembly:
       type: object
       description: Assembly row represented in a BOM. 
@@ -228,10 +208,10 @@ components:
       - name
       - level
       properties:
-        Id:
+        id:
           type: string
           description: Id of the child Item record
-        PDLM__Item_Number__c:
+        name:
           type: string
           description: Name of the child Item record
         PDLM__Level__c:
@@ -246,23 +226,17 @@ components:
       required: 
       - id
       properties:
-        Id:
+        id:
+          type: string
+          description: Id of the Attachment (ContentDocument record)
+        name:
+          type: string
+          description: Name of the attachment/file
+        versionId:
           type: string
           description: The content version ID associated with the file. This contains
             the file's latest base64 encoded content.
-        ContentDocumentId:
-          type: string
-          description: Id of the Attachment (ContentDocument record)
-        ContentSize:
-          type: number
-          description: Size of the file
-        IsLatest:
-          type: boolean
-          description: Size of the file
-        Title:
-          type: string
-          description: Name of the file
-        VersionNumber:
+        version:
           type: number
           description: The version number associated with the file
     Document:
@@ -293,15 +267,14 @@ components:
       required:
       - id
       properties:
-        Id:
+        id:
           type: string
           description: Id of the Manufacturer Part record
-        Name:
+        name:
           type: string
           description: Name of the Manufacturer Part record
         PDLM__Manufacturer__c:
           type: string
-          description: Id of the Account record representing the manufacturer
         PDLM__Manufacturer_Name__c:
           type: string
         PDLM__Primary_Key__c:
@@ -311,10 +284,6 @@ components:
         Custom_Field__c:
           type: string
           description: Placeholder for any custom fields an org may have on the Manufacturer_Part__c object.
-        attachments:
-          type: array
-          items:
-            $ref: '#/components/schemas/Attachment'
     Error:
       type: object
       required:
