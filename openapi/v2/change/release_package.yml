@@ -104,61 +104,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
-  '/bom/{itemNumber}':
-    get:
-      summary: BOM 
-      description: Query to return a list of assembly records which represent the full BOM for the 
-        given Item.
-      operationId: getBom
-      tags:
-      - Bill of Material
-      - BOM
-      - Assembly
-      parameters:
-      - name: itemNumber
-        in: path
-        description: Item Revision Id or Item Number of assembly to retrieve the BOM for. If Item Id or Item Number is provided, will default to latest released revision or latest revision if there is no released revision.
-        required: true
-        schema:
-          type: string
-          format: string
-      - name: level
-        in: query
-        description: Level of BOM to fetch. Defaults to All levels.
-        required: false
-        schema:
-          type: string
-          format: string
-          default: 'all'
-      - name: delta
-        in: query
-        description: Returns the deltas in the BOM between the latest released revision and previous revision in addition to the BOM.
-        required: false
-        schema:
-          type: boolean
-          format: boolean
-          default: false
-      - name: flatten
-        in: query
-        description: Returns a list of parts in the assembly without level. Will combine duplicate BOM rows that exist at different levels into a single BOM row.
-        required: false
-        schema:
-          type: boolean
-          format: boolean
-          default: false
-      responses:
-        '200':
-          description: Bill of Materials for a specified Item
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Assembly'
-        '404':
-          description: Change Order not found
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
 components:
   schemas:
     ReleasePackage:
