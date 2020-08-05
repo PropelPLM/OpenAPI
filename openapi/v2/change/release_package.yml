@@ -1,0 +1,273 @@
+---
+openapi: 3.0.0
+info:
+  version: '3.0'
+  title: Release Package REST API
+  license:
+    name: MIT
+servers:
+- url: https://{orgId}.salesforce.com/services/apexrest/{namespace}/v3
+  variables:
+    namespace: 
+      default: PDLM
+      description: This value should default to PDLM for production environments. 
+        For dev environments, provide the namespace to your dev org.
+paths:
+  '/change/{changeId}':
+    get:
+      summary: Change (Release Package)
+      description: Get a change order's details along with related information such
+        as Affected Items, Bills of Materials, Approved Manufacturers Lists, and Attachments.
+        This endpoint is useful for integrations with downstream systems such as ERP.
+      operationId: getChangeOrder
+      tags:
+      - change
+      parameters:
+      - name: changeId
+        in: path
+        description: Change Id Or Change Number
+        required: true
+        schema:
+          type: string
+          format: string
+      - name: affectedItems
+        in: query
+        description: Include affected items including details fields and costing information.
+        required: false
+        schema:
+          type: boolean
+          format: boolean
+          default: false
+      - name: bom
+        in: query
+        description: Include the BOM for each affected item in the payload, only includes the
+          first level. affectedItems parameter must be true.
+        required: false
+        schema:
+          type: boolean
+          format: boolean
+          default: false
+      - name: amls
+        in: query
+        description: Include AMLs for each affected item in the payload. affectedItems
+          parameter must be true.
+        required: false
+        schema:
+          type: boolean
+          format: boolean
+          default: false
+      - name: attachments
+        in: query
+        description: Include information about Change attachments. If affectedItems
+          is true, Item attachments will also be included.
+        required: false
+        schema:
+          type: boolean
+          format: boolean
+          default: false
+      - name: useXMLexportFieldset
+        in: query
+        description: Use the XML Export field set to determine which fields will
+          be returned in the response. Default is false to return all fields.
+        required: false
+        schema:
+          type: boolean
+          format: boolean
+          default: false
+      - name: limit
+        in: query
+        description: Used to limit the number of affected items included in the response
+        required: false
+        schema:
+          type: integer
+          format: integer
+          default: 0
+      - name: page
+        in: query
+        description: Page number to provide if number of affected items exceeds limit provided or Propel limit of 1000
+        required: false
+        schema:
+          type: integer
+          format: integer
+          default: 0
+      responses:
+        '200':
+          description: Change Order details fields. Optionally includes Affected Item,
+            BOM, and AML data for downstream system integrations.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReleasePackage'
+        '404':
+          description: Change Order not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+components:
+  schemas:
+    ReleasePackage:
+      type: object
+      required:
+      - id
+      - name
+      properties:
+        Id:
+          type: integer
+          format: int64
+        Name:
+          type: string
+        affectedItems:
+          type: array
+          items:
+            $ref: '#/components/schemas/AffectedItem'
+        attachments:
+          type: array
+          items:
+            $ref: '#/components/schemas/Attachment'
+        next:
+          type: string
+          description: URL to retrieve the next page of affected items associated to this release package. Will only be provided if number of affected items exceeds provided limit or Propel limit of 1000
+    attributes:
+      type: object
+      required: 
+      - type
+      - url
+      properties:
+        type: 
+          type: string
+        url:
+          type: string
+    AffectedItem:
+      type: object
+      required:
+      - id
+      - name
+      properties:
+        Id:
+          type: string
+          description: Id of the associated Item Revision record
+        Name:
+          type: string
+          description: Name of the item record associated to the affected item
+        Custom_Field__c:
+          type: string
+          description: Placeholder for any custom fields an org may have on the Change__c object.
+        bom:
+          type: array
+          items:
+            $ref: '#/components/schemas/Assembly'
+        aml:
+          type: array
+          items:
+            $ref: '#/components/schemas/Manufacturer'
+        attachments:
+          type: array
+          items:
+            $ref: '#/components/schemas/Document'
+    Assembly:
+      type: object
+      description: Assembly row represented in a BOM. 
+      required:
+      - id
+      - name
+      - level
+      properties:
+        Id:
+          type: string
+          description: Id of the child Item record
+        PDLM__Item_Number__c:
+          type: string
+          description: Name of the child Item record
+        PDLM__Level__c:
+          type: string
+          description: 'BOM level of assembly row. In the format of 1, 1.1, 2, 2.1, 2.2, 2.2.1'
+        Custom_Field__c:
+          type: string
+          description: Placeholder for any custom fields an org may have on the Assembly__c object.
+    Attachment:
+      type: object
+      description: Attachments added to change, quality or AML records
+      required: 
+      - id
+      properties:
+        Id:
+          type: string
+          description: The content version ID associated with the file. This contains
+            the file's latest base64 encoded content.
+        ContentDocumentId:
+          type: string
+          description: Id of the Attachment (ContentDocument record)
+        ContentSize:
+          type: number
+          description: Size of the file
+        IsLatest:
+          type: boolean
+          description: Size of the file
+        Title:
+          type: string
+          description: Name of the file
+        VersionNumber:
+          type: number
+          description: The version number associated with the file
+    Document:
+      type: object
+      description: Document records attached to items
+      required:
+      - id
+      properties:
+        id:
+          type: string
+          description: Id of the Attachment (Document__c) record
+        name:
+          type: string
+          description: Name of the attachment
+        PDLM__Document_Version__c:
+          type: string
+          description: The latest content version ID associated with the attachment.
+            This contains the files latest base64 encoded content.
+        PDLM__External_Attachment_URL__c:
+          type: string
+          description: URL of the attachment if applicable.
+        Custom_Field__c:
+          type: string
+          description: Placeholder for any custom fields an org may have on the Document__c object.
+    Manufacturer:
+      type: object
+      description: Manufacturer Part representing AML rows
+      required:
+      - id
+      properties:
+        Id:
+          type: string
+          description: Id of the Manufacturer Part record
+        Name:
+          type: string
+          description: Name of the Manufacturer Part record
+        PDLM__Manufacturer__c:
+          type: string
+          description: Id of the Account record representing the manufacturer
+        PDLM__Manufacturer_Name__c:
+          type: string
+        PDLM__Primary_Key__c:
+          type: string
+          description: Primary key unique identifier for the Manufacturer Part
+            record
+        Custom_Field__c:
+          type: string
+          description: Placeholder for any custom fields an org may have on the Manufacturer_Part__c object.
+        attachments:
+          type: array
+          items:
+            $ref: '#/components/schemas/Attachment'
+    Error:
+      type: object
+      required:
+      - code
+      - message
+      properties:
+        code:
+          type: integer
+          format: int32
+        message:
+          type: string
