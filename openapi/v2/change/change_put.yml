@@ -1,0 +1,86 @@
+openapi: 3.0.0
+info:
+  version: '2.0'
+  title: Change PUT
+  license:
+    name: MIT
+servers:
+  - url: 'https://{orgId}.salesforce.com/services/apexrest/{namespace}/v2'
+    variables:
+      namespace:
+        default: PDLM
+        description: >-
+          This value should default to PDLM for production environments. For dev
+          environments, provide the namespace to your dev org.
+paths:
+  '/change/{changeId}':
+    put:
+      summary: Update Change Order
+      description: >-
+        Update existing change order to add/remove a list of affected items and
+        update change detail fields
+      operationId: changePut
+      tags:
+        - change
+      parameters:
+        - name: changeId
+          in: path
+          description: Change Id or Change Number
+          required: true
+          schema:
+            type: string
+            format: string
+        - name: addAffectedItems
+          in: query
+          description: List of affected items to add to the change order
+          required: false
+          schema:
+            type: array
+            items:
+              type: string
+      responses:
+        '200':
+          description: Updated change order
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Change'
+components:
+  schemas:
+    Change:
+      type: object
+      required:
+        - Id
+        - Name
+      properties:
+        Id:
+          type: integer
+          format: int64
+        Name:
+          type: string
+        Custom_Field__c:
+          type: string
+          description: >-
+            Placeholder for any custom fields an org may have on the Change__c
+            object.
+        affectedItems:
+          type: array
+          items:
+            $ref: '#/components/schemas/AffectedItem'
+    AffectedItem:
+      type: object
+      required:
+        - id
+        - name
+      properties:
+        Id:
+          type: string
+          description: Id of the associated Item Revision record
+        Name:
+          type: string
+          description: Name of the item record associated to the affected item
+        Custom_Field__c:
+          type: string
+          description: >-
+            Placeholder for any custom fields an org may have on the
+            Affected_Item__c object.
