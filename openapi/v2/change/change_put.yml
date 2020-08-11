@@ -30,14 +30,11 @@ paths:
           schema:
             type: string
             format: string
-        - name: addAffectedItems
-          in: query
-          description: List of affected items to add to the change order
-          required: false
-          schema:
-            type: array
-            items:
-              type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChangeBody'
       responses:
         '200':
           description: Updated change order
@@ -84,3 +81,25 @@ components:
           description: >-
             Placeholder for any custom fields an org may have on the
             Affected_Item__c object.
+    ChangeBody:
+      type: object
+      properties:
+        addAffectedItems:
+          type: array
+          items: 
+            type: string
+            format: string
+        removeAffectedItems:
+          type: array
+          items:
+            type: string
+            format: string
+        details:
+          type: object
+          properties:
+            PDLM__Description__c: 
+              type: string
+              format: string
+            Custom_Field__c:
+              type: string
+              format: string
