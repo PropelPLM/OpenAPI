@@ -30,6 +30,15 @@ paths:
           schema:
             type: string
             format: string
+        - name: forceAdd
+          in: query
+          description: Force add any affected items that are currently on an existing change, by 
+            removing them from the previous change prior to adding.
+          required: false
+          schema:
+            type: boolean
+            format: boolean
+            default: false
       requestBody:
         content:
           application/json:
