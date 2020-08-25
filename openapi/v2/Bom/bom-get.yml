@@ -60,7 +60,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/Assembly'
+                $ref: '#/components/schemas/GetBom'
         '404':
           description: Change Order not found
           content:
@@ -80,12 +80,16 @@ components:
             $ref: '#/components/schemas/ReturnBom'
           description: Array of objects containing information about the manufacturer items and assemblies associated with the bom.
         deltaBom:
-          type: Object
+          type: object
           items:
             $ref: '#/components/schemas/DeltaBom'
           description: Contains information about changes in the bom.
     ReturnBom:
       type: array
+      items:
+            $ref: '#/components/schemas/ReturnBomItem'
+    ReturnBomItem:
+      type: object
       required:
       - id
       - attributes
@@ -115,15 +119,15 @@ components:
       - Bom
       properties:
         ManufacturerParts:
-          type: Object
+          type: object
           items:
             $ref: '#/components/schemas/Rows'
         Details:
-          type: Object
-          Items:
+          type: object
+          items:
             $ref: '#/components/schemas/Fields'
         Bom:
-          type: Object
+          type: object
           items:
             $ref: '#/components/schemas/Rows'
           description: 'BOM level of assembly row. In the format of 1, 1.1, 2, 2.1, 2.2, 2.2.1'
@@ -134,12 +138,15 @@ components:
       - Row
       properties:
         Row:
-          type: Array
-          Items:
+          type: array
+          items:
             $ref: '#/components/schemas/Row'
     Row:
-      type: Array
+      type: array
+      items:
+        $ref: '#/components/schemas/RowObjects'
       description: Array of Objects containing information about a changed bom row
+    RowObjects:
       required:
       - UniqueId
       - Status
@@ -154,36 +161,40 @@ components:
           type: string
           description: Unique Identifier for an Assembly__c (Secondary_Unique_Key__c).
         Fields:
-          type: Object
-          Items:
+          type: object
+          items:
             $ref: '#/components/schemas/Fields'
           description: Object containing Fields that have been updated on this assembly.
     Fields:
-      type: Object
+      type: object
       description: Object containing Fields that have been updated on this assembly.
       required:
       - Field
       properties:
-        Field:
+        field:
           type: array
-          Items:
+          items:
             $ref: '#/components/schemas/Field'
     Field:
       type: array
+      items:
+        $ref: '#/components/schemas/FieldObject'
       description: Array of objects containing information about fields that have been updated
+    FieldObject:
+      type: object
       required:
       - OldValue
       - NewValue
       - Name
       properties:
         OldValue:
-          type: String
+          type: string
           description: previous value of the field
         NewValue:
-          type: String
+          type: string
           description: Updated value of the field
         Name:
-          type: String
+          type: string
           description: Name of the field that has been updated
     Error:
       type: object
