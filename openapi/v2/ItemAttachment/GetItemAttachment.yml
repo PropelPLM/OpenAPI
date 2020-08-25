@@ -9,15 +9,13 @@ servers:
     variables:
       namespace:
         default: PDLM
-        description: >-
-          This value should default to PDLM for production environments. For dev
+        description: This value should default to PDLM for production environments. For dev
           environments, provide the namespace to your dev org.
 paths:
   '/item/{itemId}/attachment':
     get:
       summary: Get Attachment Information
-      description: >-
-        Gets all necessary information for attachments for a specific item. Returns array of Document__c records
+      description: Gets all necessary information for attachments for a specific item. Returns array of Document__c records
       operationId: attachmentGet
       tags:
         - attachment
@@ -64,7 +62,7 @@ components:
       items:
         $ref: '#/components/schemas/Document'
     Document:
-      type: Object
+      type: object
       description: Document records attached to items
       required:
       - id
@@ -85,20 +83,20 @@ components:
         itemDetails:
           type: object
           description: If get Nested Attachment = true, returns Id, Item Number, and Revision of nested items.
-              schema:
-                $ref: '#/components/schemas/ItemDetails'
+          items:
+            $ref: '#/components/schemas/ItemDetails'
         Custom_Field__c:
           type: string
           description: Placeholder for any custom fields an org may have on the Document__c object.
     ItemDetails:
-      type: Object
-      description: If get Nested Attachment = true, returns Id, Item Number, and Revision of nested items.
+      type: object
+      description: If get Nested Attachment = true, returns Id, Item Number, and Revision of nested items in bom.
       required:
-      -id
+        - id
       properties:
         id:
-          type: string
-          description: Id of the nested Item
+         type: string
+         description: Id of the nested Item
         Item Number:
           type: string
           description: Name of the  nested Item
@@ -108,6 +106,14 @@ components:
         Custom_Field__c:
           type: string
           description: Placeholder for any custom fields an org may have on the Document__c object.
-
-
-
+    Error:
+      type: object
+      required:
+      - code
+      - message
+      properties:
+        code:
+          type: integer
+          format: int32
+        message:
+          type: string
