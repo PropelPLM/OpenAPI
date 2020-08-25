@@ -1,0 +1,113 @@
+openapi: 3.0.0
+info:
+  version: '2.0'
+  title: Item Attachment Put
+  license:
+    name: MIT
+servers:
+  - url: 'https://{orgId}.salesforce.com/services/apexrest/{namespace}/v2'
+    variables:
+      namespace:
+        default: PDLM
+        description: >-
+          This value should default to PDLM for production environments. For dev
+          environments, provide the namespace to your dev org.
+paths:
+  '/item/{itemId}/attachment':
+    get:
+      summary: Get Attachment Information
+      description: >-
+        Gets all necessary information for attachments for a specific item. Returns array of Document__c records
+      operationId: attachmentGet
+      tags:
+        - attachment
+      parameters:
+        - name: itemId
+          in: path
+          description: Id of desired Item.
+          required: true
+          schema:
+            type: string
+            format: string
+        - name: revision
+          in: query
+          description: Item Revision Id or Name. Gets attachments for specified rev
+          required: false
+          schema:
+            type: string
+            format: string
+        - name: Get Nested Attachments
+          in: query
+          description: If true, retrieves all attachments from all bom levels.
+          required: false
+          schema:
+            type: boolean
+            format: boolean
+            default: false
+      responses:
+        '200':
+          description: Array of Document__c records corresponding to attachments on desired Item.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Documents'
+        '404':
+          description: Change Order not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+components:
+  schemas:
+    Documents:
+      type: array
+      items:
+        $ref: '#/components/schemas/Document'
+    Document:
+      type: Object
+      description: Document records attached to items
+      required:
+      - id
+      properties:
+        id:
+          type: string
+          description: Id of the Attachment (Document__c) record
+        name:
+          type: string
+          description: Name of the attachment
+        PDLM__Document_Version__c:
+          type: string
+          description: The latest content version ID associated with the attachment.
+            This contains the files latest base64 encoded content.
+        PDLM__External_Attachment_URL__c:
+          type: string
+          description: URL of the attachment if applicable.
+        itemDetails:
+          type: object
+          description: If get Nested Attachment = true, returns Id, Item Number, and Revision of nested items.
+              schema:
+                $ref: '#/components/schemas/ItemDetails'
+        Custom_Field__c:
+          type: string
+          description: Placeholder for any custom fields an org may have on the Document__c object.
+    ItemDetails:
+      type: Object
+      description: If get Nested Attachment = true, returns Id, Item Number, and Revision of nested items.
+      required:
+      -id
+      properties:
+        id:
+          type: string
+          description: Id of the nested Item
+        Item Number:
+          type: string
+          description: Name of the  nested Item
+        Revision:
+          type: string
+          description: Id of the revision for the nested Item
+        Custom_Field__c:
+          type: string
+          description: Placeholder for any custom fields an org may have on the Document__c object.
+
+
+
