@@ -5,7 +5,7 @@ info:
   license:
     name: MIT
 servers:
-- url: https://{orgId}.salesforce.com/services/apexrest/{namespace}/v3
+- url: https://{orgId}.salesforce.com/services/apexrest/{namespace}/v2
   variables:
     namespace:
       default: PDLM
@@ -35,9 +35,9 @@ paths:
         description: Level of BOM to fetch. Defaults to All levels.
         required: false
         schema:
-          type: string
-          format: string
-          default: 'all'
+          type: integer
+          format: integer
+          default: 0
       - name: delta
         in: query
         description: Returns the deltas in the BOM between the latest released revision and previous revision in addition to the BOM.
