@@ -130,7 +130,6 @@ components:
           type: object
           items:
             $ref: '#/components/schemas/Rows'
-          description: 'BOM level of assembly row. In the format of 1, 1.1, 2, 2.1, 2.2, 2.2.1'
     Rows:
       type: object
       description: Contains information about a changed bom row.
@@ -207,3 +206,4 @@ components:
           format: int32
         message:
           type: string
+
