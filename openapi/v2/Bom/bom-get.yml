@@ -32,12 +32,12 @@ paths:
           format: string
       - name: level
         in: query
-        description: Level of BOM to fetch. Defaults to All levels.
+        description: Level of BOM to fetch. Defaults to All levels. Accepts 'all' or '1', '2', '3', etc.
         required: false
         schema:
-          type: integer
-          format: integer
-          default: 0
+          type: string
+          format: string
+          default: all
       - name: delta
         in: query
         description: Returns the deltas in the BOM between the latest released revision and previous revision in addition to the BOM.
@@ -109,7 +109,7 @@ components:
               type: string
         Custom_Field__c:
           type: object
-          description: Placeholder for any custom fields an org may have on the Change__c object.
+          description: Placeholder for any custom fields an org may have on the Assembly__c object.
     DeltaBom:
       type: object
       description: Contains Manufacturer Parts, Details, and Items that have been changed in the bom.
