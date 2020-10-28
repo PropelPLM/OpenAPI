@@ -1,0 +1,77 @@
+openapi: 3.0.0
+info:
+  version: '2.0'
+  title: Item Attachment Put
+  license:
+    name: MIT
+servers:
+  - url: 'https://{orgId}.salesforce.com/services/apexrest/{namespace}/api/v2/attachment/{changeId}'
+    variables:
+      namespace:
+        default: PDLM
+        description: This value should default to PDLM for production environments. For dev
+          environments, provide the namespace to your dev org.
+paths:
+  '/api/v2/attachment/{changeId}':
+    get:
+      summary: Get Attachment Information
+      description: Gets attachment summary information for attachments for a specific change/quality. Returns array of ContentDocument records
+      operationId: attachmentGet
+      tags:
+        - attachment
+      parameters:
+        - name: changeId
+          in: path
+          description: Id of desired Item.
+          required: true
+          schema:
+            type: string
+            format: string        
+      responses:
+        '200':
+          description: Array of ContentDocument records corresponding to attachment tab list on desired Change.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Documents'
+        '404':
+          description: Change Order not found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+components:
+  schemas:
+    Documents:
+      type: array
+      items:
+        $ref: '#/components/schemas/ContentDocument'
+    ContentDocument:
+      type: object
+      description: ContentDocument records attached to change or quality
+      required:
+      - id
+      properties:
+        id:
+          type: string
+          description: Id of the Attachment (ContentDocument) record
+        Title:
+          type: string
+          description: Name of the attachment
+        CreatedDate:
+          type: string
+          description: Date file was created.
+        FileSize:
+          type: integer
+          format: int32
+    Error:
+      type: object
+      required:
+      - code
+      - message
+      properties:
+        code:
+          type: integer
+          format: int32
+        message:
+          type: string
