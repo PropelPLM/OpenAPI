@@ -43,12 +43,6 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
-        405:
-          description: Method not allowed
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
         500:
           description: Unexpected error
           content:
@@ -74,12 +68,6 @@ paths:
                 $ref: '#/components/schemas/NewOrExistingManufacturerPart'
         404:
           description: No Manufacturer Part found for the provided `MfrPartId`
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        405:
-          description: Method not allowed
           content:
             application/json:
               schema:
@@ -117,7 +105,6 @@ components:
           example: United Gas & Oil
         mpn:
           type: string
-          example: MPN-12345
         distributor:
           type: string
           example: GenePoint

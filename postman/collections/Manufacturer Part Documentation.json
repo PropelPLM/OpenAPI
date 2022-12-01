@@ -1,0 +1,487 @@
+{
+	"info": {
+		"_postman_id": "bbccc2ae-ea8c-48d6-9c3c-b45486e428db",
+		"name": "Manufacturer Part Documentation",
+		"description": "Propel Manufacturer Part API\n\nContact Support:\n Name: Propel Support\n Email: support@propelsoftware.com",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"_uid": "18799091-bbccc2ae-ea8c-48d6-9c3c-b45486e428db"
+	},
+	"item": [
+		{
+			"name": "Manufacturer Part",
+			"item": [
+				{
+					"name": "Create a new Manufacturer Part",
+					"id": "6bc73b8d-a642-42d0-8210-56e97289ca6d",
+					"protocolProfileBehavior": {
+						"disableBodyPruning": true
+					},
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Content-Type",
+								"value": "application/json"
+							},
+							{
+								"key": "Accept",
+								"value": "application/json"
+							}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n  \"addAML\": [\n    {\n      \"manufacturer\": \"<string>\",\n      \"mpn\": \"<string>\",\n      \"distributor\": \"<string>\"\n    },\n    {\n      \"manufacturer\": \"<string>\",\n      \"mpn\": \"<string>\",\n      \"distributor\": \"<string>\"\n    }\n  ]\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "{{baseUrl}}/ManufacturerPart/",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"ManufacturerPart",
+								""
+							],
+							"variable": [
+								{
+									"key": "_endpoint",
+									"value": "{{_endpoint}}",
+									"description": "This is the salesforce instance url"
+								},
+								{
+									"key": "_namespace",
+									"value": "{{_namespace}}",
+									"description": "This value should default to PDLM for managed package environments. For source environments, provide the namespace to your dev org."
+								}
+							]
+						}
+					},
+					"response": [
+						{
+							"id": "d9b0c975-faa7-4b8c-bfd6-c2d76923ca1d",
+							"name": "Successfully created a new Manufacturer Part",
+							"originalRequest": {
+								"method": "POST",
+								"header": [
+									{
+										"description": "Added as a part of security scheme: apikey",
+										"key": "X-Api-Key",
+										"value": "<API Key>"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"addAML\": [\n    {\n      \"manufacturer\": \"United Gas & Oil\",\n      \"mpn\": \"sint\",\n      \"distributor\": \"GenePoint\"\n    },\n    {\n      \"manufacturer\": \"United Gas & Oil\",\n      \"mpn\": \"magna exercitation adipisicing\",\n      \"distributor\": \"GenePoint\"\n    }\n  ]\n}",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": {
+									"raw": "{{baseUrl}}/ManufacturerPart/",
+									"host": [
+										"{{baseUrl}}"
+									],
+									"path": [
+										"ManufacturerPart",
+										""
+									],
+									"variable": [
+										{
+											"key": "_endpoint",
+											"value": "{{_endpoint}}",
+											"description": "This is the salesforce instance url"
+										},
+										{
+											"key": "_namespace",
+											"value": "{{_namespace}}",
+											"description": "This value should default to PDLM for managed package environments. For source environments, provide the namespace to your dev org."
+										}
+									]
+								}
+							},
+							"status": "OK",
+							"code": 200,
+							"_postman_previewlanguage": "json",
+							"header": [
+								{
+									"key": "Content-Type",
+									"value": "application/json"
+								}
+							],
+							"cookie": [],
+							"body": "{\n  \"attributes\": {\n    \"type\": \"{_namespace}__Manufacturer_Part__c\",\n    \"url\": \"occaecat ipsum Duis laborum\"\n  },\n  \"Name\": \"MPN-12345\",\n  \"Id\": \"laboris est\",\n  \"{_namespace}__Manufacturer__c\": \"ullamco sed adipisicing iru\",\n  \"{_namespace}__Distributor__c\": \"est Duis ut nostrud\",\n  \"any_standard_or_custom_field__c\": \"id velit\"\n}"
+						},
+						{
+							"id": "f96606b7-12ea-40c3-9830-9a710d6fbae8",
+							"name": "Bad request",
+							"originalRequest": {
+								"method": "POST",
+								"header": [
+									{
+										"description": "Added as a part of security scheme: apikey",
+										"key": "X-Api-Key",
+										"value": "<API Key>"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"addAML\": [\n    {\n      \"manufacturer\": \"United Gas & Oil\",\n      \"mpn\": \"sint\",\n      \"distributor\": \"GenePoint\"\n    },\n    {\n      \"manufacturer\": \"United Gas & Oil\",\n      \"mpn\": \"magna exercitation adipisicing\",\n      \"distributor\": \"GenePoint\"\n    }\n  ]\n}",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": {
+									"raw": "{{baseUrl}}/ManufacturerPart/",
+									"host": [
+										"{{baseUrl}}"
+									],
+									"path": [
+										"ManufacturerPart",
+										""
+									],
+									"variable": [
+										{
+											"key": "_endpoint",
+											"value": "{{_endpoint}}",
+											"description": "This is the salesforce instance url"
+										},
+										{
+											"key": "_namespace",
+											"value": "{{_namespace}}",
+											"description": "This value should default to PDLM for managed package environments. For source environments, provide the namespace to your dev org."
+										}
+									]
+								}
+							},
+							"status": "Bad Request",
+							"code": 400,
+							"_postman_previewlanguage": "json",
+							"header": [
+								{
+									"key": "Content-Type",
+									"value": "application/json"
+								}
+							],
+							"cookie": [],
+							"body": "\"Missing mpn or invalid manufacturer/distributor. No parts created.\""
+						},
+						{
+							"id": "1f802df6-34d3-486b-a5fe-c61925acf850",
+							"name": "Unexpected error",
+							"originalRequest": {
+								"method": "POST",
+								"header": [
+									{
+										"description": "Added as a part of security scheme: apikey",
+										"key": "X-Api-Key",
+										"value": "<API Key>"
+									}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n  \"addAML\": [\n    {\n      \"manufacturer\": \"United Gas & Oil\",\n      \"mpn\": \"sint\",\n      \"distributor\": \"GenePoint\"\n    },\n    {\n      \"manufacturer\": \"United Gas & Oil\",\n      \"mpn\": \"magna exercitation adipisicing\",\n      \"distributor\": \"GenePoint\"\n    }\n  ]\n}",
+									"options": {
+										"raw": {
+											"language": "json"
+										}
+									}
+								},
+								"url": {
+									"raw": "{{baseUrl}}/ManufacturerPart/",
+									"host": [
+										"{{baseUrl}}"
+									],
+									"path": [
+										"ManufacturerPart",
+										""
+									],
+									"variable": [
+										{
+											"key": "_endpoint",
+											"value": "{{_endpoint}}",
+											"description": "This is the salesforce instance url"
+										},
+										{
+											"key": "_namespace",
+											"value": "{{_namespace}}",
+											"description": "This value should default to PDLM for managed package environments. For source environments, provide the namespace to your dev org."
+										}
+									]
+								}
+							},
+							"status": "Internal Server Error",
+							"code": 500,
+							"_postman_previewlanguage": "json",
+							"header": [
+								{
+									"key": "Content-Type",
+									"value": "application/json"
+								}
+							],
+							"cookie": [],
+							"body": "\"Missing mpn or invalid manufacturer/distributor. No parts created.\""
+						}
+					]
+				},
+				{
+					"name": "Fetch a Manufacturer Part",
+					"id": "3614dc94-a354-488e-9cdb-c0e58dcdbd88",
+					"protocolProfileBehavior": {
+						"disableBodyPruning": true
+					},
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/ManufacturerPart/:MfrPartId",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"ManufacturerPart",
+								":MfrPartId"
+							],
+							"variable": [
+								{
+									"key": "MfrPartId",
+									"value": "<string>",
+									"description": "(Required) The Salesforce record id of the Manufacturer Part"
+								},
+								{
+									"key": "_endpoint",
+									"value": "{{_endpoint}}",
+									"description": "This is the salesforce instance url"
+								},
+								{
+									"key": "_namespace",
+									"value": "{{_namespace}}",
+									"description": "This value should default to PDLM for managed package environments. For source environments, provide the namespace to your dev org."
+								}
+							]
+						}
+					},
+					"response": [
+						{
+							"id": "ee8be6e7-c77d-4225-b31c-de890d35e802",
+							"name": "The Manufacturer Part corresponding to the provided `MfrPartId`",
+							"originalRequest": {
+								"method": "GET",
+								"header": [
+									{
+										"description": "Added as a part of security scheme: apikey",
+										"key": "X-Api-Key",
+										"value": "<API Key>"
+									}
+								],
+								"url": {
+									"raw": "{{baseUrl}}/ManufacturerPart/:MfrPartId",
+									"host": [
+										"{{baseUrl}}"
+									],
+									"path": [
+										"ManufacturerPart",
+										":MfrPartId"
+									],
+									"variable": [
+										{
+											"key": "MfrPartId",
+											"value": "<string>",
+											"description": "(Required) The Salesforce record id of the Manufacturer Part"
+										},
+										{
+											"key": "_endpoint",
+											"value": "{{_endpoint}}",
+											"description": "This is the salesforce instance url"
+										},
+										{
+											"key": "_namespace",
+											"value": "{{_namespace}}",
+											"description": "This value should default to PDLM for managed package environments. For source environments, provide the namespace to your dev org."
+										}
+									]
+								}
+							},
+							"status": "OK",
+							"code": 200,
+							"_postman_previewlanguage": "json",
+							"header": [
+								{
+									"key": "Content-Type",
+									"value": "application/json"
+								}
+							],
+							"cookie": [],
+							"body": "{\n  \"attributes\": {\n    \"type\": \"{_namespace}__Manufacturer_Part__c\",\n    \"url\": \"occaecat ipsum Duis laborum\"\n  },\n  \"Name\": \"MPN-12345\",\n  \"Id\": \"laboris est\",\n  \"{_namespace}__Manufacturer__c\": \"ullamco sed adipisicing iru\",\n  \"{_namespace}__Distributor__c\": \"est Duis ut nostrud\",\n  \"any_standard_or_custom_field__c\": \"id velit\"\n}"
+						},
+						{
+							"id": "eab3bcd2-a5cc-4a2b-93dc-4313b0e63726",
+							"name": "No Manufacturer Part found for the provided `MfrPartId`",
+							"originalRequest": {
+								"method": "GET",
+								"header": [
+									{
+										"description": "Added as a part of security scheme: apikey",
+										"key": "X-Api-Key",
+										"value": "<API Key>"
+									}
+								],
+								"url": {
+									"raw": "{{baseUrl}}/ManufacturerPart/:MfrPartId",
+									"host": [
+										"{{baseUrl}}"
+									],
+									"path": [
+										"ManufacturerPart",
+										":MfrPartId"
+									],
+									"variable": [
+										{
+											"key": "MfrPartId",
+											"value": "<string>",
+											"description": "(Required) The Salesforce record id of the Manufacturer Part"
+										},
+										{
+											"key": "_endpoint",
+											"value": "{{_endpoint}}",
+											"description": "This is the salesforce instance url"
+										},
+										{
+											"key": "_namespace",
+											"value": "{{_namespace}}",
+											"description": "This value should default to PDLM for managed package environments. For source environments, provide the namespace to your dev org."
+										}
+									]
+								}
+							},
+							"status": "Not Found",
+							"code": 404,
+							"_postman_previewlanguage": "json",
+							"header": [
+								{
+									"key": "Content-Type",
+									"value": "application/json"
+								}
+							],
+							"cookie": [],
+							"body": "\"Missing mpn or invalid manufacturer/distributor. No parts created.\""
+						},
+						{
+							"id": "270a5a74-78c0-4876-a75b-e535d6a35c41",
+							"name": "Unexpected error",
+							"originalRequest": {
+								"method": "GET",
+								"header": [
+									{
+										"description": "Added as a part of security scheme: apikey",
+										"key": "X-Api-Key",
+										"value": "<API Key>"
+									}
+								],
+								"url": {
+									"raw": "{{baseUrl}}/ManufacturerPart/:MfrPartId",
+									"host": [
+										"{{baseUrl}}"
+									],
+									"path": [
+										"ManufacturerPart",
+										":MfrPartId"
+									],
+									"variable": [
+										{
+											"key": "MfrPartId",
+											"value": "<string>",
+											"description": "(Required) The Salesforce record id of the Manufacturer Part"
+										},
+										{
+											"key": "_endpoint",
+											"value": "{{_endpoint}}",
+											"description": "This is the salesforce instance url"
+										},
+										{
+											"key": "_namespace",
+											"value": "{{_namespace}}",
+											"description": "This value should default to PDLM for managed package environments. For source environments, provide the namespace to your dev org."
+										}
+									]
+								}
+							},
+							"status": "Internal Server Error",
+							"code": 500,
+							"_postman_previewlanguage": "json",
+							"header": [
+								{
+									"key": "Content-Type",
+									"value": "application/json"
+								}
+							],
+							"cookie": [],
+							"body": "\"Missing mpn or invalid manufacturer/distributor. No parts created.\""
+						}
+					]
+				}
+			],
+			"id": "96954eb5-ebe0-4445-8706-cf22a43869ae"
+		}
+	],
+	"auth": {
+		"type": "apikey",
+		"apikey": [
+			{
+				"key": "key",
+				"value": "X-Api-Key",
+				"type": "string"
+			},
+			{
+				"key": "value",
+				"value": "<API Key>",
+				"type": "string"
+			},
+			{
+				"key": "in",
+				"value": "header",
+				"type": "string"
+			}
+		]
+	},
+	"variable": [
+		{
+			"id": "aa8db7a2-d9ce-4009-b6e0-5eb9256e04b7",
+			"key": "_endpoint",
+			"value": "login.salesforce.com",
+			"type": "any",
+			"description": {
+				"content": "This is the salesforce instance url",
+				"type": "text/plain"
+			}
+		},
+		{
+			"id": "84dcc382-297f-455c-8f56-a20e646ec40b",
+			"key": "_namespace",
+			"value": "PDLM",
+			"type": "any",
+			"description": {
+				"content": "This value should default to PDLM for managed package environments. For source environments, provide the namespace to your dev org.",
+				"type": "text/plain"
+			}
+		},
+		{
+			"id": "00ffacd5-a2c7-4591-8f06-c934354a8bd5",
+			"key": "baseUrl",
+			"value": "https://{{_endpoint}}/services/apexrest/{{_namespace}}",
+			"type": "string"
+		}
+	]
+}
