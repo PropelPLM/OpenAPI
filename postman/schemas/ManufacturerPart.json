@@ -1,5 +1,5 @@
 {
-  "openapi": "3.1.0",
+  "openapi": "3.0.0",
   "info": {
     "version": "1.0.0",
     "title": "Propel Manufacturer Part API",
@@ -33,7 +33,7 @@
   "paths": {
     "/ManufacturerPart/": {
       "post": {
-        "summary": "Create a new Manufacturer Part",
+        "summary": "Create new Manufacturer Part(s)",
         "requestBody": {
           "required": true,
           "content": {
@@ -46,7 +46,7 @@
         },
         "responses": {
           "200": {
-            "description": "Successfully created a new Manufacturer Part",
+            "description": "Successfully created new Manufacturer Part(s)",
             "content": {
               "application/json": {
                 "schema": {

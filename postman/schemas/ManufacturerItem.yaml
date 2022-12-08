@@ -1,8 +1,8 @@
 openapi: '3.0.0'
 info:
   version: '1.0.0'
-  title: 'Propel Manufacturer Part API'
-  description: Propel Manufacturer Part API
+  title: 'Propel Manufacturer Item API'
+  description: Propel Manufacturer Item API
   license:
     name: MIT
     url: https://spdx.org/licenses/MIT
@@ -21,9 +21,16 @@ servers:
         default: PDLM
         description: This value should default to PDLM for managed package environments. For other environments, provide the namespace to your dev org.
 paths:
-  '/ManufacturerPart/':
+  '/ManufacturerItem/{ItemId}':
+    parameters:
+      - name: ItemId
+        description: The Salesforce record id of the Item
+        in: path
+        required: true
+        schema: 
+          $ref: '#/components/schemas/ItemId'
     post:
-      summary: Create new Manufacturer Part(s)
+      summary: Create new Manufacturer Item(s)
       requestBody:
         required: true
         content:
@@ -32,11 +39,11 @@ paths:
               $ref: '#/components/schemas/MfrList'
       responses:
         '200':
-          description: Successfully created new Manufacturer Part(s)
+          description: Successfully created new Manufacturer Item(s)
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/NewOrExistingManufacturerPart'
+                $ref: '#/components/schemas/NewOrExistingManufacturerItem'
         '400':
           description: Bad request
           content:
@@ -49,39 +56,10 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/Error'
-  '/ManufacturerPart/{MfrPartId}':
-    parameters:
-      - name: MfrPartId
-        description: The Salesforce record id of the Manufacturer Part
-        in: path
-        required: true
-        schema:
-          $ref: '#/components/schemas/MfrPartId'
-    get:
-      summary: Fetch a Manufacturer Part
-      responses:
-        '200':
-          description: The Manufacturer Part corresponding to the provided `MfrPartId`
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/NewOrExistingManufacturerPart'
-        '404':
-          description: No Manufacturer Part found for the provided `MfrPartId`
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
-        '500':
-          description: Unexpected error
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/Error'
 components:
   schemas:
-    MfrPartId:
-      description: The Salesforce record id of the Manufacturer Part
+    ItemId:
+      description: The Salesforce record id of the Item
       type: string
     MfrList:
       description: Model containing AML list object
@@ -108,8 +86,8 @@ components:
         distributor:
           type: string
           example: GenePoint
-    NewOrExistingManufacturerPart:
-      description: Model containing newly created Manufacturer Part details
+    NewOrExistingManufacturerItem:
+      description: Model containing newly created Manufacturer Item details
       type: object
       required:
         - attributes
@@ -121,7 +99,7 @@ components:
           properties:
             type:
               type: string
-              example: 'PDLM__Manufacturer_Part__c'
+              example: 'PDLM__Manufacturer_Item__c'
             url:
               type: string
         Name:
@@ -134,12 +112,12 @@ components:
           description: The Salesforce record id of the Distributor account 
           type: string
         Id:
-          description: The Salesforce record id of the newly created Manufacturer Part
+          description: The Salesforce record id of the newly created Manufacturer Item
           type: string
     Error:
       description: A human readable error message or null/blank
       type: string
-      example: Missing mpn or invalid manufacturer/distributor. No parts created.
+      example: Invalid manufacturer/distributor value (s). No items or parts created.
   securitySchemes:
     oAuth2Implicit:
       type: oauth2
