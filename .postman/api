@@ -5,7 +5,6 @@ id = 82cbabf3-2e7b-4bc1-b1d3-a35eb5e04111
 
 [relations.collections]
 rootDirectory = postman/collections
-files[] = {"id":"18799091-bbccc2ae-ea8c-48d6-9c3c-b45486e428db","path":"Manufacturer Part Documentation.json","metaData":{}}
 
 [relations.collections.metaData]
 
