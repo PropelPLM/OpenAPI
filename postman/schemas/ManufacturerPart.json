@@ -19,22 +19,6 @@
       "url": "https://{endpoint}/services/apexrest/{namespace}",
       "description": "Propel API Endpoint Base URL",
       "variables": {
-        "url": {
-          "default": "https://login.salesforce.com",
-          "description": "The base URL for all requests. Either (1) https://test.salesforce.com for sandboxes or Scratch orgs (2) https://login.salesforce.com for production, Trailhead Playground and Developer Edition orgs (3) your custom My Domain base URL."
-        },
-        "site": {
-          "default": "",
-          "description": "Community suffix when connecting with an Experience Cloud user."
-        },
-        "clientID": {
-          "default": "",
-          "description": "Connected App client Id"
-        },
-        "clientSecret": {
-          "default": "",
-          "description": "Connected App client secret"
-        },
         "endpoint": {
           "default": "https://login.salesforce.com",
           "description": "This is the Salesforce instance url"
