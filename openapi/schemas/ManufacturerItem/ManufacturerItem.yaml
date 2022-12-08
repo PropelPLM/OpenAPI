@@ -117,7 +117,7 @@ components:
     Error:
       description: A human readable error message or null/blank
       type: string
-      example: Invalid manufacturer/distributor value (s). No items or parts created.
+      example: Invalid manufacturer/distributor value(s). No items or parts created.
   securitySchemes:
     oAuth2Implicit:
       type: oauth2
