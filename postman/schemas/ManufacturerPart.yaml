@@ -11,15 +11,27 @@ info:
     url: https://propel.force.com/helpcenter/s/
     email: support@propelsoftware.com
 servers:
-  - url: 'https://{_endpoint}/services/apexrest/{_namespace}'
+  - url: 'https://{endpoint}/services/apexrest/{namespace}'
     description: Propel API Endpoint Base URL
     variables:
-      _endpoint:
-        default: login.salesforce.com
-        description: This is the salesforce instance url
-      _namespace:
+      url:
+        default: https://login.salesforce.com
+        description: The base URL for all requests. Either (1) https://test.salesforce.com for sandboxes or Scratch orgs (2) https://login.salesforce.com for production, Trailhead Playground and Developer Edition orgs (3) your custom My Domain base URL.
+      site:
+        default: ''
+        description: Community suffix when connecting with an Experience Cloud user.
+      clientID:
+        default: ''
+        description: Connected App client Id
+      clientSecret:
+        default: ''
+        description: Connected App client secret
+      endpoint:
+        default: https://login.salesforce.com
+        description: This is the Salesforce instance url
+      namespace:
         default: PDLM
-        description: This value should default to PDLM for managed package environments. For source environments, provide the namespace to your dev org.
+        description: This value should default to PDLM for managed package environments. For other environments, provide the namespace to your dev org.
 paths:
   '/ManufacturerPart/':
     post:
@@ -121,33 +133,34 @@ components:
           properties:
             type:
               type: string
-              example: '{_namespace}__Manufacturer_Part__c'
+              example: 'PDLM__Manufacturer_Part__c'
             url:
               type: string
         Name:
           type: string
           example: MPN-12345
-        '{_namespace}__Manufacturer__c':
+        'PDLM__Manufacturer__c':
           description: The Salesforce record id of the Manufacturer account
           type: string
-        '{_namespace}__Distributor__c':
+        'PDLM__Distributor__c':
           description: The Salesforce record id of the Distributor account 
           type: string
         Id:
           description: The Salesforce record id of the newly created Manufacturer Part
-          type: string
-        any_standard_or_custom_field__c:
-          description: Any field on the Manufacturer Part object
           type: string
     Error:
       description: A human readable error message or null/blank
       type: string
       example: Missing mpn or invalid manufacturer/distributor. No parts created.
   securitySchemes:
-    ApiKey:
-      type: apiKey
-      in: header
-      name: X-Api-Key
+    oAuth2Implicit:
+      type: oauth2
+      description: This API uses OAuth 2 with the implicit grant flow.
+      flows:
+        implicit:
+          authorizationUrl: '{{url}}{{site}}/services/oauth2/authorize'
+          scopes:
+            api: Enable read and write access to Propel objects
 security:
-  - ApiKey: []
+  - oAuth2Implicit: [api]
   
