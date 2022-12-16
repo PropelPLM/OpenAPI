@@ -1,0 +1,239 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "version": "1.0.0",
+    "title": "Propel Manufacturer Part API",
+    "description": "Propel Manufacturer Part API",
+    "license": {
+      "name": "MIT",
+      "url": "https://spdx.org/licenses/MIT"
+    },
+    "contact": {
+      "name": "Propel Support",
+      "url": "https://propel.force.com/helpcenter/s/",
+      "email": "support@propelsoftware.com"
+    }
+  },
+  "servers": [
+    {
+      "url": "https://{endpoint}/services/apexrest/{namespace}",
+      "description": "Propel API Endpoint Base URL",
+      "variables": {
+        "endpoint": {
+          "default": "https://login.salesforce.com",
+          "description": "This is the Salesforce instance url"
+        },
+        "namespace": {
+          "default": "PDLM",
+          "description": "This value should default to PDLM for managed package environments. For other environments, provide the namespace to your dev org."
+        }
+      }
+    }
+  ],
+  "paths": {
+    "/ManufacturerPart/": {
+      "post": {
+        "summary": "Create new Manufacturer Part(s)",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MfrList"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successfully created new Manufacturer Part(s)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NewOrExistingManufacturerPart"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ManufacturerPart/{MfrPartId}": {
+      "parameters": [
+        {
+          "name": "MfrPartId",
+          "description": "The Salesforce record id of the Manufacturer Part",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "$ref": "#/components/schemas/MfrPartId"
+          }
+        }
+      ],
+      "get": {
+        "summary": "Fetch a Manufacturer Part",
+        "responses": {
+          "200": {
+            "description": "The Manufacturer Part corresponding to the provided `MfrPartId`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NewOrExistingManufacturerPart"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No Manufacturer Part found for the provided `MfrPartId`",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unexpected error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "MfrPartId": {
+        "description": "The Salesforce record id of the Manufacturer Part",
+        "type": "string"
+      },
+      "MfrList": {
+        "description": "Model containing AML list object",
+        "type": "object",
+        "required": [
+          "addAML"
+        ],
+        "properties": {
+          "addAML": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ManufacturerPart"
+            }
+          }
+        }
+      },
+      "ManufacturerPart": {
+        "description": "Model containing Manufacturer Part mappings",
+        "type": "object",
+        "required": [
+          "manufacturer",
+          "mpn"
+        ],
+        "properties": {
+          "manufacturer": {
+            "type": "string",
+            "example": "United Gas & Oil"
+          },
+          "mpn": {
+            "type": "string"
+          },
+          "distributor": {
+            "type": "string",
+            "example": "GenePoint"
+          }
+        }
+      },
+      "NewOrExistingManufacturerPart": {
+        "description": "Model containing newly created Manufacturer Part details",
+        "type": "object",
+        "required": [
+          "attributes",
+          "Name",
+          "Id"
+        ],
+        "properties": {
+          "attributes": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string",
+                "example": "PDLM__Manufacturer_Part__c"
+              },
+              "url": {
+                "type": "string"
+              }
+            }
+          },
+          "Name": {
+            "type": "string",
+            "example": "MPN-12345"
+          },
+          "PDLM__Manufacturer__c": {
+            "description": "The Salesforce record id of the Manufacturer account",
+            "type": "string"
+          },
+          "PDLM__Distributor__c": {
+            "description": "The Salesforce record id of the Distributor account",
+            "type": "string"
+          },
+          "Id": {
+            "description": "The Salesforce record id of the newly created Manufacturer Part",
+            "type": "string"
+          }
+        }
+      },
+      "Error": {
+        "description": "A human readable error message or null/blank",
+        "type": "string",
+        "example": "Missing mpn or invalid manufacturer/distributor. No parts created."
+      }
+    },
+    "securitySchemes": {
+      "oAuth2Implicit": {
+        "type": "oauth2",
+        "description": "This API uses OAuth 2 with the implicit grant flow.",
+        "flows": {
+          "implicit": {
+            "authorizationUrl": "{{url}}{{site}}/services/oauth2/authorize",
+            "scopes": {
+              "api": "Enable read and write access to Propel objects"
+            }
+          }
+        }
+      }
+    }
+  },
+  "security": [
+    {
+      "oAuth2Implicit": [
+        "api"
+      ]
+    }
+  ]
+}

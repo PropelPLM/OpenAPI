@@ -1,0 +1,346 @@
+{
+    "openapi": "3.0.0",
+    "info": {
+      "version": "3.0",
+      "title": "Get Bom API",
+      "license": {
+        "name": "MIT"
+      }
+    },
+    "servers": [
+      {
+        "url": "https://{orgId}.salesforce.com/services/apexrest/{namespace}/v2",
+        "variables": {
+          "namespace": {
+            "default": "PDLM",
+            "description": "This value should default to PDLM for production environments. For dev environments, provide the namespace to your dev org."
+          }
+        }
+      }
+    ],
+    "paths": {
+      "/item/{itemNumber}/bom": {
+        "get": {
+          "summary": "BOM",
+          "description": "Query to return a list of assembly records which represent the full BOM for the given Item.",
+          "operationId": "getBom",
+          "tags": [
+            "Bill of Material",
+            "BOM",
+            "Assembly"
+          ],
+          "parameters": [
+            {
+              "name": "itemNumber",
+              "in": "path",
+              "description": "Item Revision Id or Item Number of assembly to retrieve the BOM for. If Item Id or Item Number is provided, will default to latest released revision or latest revision if there is no released revision.",
+              "required": true,
+              "schema": {
+                "type": "string",
+                "format": "string"
+              }
+            },
+            {
+              "name": "level",
+              "in": "query",
+              "description": "Level of BOM to fetch. Defaults to All levels. Accepts 'all' or '1', '2', '3', etc.",
+              "required": false,
+              "schema": {
+                "type": "string",
+                "format": "string",
+                "default": "all"
+              }
+            },
+            {
+              "name": "delta",
+              "in": "query",
+              "description": "Returns the deltas in the BOM between the latest released revision and previous revision in addition to the BOM.",
+              "required": false,
+              "schema": {
+                "type": "boolean",
+                "format": "boolean",
+                "default": false
+              }
+            },
+            {
+              "name": "flatten",
+              "in": "query",
+              "description": "Returns a list of parts in the assembly without level. Will combine duplicate BOM rows that exist at different levels into a single BOM row.",
+              "required": false,
+              "schema": {
+                "type": "boolean",
+                "format": "boolean",
+                "default": false
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "description": "Bill of Materials for a specified Item",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/GetBom"
+                  }
+                }
+              }
+            },
+            "404": {
+              "description": "Change Order not found",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/Error"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "components": {
+      "schemas": {
+        "GetBom": {
+          "type": "object",
+          "required": [
+            "returnBom"
+          ],
+          "properties": {
+            "returnBom": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/ReturnBom"
+              },
+              "description": "Array of objects containing information about the manufacturer items and assemblies associated with the bom."
+            },
+            "deltaBom": {
+              "type": "object",
+              "items": {
+                "$ref": "#/components/schemas/DeltaBom"
+              },
+              "description": "Contains information about changes in the bom."
+            }
+          }
+        },
+        "ReturnBom": {
+          "type": "object",
+          "required": [
+            "assemblies",
+            "manufacturerItems"
+          ],
+          "properties": {
+            "assemblies": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/Assembly"
+              }
+            },
+            "manufacturerItems": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/Manufacturer"
+              }
+            }
+          }
+        },
+        "Assembly": {
+          "type": "object",
+          "description": "Assembly row represented in a BOM.",
+          "required": [
+            "id",
+            "name",
+            "level"
+          ],
+          "properties": {
+            "Id": {
+              "type": "string",
+              "description": "Id of the child Item record"
+            },
+            "PDLM__Item_Number__c": {
+              "type": "string",
+              "description": "Name of the child Item record"
+            },
+            "PDLM__Level__c": {
+              "type": "string",
+              "description": "BOM level of assembly row. In the format of 1, 1.1, 2, 2.1, 2.2, 2.2.1"
+            },
+            "Custom_Field__c": {
+              "type": "string",
+              "description": "Placeholder for any custom fields an org may have on the Assembly__c object."
+            }
+          }
+        },
+        "Manufacturer": {
+          "type": "object",
+          "description": "Manufacturer Part representing AML rows",
+          "required": [
+            "id"
+          ],
+          "properties": {
+            "Id": {
+              "type": "string",
+              "description": "Id of the Manufacturer Part record"
+            },
+            "Name": {
+              "type": "string",
+              "description": "Name of the Manufacturer Part record"
+            },
+            "PDLM__Manufacturer__c": {
+              "type": "string",
+              "description": "Id of the Account record representing the manufacturer"
+            },
+            "PDLM__Manufacturer_Name__c": {
+              "type": "string"
+            },
+            "PDLM__Primary_Key__c": {
+              "type": "string",
+              "description": "Primary key unique identifier for the Manufacturer Part record"
+            },
+            "Custom_Field__c": {
+              "type": "string",
+              "description": "Placeholder for any custom fields an org may have on the Manufacturer_Part__c object."
+            }
+          }
+        },
+        "DeltaBom": {
+          "type": "object",
+          "description": "Contains Manufacturer Parts, Details, and Items that have been changed in the bom.",
+          "required": [
+            "ManufacturerParts",
+            "Details",
+            "Bom"
+          ],
+          "properties": {
+            "ManufacturerParts": {
+              "type": "object",
+              "items": {
+                "$ref": "#/components/schemas/Rows"
+              }
+            },
+            "Details": {
+              "type": "object",
+              "items": {
+                "$ref": "#/components/schemas/Fields"
+              }
+            },
+            "Bom": {
+              "type": "object",
+              "items": {
+                "$ref": "#/components/schemas/Rows"
+              }
+            }
+          }
+        },
+        "Rows": {
+          "type": "object",
+          "description": "Contains information about a changed bom row.",
+          "required": [
+            "Row"
+          ],
+          "properties": {
+            "Row": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/Row"
+              }
+            }
+          }
+        },
+        "Row": {
+          "type": "array",
+          "items": {
+            "$ref": "#/components/schemas/RowObjects"
+          },
+          "description": "Array of Objects containing information about a changed bom row"
+        },
+        "RowObjects": {
+          "required": [
+            "UniqueId",
+            "Status"
+          ],
+          "properties": {
+            "UniqueId": {
+              "type": "string",
+              "description": "Name of changed Item__c or Manufacturer_Part__c"
+            },
+            "Status": {
+              "type": "string",
+              "description": "Status of object. Added, Deleted, or Updated."
+            },
+            "SecondaryKey": {
+              "type": "string",
+              "description": "Unique Identifier for an Assembly__c (Secondary_Unique_Key__c)."
+            },
+            "Fields": {
+              "type": "object",
+              "items": {
+                "$ref": "#/components/schemas/Fields"
+              },
+              "description": "Object containing Fields that have been updated on this assembly."
+            }
+          }
+        },
+        "Fields": {
+          "type": "object",
+          "description": "Object containing Fields that have been updated on this assembly.",
+          "required": [
+            "Field"
+          ],
+          "properties": {
+            "field": {
+              "type": "array",
+              "items": {
+                "$ref": "#/components/schemas/Field"
+              }
+            }
+          }
+        },
+        "Field": {
+          "type": "array",
+          "items": {
+            "$ref": "#/components/schemas/FieldObject"
+          },
+          "description": "Array of objects containing information about fields that have been updated"
+        },
+        "FieldObject": {
+          "type": "object",
+          "required": [
+            "OldValue",
+            "NewValue",
+            "Name"
+          ],
+          "properties": {
+            "OldValue": {
+              "type": "string",
+              "description": "previous value of the field"
+            },
+            "NewValue": {
+              "type": "string",
+              "description": "Updated value of the field"
+            },
+            "Name": {
+              "type": "string",
+              "description": "Name of the field that has been updated"
+            }
+          }
+        },
+        "Error": {
+          "type": "object",
+          "required": [
+            "code",
+            "message"
+          ],
+          "properties": {
+            "code": {
+              "type": "integer",
+              "format": "int32"
+            },
+            "message": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    }
+  }

@@ -1,0 +1,132 @@
+openapi: '3.0.0'
+info:
+  version: '1.0.0'
+  title: 'Propel Manufacturer Item API'
+  description: Propel Manufacturer Item API
+  license:
+    name: MIT
+    url: https://spdx.org/licenses/MIT
+  contact:
+    name: Propel Support
+    url: https://propel.force.com/helpcenter/s/
+    email: support@propelsoftware.com
+servers:
+  - url: 'https://{endpoint}/services/apexrest/{namespace}'
+    description: Propel API Endpoint Base URL
+    variables:
+      endpoint:
+        default: https://login.salesforce.com
+        description: This is the Salesforce instance url
+      namespace:
+        default: PDLM
+        description: This value should default to PDLM for managed package environments. For other environments, provide the namespace to your dev org.
+paths:
+  '/ManufacturerItem/{ItemId}':
+    parameters:
+      - name: ItemId
+        description: The Salesforce record id of the Item
+        in: path
+        required: true
+        schema: 
+          $ref: '#/components/schemas/ItemId'
+    post:
+      summary: Create new Manufacturer Item(s)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MfrList'
+      responses:
+        '200':
+          description: Successfully created new Manufacturer Item(s)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NewOrExistingManufacturerItem'
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+components:
+  schemas:
+    ItemId:
+      description: The Salesforce record id of the Item
+      type: string
+    MfrList:
+      description: Model containing AML list object
+      type: object
+      required:
+        - addAML
+      properties:
+        addAML:
+          type: array
+          items:
+            $ref: '#/components/schemas/ManufacturerPart'
+    ManufacturerPart:
+      description: Model containing Manufacturer Part mappings
+      type: object
+      required:
+        - manufacturer
+        - mpn
+      properties:
+        manufacturer:
+          type: string
+          example: United Gas & Oil
+        mpn:
+          type: string
+        distributor:
+          type: string
+          example: GenePoint
+    NewOrExistingManufacturerItem:
+      description: Model containing newly created Manufacturer Item details
+      type: object
+      required:
+        - attributes
+        - Name
+        - Id
+      properties:
+        attributes:
+          type: object
+          properties:
+            type:
+              type: string
+              example: 'PDLM__Manufacturer_Item__c'
+            url:
+              type: string
+        Name:
+          type: string
+          example: MPN-12345
+        'PDLM__Manufacturer__c':
+          description: The Salesforce record id of the Manufacturer account
+          type: string
+        'PDLM__Distributor__c':
+          description: The Salesforce record id of the Distributor account 
+          type: string
+        Id:
+          description: The Salesforce record id of the newly created Manufacturer Item
+          type: string
+    Error:
+      description: A human readable error message or null/blank
+      type: string
+      example: Invalid manufacturer/distributor value(s). No items or parts created.
+  securitySchemes:
+    oAuth2Implicit:
+      type: oauth2
+      description: This API uses OAuth 2 with the implicit grant flow.
+      flows:
+        implicit:
+          authorizationUrl: '{{url}}{{site}}/services/oauth2/authorize'
+          scopes:
+            api: Enable read and write access to Propel objects
+security:
+  - oAuth2Implicit: [api]
+  
