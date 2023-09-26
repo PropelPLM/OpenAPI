@@ -15,7 +15,7 @@ servers:
     description: Propel API Endpoint Base URL
     variables:
       endpoint:
-        default: https://login.salesforce.com
+        default: login.salesforce.com
         description: This is the Salesforce instance url
       namespace:
         default: PDLM
