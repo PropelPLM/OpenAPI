@@ -1,0 +1,111 @@
+openapi: 3.0.0
+info:
+  version: 1.0.0
+  title: Propel Configuration API
+  description: Propel Configuration API
+  license:
+    name: MIT
+    url: https://spdx.org/licenses/MIT
+  contact:
+    name: Propel Support
+    url: https://propel.force.com/helpcenter/s/
+    email: support@propelsoftware.com
+servers:
+  - url: https://{endpoint}/services/apexrest/{namespace}
+    description: Propel API Endpoint Base URL
+    variables:
+      endpoint:
+        default: https://login.salesforce.com
+        description: This is the Salesforce instance url
+      namespace:
+        default: PDLM
+        description: This value should default to PDLM for managed package environments. For other environments, provide the namespace to your dev org.
+paths:
+  /configuration/:
+    post:
+      summary: Upsert a new configuration. A configuration is a custom setting or metadata within the package, the former being keyed by the 'Name' field whilst the latter on the 'Label' field.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              oneOf:
+                - $ref: '#/components/schemas/GoogleDriveSetting'
+                - $ref: '#/components/schemas/SharingRule'
+      responses:
+        '200':
+          description: Successfully created new Configuration
+          content:
+            application/json:
+              schema:
+                type: object
+                oneOf:
+                  - $ref: '#/components/schemas/GoogleDriveSetting'
+                  - $ref: '#/components/schemas/SharingRule'
+        '400':
+          description: Bad request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '500':
+          description: Unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+components:
+  schemas:
+    GoogleDriveSetting:
+      description: Example google drive custom setting
+      type: object
+      required:
+        - Name
+      properties:
+        Name:
+          type: string
+          example: GoogleDrive
+        Access_Token__c:
+          type: string
+        Client_Id__c:
+          type: string
+          description: required if setting is brand new
+        Client_Secret__c:
+          type: string
+          description: required if setting is brand new
+        Drafts_Folder_Id__c:
+          type: string
+        In_Review_Folder_Id__c:
+          type: string
+        Refresh_Token__c:
+          type: string
+        Released_Folder_Id__c:
+          type: string
+    SharingRule:
+      description: Example sharing rule custom metadata
+      type: object
+      required:
+        - Label
+      properties:
+        Label:
+          type: string
+          example: Sharing Rule 8 - Share with Manufacturers
+        Share_With_Field__c:
+          type: string
+    Error:
+      description: A human readable error message or null/blank
+      type: string
+      example: Request body malformed.
+  securitySchemes:
+    oAuth2Implicit:
+      type: oauth2
+      description: This API uses OAuth 2 with the implicit grant flow.
+      flows:
+        implicit:
+          authorizationUrl: '{{url}}{{site}}/services/oauth2/authorize'
+          scopes:
+            api: Enable read and write access to Propel objects
+security:
+  - oAuth2Implicit:
+      - api
