@@ -2,8 +2,8 @@
   "openapi": "3.0.0",
   "info": {
     "version": "1.0.0",
-    "title": "Propel Manufacturer Item API",
-    "description": "Propel Manufacturer Item API",
+    "title": "Propel Configuration API",
+    "description": "Propel Configuration API",
     "license": {
       "name": "MIT",
       "url": "https://spdx.org/licenses/MIT"
@@ -31,37 +31,42 @@
     }
   ],
   "paths": {
-    "/ManufacturerItem/{ItemId}": {
-      "parameters": [
-        {
-          "name": "ItemId",
-          "description": "The Salesforce record id of the Item",
-          "in": "path",
-          "required": true,
-          "schema": {
-            "$ref": "#/components/schemas/ItemId"
-          }
-        }
-      ],
+    "/configuration/": {
       "post": {
-        "summary": "Create new Manufacturer Item(s)",
+        "summary": "Upsert a new configuration. A configuration is a custom setting or metadata within the package, the former being keyed by the 'Name' field whilst the latter on the 'Label' field.",
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/MfrList"
+                "type": "object",
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/GoogleDriveSetting"
+                  },
+                  {
+                    "$ref": "#/components/schemas/SharingRule"
+                  }
+                ]
               }
             }
           }
         },
         "responses": {
           "200": {
-            "description": "Successfully created new Manufacturer Item(s)",
+            "description": "Successfully created new Configuration",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/NewOrExistingManufacturerItem"
+                  "type": "object",
+                  "oneOf": [
+                    {
+                      "$ref": "#/components/schemas/GoogleDriveSetting"
+                    },
+                    {
+                      "$ref": "#/components/schemas/SharingRule"
+                    }
+                  ]
                 }
               }
             }
@@ -92,81 +97,54 @@
   },
   "components": {
     "schemas": {
-      "ItemId": {
-        "description": "The Salesforce record id of the Item",
-        "type": "string"
-      },
-      "MfrList": {
-        "description": "Model containing AML list object",
+      "GoogleDriveSetting": {
+        "description": "Example google drive custom setting",
         "type": "object",
         "required": [
-          "addAML"
+          "Name"
         ],
         "properties": {
-          "addAML": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ManufacturerPart"
-            }
-          }
-        }
-      },
-      "ManufacturerPart": {
-        "description": "Model containing Manufacturer Part mappings",
-        "type": "object",
-        "required": [
-          "manufacturer",
-          "mpn"
-        ],
-        "properties": {
-          "manufacturer": {
-            "type": "string",
-            "example": "United Gas & Oil"
-          },
-          "mpn": {
-            "type": "string"
-          },
-          "distributor": {
-            "type": "string",
-            "example": "GenePoint"
-          }
-        }
-      },
-      "NewOrExistingManufacturerItem": {
-        "description": "Model containing newly created Manufacturer Item details",
-        "type": "object",
-        "required": [
-          "attributes",
-          "Name",
-          "Id"
-        ],
-        "properties": {
-          "attributes": {
-            "type": "object",
-            "properties": {
-              "type": {
-                "type": "string",
-                "example": "PDLM__Manufacturer_Item__c"
-              },
-              "url": {
-                "type": "string"
-              }
-            }
-          },
           "Name": {
             "type": "string",
-            "example": "MPN-12345"
+            "example": "GoogleDrive"
           },
-          "PDLM__Manufacturer__c": {
-            "description": "The Salesforce record id of the Manufacturer account",
+          "Access_Token__c": {
             "type": "string"
           },
-          "PDLM__Distributor__c": {
-            "description": "The Salesforce record id of the Distributor account",
+          "Client_Id__c": {
+            "type": "string",
+            "description": "required if setting is brand new"
+          },
+          "Client_Secret__c": {
+            "type": "string",
+            "description": "required if setting is brand new"
+          },
+          "Drafts_Folder_Id__c": {
             "type": "string"
           },
-          "Id": {
-            "description": "The Salesforce record id of the newly created Manufacturer Item",
+          "In_Review_Folder_Id__c": {
+            "type": "string"
+          },
+          "Refresh_Token__c": {
+            "type": "string"
+          },
+          "Released_Folder_Id__c": {
+            "type": "string"
+          }
+        }
+      },
+      "SharingRule": {
+        "description": "Example sharing rule custom metadata",
+        "type": "object",
+        "required": [
+          "Label"
+        ],
+        "properties": {
+          "Label": {
+            "type": "string",
+            "example": "Sharing Rule 8 - Share with Manufacturers"
+          },
+          "Share_With_Field__c": {
             "type": "string"
           }
         }
@@ -174,7 +152,7 @@
       "Error": {
         "description": "A human readable error message or null/blank",
         "type": "string",
-        "example": "Invalid manufacturer/distributor value(s). No items or parts created."
+        "example": "Request body malformed."
       }
     },
     "securitySchemes": {
