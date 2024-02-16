@@ -58,8 +58,18 @@
                 }
               }
             },
-            "404": { // change this
-              "description": "Change Order not found",
+            "400": {
+              "description": "Id provided is not that of an Item Revison",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/Error"
+                  }
+                }
+              }
+            },
+            "404": {
+              "description": "Item of given item revision Id cannot be found",
               "content": {
                 "application/json": {
                   "schema": {
@@ -117,6 +127,22 @@
         "SObjectTypes": {
           "type": "string",
           "enum": ["Assembly__c", "Document__c", "Manufacturer_Item__c"]
+        },
+        "Error": {
+          "type": "object",
+          "required": [
+            "code",
+            "message"
+          ],
+          "properties": {
+            "code": {
+              "type": "integer",
+              "format": "int32"
+            },
+            "message": {
+              "type": "string"
+            }
+          }
         }
       }
     }
