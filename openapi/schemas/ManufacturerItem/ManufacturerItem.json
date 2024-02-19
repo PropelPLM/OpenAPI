@@ -20,8 +20,7 @@
       "description": "Propel API Endpoint Base URL",
       "variables": {
         "endpoint": {
-          "default": "login.salesforce.com",
-          "description": "This is the Salesforce instance url"
+          "description": "This is the Salesforce instance url. It is the URL when using Salesforce Classic, i.e. propel.my.salesforce.com"
         },
         "namespace": {
           "default": "PDLM",
