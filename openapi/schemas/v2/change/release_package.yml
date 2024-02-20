@@ -6,8 +6,10 @@ info:
   license:
     name: MIT
 servers:
-- url: https://{orgId}.salesforce.com/services/apexrest/{namespace}/v3
+- url: https://{endpoint}/services/apexrest/{namespace}/v3
   variables:
+    endpoint:
+      description: This is the Salesforce instance url. It is the URL when using Salesforce Classic, i.e. propel.my.salesforce.com
     namespace: 
       default: PDLM
       description: This value should default to PDLM for production environments. 

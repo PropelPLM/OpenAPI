@@ -1,0 +1,152 @@
+{
+    "openapi": "3.0.0",
+    "info": {
+      "version": "2.0",
+      "title": "Item Attachment Put",
+      "license": {
+        "name": "MIT"
+      }
+    },
+    "servers": [
+      {
+        "url": "https://{endpoint}/services/apexrest/{namespace}/v2",
+        "variables": {
+          "endpoint": {
+            "description": "This is the Salesforce instance url. It is the URL when using Salesforce Classic, i.e. propel.my.salesforce.com"
+          },
+          "namespace": {
+            "default": "PDLM",
+            "description": "This value should default to PDLM for production environments. For dev environments, provide the namespace to your dev org."
+          }
+        }
+      }
+    ],
+    "paths": {
+      "/item/{itemRevId}/markup": {
+        "get": {
+          "summary": "Get markup information of a item revision",
+          "description": "Gets all the fields that the specified item revision has changed against the latest released revision of an item. Returns",
+          "operationId": "markupGet",
+          "tags": [ "markup" ],
+          "parameters": [
+            {
+              "name": "itemRevId",
+              "in": "path",
+              "description": "Id of desired Item Revision.",
+              "required": true,
+              "schema": {
+                "type": "string",
+                "format": "string"
+              }
+            },
+            {
+              "name": "fieldset",
+              "in": "query",
+              "description": "Fieldset to use for diffing instead of the default fields",
+              "required": false,
+              "schema": {
+                "type": "string",
+                "format": "string"
+              }
+            }
+          ],
+          "responses": {
+            "200": {
+              "description": "Changed fields of the SObjects associated to the Item when comparing the specified revision against the latest released revision.",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/Markups"
+                  }
+                }
+              }
+            },
+            "400": {
+              "description": "Id provided is not that of an Item Revison",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/Error"
+                  }
+                }
+              }
+            },
+            "404": {
+              "description": "Item of given item revision Id cannot be found",
+              "content": {
+                "application/json": {
+                  "schema": {
+                    "$ref": "#/components/schemas/Error"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "components": {
+      "schemas": {
+        "Markups": {
+          "type": "array",
+          "items": {
+            "$ref": "#/components/schemas/Markup"
+          }
+        },
+        "Markup": {
+          "type": "object",
+          "required": [
+            "sobjectType",
+            "rowOld",
+            "rowNew",
+            "markupType",
+            "key"
+          ],
+          "properties": {
+            "sobjectType": {
+              "$ref": "#/components/schemas/SObjectTypes"
+            },
+            "rowOld": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "rowNew": {
+              "type": "object",
+              "additionalProperties": true
+            },
+            "markupType": {
+              "$ref": "#/components/schemas/MarkupTypes"
+            },
+            "key": {
+              "type": "string"
+            }
+          },
+          "description": "Contains information about how an SObject's fields have changed when compared to the point of the item's release. The 'rowNew' property only contains the delta, i.e. if there are no changes 'rowNew' is an empty object."
+        },
+        "MarkupTypes": {
+          "type": "string",
+          "enum": ["Add", "Delete", "Modify", "NoChange"]
+        },
+        "SObjectTypes": {
+          "type": "string",
+          "enum": ["Assembly__c", "Document__c", "Manufacturer_Item__c"]
+        },
+        "Error": {
+          "type": "object",
+          "required": [
+            "code",
+            "message"
+          ],
+          "properties": {
+            "code": {
+              "type": "integer",
+              "format": "int32"
+            },
+            "message": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    }
+}
