@@ -3,7 +3,3 @@
 This repository contains the [OpenAPI Specifications][openapi] for Propel APIs as well as the Postman Collection containing the APIs.
 
 [openapi]: https://www.openapis.org/
-
-<br/>
-
-[![Run in Postman](https://run.pstmn.io/button.svg)](https://app.getpostman.com/run-collection/0bf09560b95060c966aa?action=collection%2Fimport#?env%5BPropel%20APIs%20Environment%5D=W3sia2V5IjoiZW5kcG9pbnQiLCJ2YWx1ZSI6IiIsImVuYWJsZWQiOnRydWUsInR5cGUiOiJkZWZhdWx0Iiwic2Vzc2lvblZhbHVlIjoiaHR0cHM6Ly9wcm9wZWxkZXYtZGV2LWVkLm15LnNhbGVzZm9yY2UuY29tIiwic2Vzc2lvbkluZGV4IjowfSx7ImtleSI6Im5hbWVzcGFjZSIsInZhbHVlIjoiUERMTSIsImVuYWJsZWQiOnRydWUsInR5cGUiOiJkZWZhdWx0Iiwic2Vzc2lvblZhbHVlIjoiUExNREVWMyIsInNlc3Npb25JbmRleCI6MX0seyJrZXkiOiJiYXNlVXJsIiwidmFsdWUiOiJ7e2VuZHBvaW50fX0vc2VydmljZXMvYXBleHJlc3Qve3tuYW1lc3BhY2V9fSIsImVuYWJsZWQiOnRydWUsInR5cGUiOiJkZWZhdWx0Iiwic2Vzc2lvblZhbHVlIjoie3tlbmRwb2ludH19L3NlcnZpY2VzL2FwZXhyZXN0L3t7bmFtZXNwYWNlfX0iLCJzZXNzaW9uSW5kZXgiOjJ9XQ==)
