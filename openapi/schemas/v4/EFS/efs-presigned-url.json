@@ -1,0 +1,259 @@
+{
+  "openapi": "3.0.0",
+  "info": {
+    "version": "4.0",
+    "title": "EFS Presigned URL REST API",
+    "description": "Resolves per-file External File Storage (S3) routing decisions and generates presigned PUT\nURLs so a caller can stream file binaries directly to S3 — keeping the binary out of Apex\nheap. Used internally by the Design Hub save flow (`DesignHubSavingService`) to migrate\nDesign Hub import attachments and bulk-clone documents to S3 where applicable.\n\n**Not a publicly-listed API.** This endpoint is consumed exclusively by the Design Hub\nHeroku service. Schema published here for contract testing and future integrations.\n",
+    "license": {
+      "name": "MIT"
+    }
+  },
+  "servers": [
+    {
+      "url": "https://{endpoint}/services/apexrest/{namespace}/api/v4",
+      "variables": {
+        "endpoint": {
+          "description": "This is the Salesforce instance url. It is the URL when using Salesforce Classic, i.e. propel.my.salesforce.com"
+        },
+        "namespace": {
+          "default": "PDLM",
+          "description": "This value should default to PDLM for production environments. For dev environments, provide the namespace to your dev org."
+        }
+      }
+    }
+  ],
+  "paths": {
+    "/efs": {
+      "post": {
+        "summary": "Resolve EFS routing and presigned URLs",
+        "description": "Evaluates each supplied file (either provided directly via `files` or queried from\nSalesforce via `revIds`) against the org's EFS routing rules (`FilesServiceImpl.getProviderAuth`).\n\nFor files routed to External File Storage (S3), returns an AWS SigV4 presigned PUT URL\nvalid for 12 hours, plus the S3 object key the caller should write the `Document__c`\nrecord against. For files that should stay in Salesforce, the URL/key/provider fields\nare null.\n\n### Short-circuits\nIf EFS is not enabled for the org (`IFeatureManagement.getEFSEnabled() == false` or\n`Config.cloudFileStorage != 'S3'`), all results are returned with `isEFS: false` without\nmaking any callout to AWS STS.\n\n### Caller responsibility\nFiles marked `isEFS: true` are NOT yet uploaded — the caller must PUT the binary to\n`presignedPutUrl` and, on success, write the `Document__c` record with\n`Content_Location__c = 'E'`, `Google_File_Id__c = <s3Key>`, and\n`External_Storage_Provider__c = <externalStorageProvider>`. On failure, the caller\nshould leave the file on Salesforce storage.\n",
+        "operationId": "postEfsPresignedUrls",
+        "tags": [
+          "efs"
+        ],
+        "requestBody": {
+          "description": "Supply EITHER `files` (when ContentVersion metadata is known client-side — fresh\nDesign Hub import path) OR `revIds` (when only revision IDs are known — bulk\nclone path; the route will query SF-stored documents on those revisions).\n",
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "$ref": "#/components/schemas/FilesPayload"
+                  },
+                  {
+                    "$ref": "#/components/schemas/RevIdsPayload"
+                  }
+                ]
+              },
+              "examples": {
+                "filesPayload": {
+                  "summary": "Staged-files mode (fresh import)",
+                  "value": {
+                    "files": [
+                      {
+                        "contentVersionId": "068xx0000000001AAA",
+                        "name": "drawing.pdf",
+                        "size": 124589
+                      },
+                      {
+                        "contentVersionId": "068xx0000000002AAA",
+                        "name": "mapping.csv",
+                        "size": 94
+                      }
+                    ]
+                  }
+                },
+                "revIdsPayload": {
+                  "summary": "Released-revision mode (bulk clone)",
+                  "value": {
+                    "revIds": [
+                      "a0Xxx0000000001EAA",
+                      "a0Xxx0000000002EAA"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Array of routing decisions, one per file. For EFS-eligible files, includes a presigned PUT URL.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/FileRoutingResult"
+                  }
+                },
+                "examples": {
+                  "mixed": {
+                    "summary": "Mixed routing decisions",
+                    "value": [
+                      {
+                        "contentVersionId": "068xx0000000001AAA",
+                        "name": "drawing.pdf",
+                        "isEFS": true,
+                        "presignedPutUrl": "https://bucket.s3.us-east-1.amazonaws.com/abc123/drawing.pdf?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Signature=...",
+                        "s3Key": "abc123/drawing.pdf",
+                        "externalStorageProvider": "S3"
+                      },
+                      {
+                        "contentVersionId": "068xx0000000002AAA",
+                        "name": "mapping.csv",
+                        "isEFS": false,
+                        "presignedPutUrl": null,
+                        "s3Key": null,
+                        "externalStorageProvider": null
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid request body. Returned when neither `files` nor `revIds` is provided,\nwhen `files` is not an array, or when a `files` entry is missing\n`contentVersionId` or `name`.\n",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "Unable to obtain AWS S3 credentials. Returned when the STS callout fails, typically\nbecause the running user lacks External Credential Principal Access for the AWSSTS\nNamed Credential.\n",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "FilesPayload": {
+        "type": "object",
+        "description": "Staged-files mode. Used by the Design Hub fresh-import path where the caller already has ContentVersion metadata in memory and the corresponding `Document__c` records do not yet exist.",
+        "required": [
+          "files"
+        ],
+        "properties": {
+          "files": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FileInput"
+            },
+            "description": "One entry per file to evaluate. An empty array returns an empty result."
+          }
+        }
+      },
+      "FileInput": {
+        "type": "object",
+        "required": [
+          "contentVersionId",
+          "name"
+        ],
+        "properties": {
+          "contentVersionId": {
+            "type": "string",
+            "description": "Salesforce ContentVersion Id of the staged binary. Echoed back in the result so the caller can correlate."
+          },
+          "name": {
+            "type": "string",
+            "description": "File name including extension. Used by the routing rules to evaluate file-type-based EFS eligibility."
+          },
+          "size": {
+            "type": "integer",
+            "format": "int64",
+            "description": "File size in bytes. Used by the routing rules to evaluate size-based EFS\neligibility. If unknown (e.g. `Document_Size__c` not yet populated by the\nContentVersion trigger), pass `0` and the routing decision falls back to\nextension-only evaluation.\n",
+            "default": 0
+          }
+        }
+      },
+      "RevIdsPayload": {
+        "type": "object",
+        "description": "Released-revision mode. Used by the bulk-item-clone path. The route queries SF-stored\n`Document__c` records attached to the supplied revisions and evaluates each. Records\nalready in external storage (`Content_Location__c = 'E'`) are excluded — they don't\nneed re-routing on clone.\n",
+        "required": [
+          "revIds"
+        ],
+        "properties": {
+          "revIds": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+              "type": "string",
+              "description": "Item_Revision__c Id"
+            }
+          }
+        }
+      },
+      "FileRoutingResult": {
+        "type": "object",
+        "required": [
+          "contentVersionId",
+          "name",
+          "isEFS"
+        ],
+        "properties": {
+          "contentVersionId": {
+            "type": "string",
+            "description": "Echoed from the input. Use this to correlate results with the original files."
+          },
+          "name": {
+            "type": "string",
+            "description": "Echoed from the input."
+          },
+          "isEFS": {
+            "type": "boolean",
+            "description": "`true` if the routing rules placed this file on External File Storage and the\ncaller should PUT it to `presignedPutUrl`. `false` if the file should remain on\nSalesforce storage.\n"
+          },
+          "presignedPutUrl": {
+            "type": "string",
+            "nullable": true,
+            "description": "AWS SigV4 presigned PUT URL for the S3 object. Null when `isEFS` is false.\nURL is valid for approximately 12 hours from generation. The caller must:\n  - PUT the file binary with `Content-Length` set (chunked transfer encoding is rejected by S3 → 501).\n  - Not modify headers — only `host` is included in the signed headers; adding others may invalidate the signature depending on AWS behavior.\n"
+          },
+          "s3Key": {
+            "type": "string",
+            "nullable": true,
+            "description": "S3 object key under the configured bucket. Format `<uuid>/<filename>` so the\nfilename survives downloads. Null when `isEFS` is false. Write this value into\n`Document__c.Google_File_Id__c` on the persisted record.\n"
+          },
+          "externalStorageProvider": {
+            "type": "string",
+            "nullable": true,
+            "description": "The external storage provider name (currently always `S3` when set). Write into\n`Document__c.External_Storage_Provider__c` on the persisted record. Null when\n`isEFS` is false.\n",
+            "enum": [
+              "S3",
+              null
+            ]
+          }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "required": [
+          "errorCode",
+          "message"
+        ],
+        "properties": {
+          "errorCode": {
+            "type": "string",
+            "description": "Short machine-readable code, e.g. `BAD_REQUEST`, `INTERNAL_SERVER_ERROR`."
+          },
+          "message": {
+            "type": "string",
+            "description": "Human-readable detail for the error."
+          }
+        }
+      }
+    }
+  }
+}
