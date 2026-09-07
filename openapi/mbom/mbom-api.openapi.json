@@ -1,0 +1,3251 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Propel MBOM API",
+    "version": "1.0.0",
+    "summary": "Create, read, edit, baseline and reconcile a Manufacturing BOM.",
+    "description": "The complete REST surface of Propel's Manufacturing BOM (MBOM), built on the new\n**branch / baseline / configuration-item** framework. Eight endpoints cover the whole\nlifecycle: create an MBOM over a released eBOM revision, read its structure, edit it with\ndelta operations, freeze it as a baseline, and reconcile it against a newer eBOM revision.\n\n---\n\n## Read this first: the eight ideas the whole API rests on\n\n### 1. An MBOM inherits its structure. It never copies it.\n\nCreating an MBOM writes **four records and not one row of BOM structure**. The branch stores\nonly its own *deltas*; everything else is resolved at read time by walking the live legacy\n`Assembly__c` graph beneath the accepted eBOM root revision. An untouched branch holds zero\nper-edge records however many times it is read.\n\n### 2. `T_R` — the pinned source clock\n\nWhen an MBOM is created (or a pull is committed), the accepted root revision's\n**release date** is stamped once as `Source_TimePoint__c`. That timestamp is **T_R**, and every\ninherited row resolves against it: a child item renders at whichever revision was released as\nof T_R.\n\nT_R is *stamped, then read* — never re-derived. So when engineering releases `Assy-100` rev-2,\n**nothing happens to the MBOM**. It still resolves against rev-1's T_R until someone explicitly\naccepts the newer revision with a [pull](#tag/Pull).\n\n### 3. `asOf` — the branch clock, and why there are two\n\nEvery read also takes an `asOf` timestamp (defaulting to now). That one governs the *branch's*\nown content — its deltas, its locally added parts, its substitutes.\n\nTwo clocks are therefore legitimately in play at once, and each row states which one governs it\n(`TreeRowDTO.governingTimestamp`, `MemberState.governingClock`):\n\n| Row kind | Governing clock |\n|---|---|\n| `inherited` — supplied by the source, untouched | **T_R** (`source`) |\n| `claimed` — the branch took copy-on-write ownership | **T_R** for the child revision it pins |\n| `local` — branch-owned, no upstream provenance | **`asOf`** (`branch`) |\n| a *substitute* (from `replace`) | **`asOf`** — its child floats |\n\nA direct consequence is that **one item can render at two different revisions in the same\ntree**. That is expected, not a fault, and is reported as a `mixed-revision` warning beside the\ndata rather than an error instead of it.\n\n### 4. Provenance: `inherited` / `claimed` / `local`\n\nDerived at read time, never stored. `claimed` and `local` differ by exactly one field on the\nwinning delta row (`Overrides_Source__c` set vs. null), and that difference is what makes\n\"what did I change relative to upstream?\" answerable.\n\n### 5. Copy-on-write: you must `claim` before you can edit\n\nAn inherited row is read-only. Editing it is refused with `CLAIM_REQUIRED`, carrying the eBOM\nline id so the client can offer the claim. Divergence from upstream is always an explicit act.\n\n### 6. Nothing is ever deleted\n\nRemoval is an **exclude delta** — a tombstone appended to an append-only log. `restore` lifts\nit. A hard delete of any branch-owned row is refused (`HARD_DELETE_BLOCKED`). This is what makes\na read at a past `asOf`, and therefore a baseline, reproducible.\n\n### 7. A baseline stores a timepoint, not rows\n\nCutting a baseline records one timestamp and freezes the revisions it resolved to. Reading it\n**re-resolves** the branch at that timestamp. Two stored counts act as canaries\n(`BASELINE_COUNT_DRIFT`, `BASELINE_PROVENANCE_DRIFT`) if something the resolution depends on has\nmoved since.\n\n### 8. \"Pull\", not \"merge\"\n\nA pull is the **downstream-initiated acceptance of a newer upstream source version**, matching\n`Branch_Source_CI__c.Source_Type__c`. The word *merge* is deliberately reserved for the Phase 2\nbranch-to-branch operation, which is bidirectional and common-ancestor-based — genuinely\ndifferent.\n\n---\n\n## Response and error conventions\n\nThe MBOM API does **not** use the Propel framework's `RestResponseHandler`. Each route\nserialises through `MbomHttp` directly onto the HTTP response, so:\n\n- Success and error bodies are **plain JSON, never wrapped** in the framework's\n  `entity` / `entities` envelope.\n- **Error bodies key the code as `code`, not `errorCode`.** `errorCode` is the framework's key;\n  it appears in this API only *inside* a delta batch's per-operation `results[]`.\n- **Nulls are not suppressed.** A field a producer never set for that case is genuinely absent\n  or explicitly `null`, and the two are meaningful — see `DeltaResult.forked`.\n- `code` values come from `MbomErrorCode`, a fixed enum. **The code is the contract; the message\n  is not.** Messages are Custom Labels and are translated; switch on `code`, never on text.\n\n### Status-code scheme\n\n| Status | Meaning |\n|---|---|\n| **400** | The request could not be read, or a value is out of range. Fix the request. |\n| **403** | No permission. The body carries the label only — never the object that was denied. |\n| **404** | The path, or an id in the body, names nothing. |\n| **409** | Well formed, and **retryable after changing state** — claim it first, restore it first, re-preview. |\n| **413** | More than 200 operations in one delta batch. |\n| **422** | Well formed, but **impossible against the model**. Retrying unchanged will never succeed (a cycle is still a cycle). |\n| **500** | Unmodelled server failure. Carries the exception type and message, never the stack trace. |\n\nThe 409/422 split is deliberate: a client that retries on a generic 4xx would spin forever on a\ncycle, and the two cases want different UI.\n\n---\n\n## Design intent: MBOM-specific paths, generic vocabulary\n\nMBOM is the first application of a general branch / baseline / configuration-item framework. The\npath is namespaced under `/mbom` so MBOM-only rules have somewhere to live, but the nouns below\nthat segment — **branch**, **source**, **member**, **override**, **baseline** — are framework\nconcepts, not MBOM concepts. Everything MBOM-specific is confined to a single discriminated\nschema, `AssemblyEdgeDetail`, reached through `MemberState.detail` and keyed by `ciType`. A\nsecond configuration-item type adds a sibling schema there and touches nothing else.\n\n## Routing\n\nRouted through `EntryAPI` → `EntryRoute` → `MbomRoute` → (`MbomCreateRoute` | `MbomBranchRoute` |\n`MbomSourceRoute` | `MbomBaselineRoute`) in `src/main/default/classes/api/`, **not** a standalone\n`@RestResource`.\n\nNote there is **no `branchId` path segment on the source endpoints**: a source already names its\nowning branch through `Branch_Source_CI__c.Downstream_Branch__c`. `branchId` still appears in the\npull-preview *body*, denormalised for display.\n",
+    "contact": {
+      "name": "Propel PLM Engineering"
+    },
+    "license": {
+      "name": "Proprietary — Propel Software Solutions, Inc.",
+      "identifier": "LicenseRef-Propel-Proprietary"
+    },
+    "x-epic": "https://propelplm.atlassian.net/browse/MVP-30018",
+    "x-jira": {
+      "create": "MVP-30027",
+      "deltas": "MVP-30028",
+      "trees": "MVP-30029",
+      "baselineCut": "MVP-30030",
+      "baselineRead": "MVP-30031",
+      "pullPreview": "MVP-30076",
+      "pullCommit": "MVP-30077"
+    },
+    "x-design-doc": "docs/architecture/mbom/mbom-pull-api.md",
+    "x-demo-plan": "docs/architecture/mbom/mbom-demo-test-plan.md"
+  },
+  "servers": [
+    {
+      "url": "https://{instance}.my.salesforce.com/services/apexrest/{namespace}api/v4",
+      "description": "Salesforce org",
+      "variables": {
+        "instance": {
+          "default": "my-domain",
+          "description": "My Domain host for the target org."
+        },
+        "namespace": {
+          "default": "",
+          "enum": [
+            "",
+            "ksplm/"
+          ],
+          "description": "Empty in a scratch/dev org where PLM is deployed unmanaged (`sfdx-project.json` sets\n`\"namespace\": \"\"`). `ksplm/` in a package org, where the managed-package namespace\nprefixes the REST path — `RestRequestHandlerTest` exercises `/ksplm/api/v4/...`.\n"
+        }
+      }
+    }
+  ],
+  "security": [
+    {
+      "sessionToken": []
+    }
+  ],
+  "tags": [
+    {
+      "name": "Lifecycle",
+      "description": "Creating an MBOM over a released eBOM revision."
+    },
+    {
+      "name": "Structure",
+      "description": "Reading resolved structure — the branch's effective content, or what a source supplies on its\nown before any branch deltas are applied.\n"
+    },
+    {
+      "name": "Editing",
+      "description": "Changing a branch through delta operations. Every change is an append to a log; nothing is\nmutated in place and nothing is deleted.\n"
+    },
+    {
+      "name": "Baselines",
+      "description": "Freezing and replaying a configuration. A baseline stores a timepoint and re-resolves on read.\n"
+    },
+    {
+      "name": "Pull",
+      "description": "Reconciling an MBOM branch against a newer version of the eBOM source it inherits from —\na two-step preview/commit flow.\n"
+    }
+  ],
+  "paths": {
+    "/mbom/mboms": {
+      "post": {
+        "tags": [
+          "Lifecycle"
+        ],
+        "operationId": "createMbom",
+        "summary": "Create an MBOM over a released eBOM revision",
+        "description": "Creates an MBOM header, its first branch, the branch's eBOM source lineage, and that\nsource's first acceptance — **four records in one transaction, and zero rows of BOM\nstructure** (`MbomCreateService`).\n\nThe response returns all four ids rather than just `mbomId`, because a caller that had to go\nlooking for the other three would be querying schema this API exists to hide. The one you\nwill use most is `branchSourceCiId` — it is the `sourceId` every `/sources/...` endpoint\ntakes.\n\n## The root revision must be Released\n\nIts `Released_Date_Time__c` becomes **T_R**, the timepoint every inherited row is pinned at.\nAn unreleased revision has no such date, so there is nothing to pin to.\n\nFour shapes are refused with `NOT_RELEASED` (409, not 400 — releasing the revision makes the\nidentical request succeed): not released; **Cancelled**; **Expired**; released but carrying\nno release date. Cancelled and Expired are excluded because the eBOM's own as-of read would\nnever resolve them either.\n\n## Timestamps stamped here\n\n| Field | Value | Why it matters |\n|---|---|---|\n| `Source_TimePoint__c` (**T_R**) | the root revision's release date | what inherited rows resolve at, forever |\n| `Accepted_At__c` | the **wall clock**, now | which acceptance governs a given `asOf` |\n\nA consequence worth knowing before you write a test: because `Accepted_At__c` is the wall\nclock, a branch created now renders **nothing** when read at an `asOf` in the past. That is\nthe acceptance not existing yet at that timestamp, not a defect.\n\n## Access\n\nGated **before the body is read**: a caller with no create grant gets 403 whatever they sent.\nRequires create on `MBOM__c`, `Branch__c`, `Branch_Source_CI__c` and\n`Branch_Source_CI_Rev__c`, plus read on `Item_Revision__c`. All five are named so a partial\ngrant is a clean 403 rather than a 500 out of the middle of the DML.\n",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MbomCreateRequest"
+              },
+              "examples": {
+                "standard": {
+                  "summary": "An MBOM over Assy-100 rev-1",
+                  "value": {
+                    "rootItemRevisionId": "a0Ag8000000Ab01EAC",
+                    "mbomName": "Assy-100 Manufacturing BOM",
+                    "branchLabel": "MBOM-GDL"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Created. Four records now exist. 201 rather than 200 because the response names records\nthat did not exist before the call, and a client distinguishing \"created\" from \"already\nthere\" has nothing else to read.\n",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MbomCreateResult"
+                },
+                "examples": {
+                  "created": {
+                    "value": {
+                      "mbomId": "a1Ag8000000AbCcEAK",
+                      "branchId": "a1Bg8000000AbCdEAK",
+                      "branchSourceCiId": "a1Cg8000000AbCeEAK",
+                      "branchSourceCiRevId": "a1Dg8000000AbCfEAK"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`INVALID_REQUEST` — the body was empty or unreadable; `mbomName` or `branchLabel` was\nblank; or either exceeded its field length (`mbomName` ≤ 80, `branchLabel` ≤ 80 — the\nshorter of `Branch__c.Name` at 80 and `Label__c` at 255).\n\nA malformed id in the **body** is a 400 while one in the **URI** is a 404, and that is\nnot an inconsistency: the URI is what *names* the resource, so a path naming nothing is\na path to nothing. A body field is a value in a request to a resource that does exist.\n",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RestError"
+                },
+                "examples": {
+                  "blankName": {
+                    "value": {
+                      "code": "INVALID_REQUEST",
+                      "message": "That request could not be read. Check that the body is valid JSON and that every required value is supplied. (mbomName is required)"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "description": "`NOT_FOUND` — `rootItemRevisionId` was null, is not an `Item_Revision__c` id, or names\nno visible row. The three are not distinguished on purpose: separating \"malformed\" from\n\"absent\" would tell an unauthorised caller which ids exist.\n",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RestError"
+                },
+                "examples": {
+                  "notARevision": {
+                    "value": {
+                      "code": "NOT_FOUND",
+                      "message": "That record does not exist, or you do not have access to it. (a0Bg8000000Ab10EAC is not an Item_Revision__c)"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "`NOT_RELEASED` — the root revision is unreleased, Cancelled, Expired, or has no release\ndate, so there is no T_R to stamp.\n",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RestError"
+                },
+                "examples": {
+                  "notReleased": {
+                    "value": {
+                      "code": "NOT_RELEASED",
+                      "message": "An mBOM can only be created from a released item revision. (a0Ag8000000Ab99EAC)"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/mbom/branches/{branchId}/tree": {
+      "get": {
+        "tags": [
+          "Structure"
+        ],
+        "operationId": "getBranchTree",
+        "summary": "Read a branch's effective structure",
+        "description": "The branch's resolved content at one timepoint: the eBOM traversed at **T_R**, with the\nbranch's own deltas folded and overlaid at **`asOf`**.\n\nThis is the main read. It is where the two-clock model becomes visible — every row states\nits own `provenance` and its own `governingTimestamp`, because a row that did not carry its\nown clock would be unexplainable to the person looking at it.\n\n## What the response contains that you might not expect\n\n- **Excluded rows are rendered**, carrying `isExcluded: true`. A tree read shows the person\n  editing what was removed. (A *baseline* read filters them out — see that endpoint.)\n- **`isEditable: false`** on any row inside the subtree of a locally added or substituted\n  assembly. Only content the branch's *source* supplied can be claimed or changed. It is\n  stated rather than left to be derived from `provenance`, so a client does not have to\n  encode which provenance values happen to be editable this release. Every delta op refuses\n  these rows, so a UI offering an action on one is offering an action the API will reject.\n- **Unreachable rows are dropped.** A delta can name a parent item that is not in the tree —\n  a subassembly whose item had nothing released at T_R drops out, and a claim beneath it\n  survives the overlay as a row with an absent parent. This read walks down from the root and\n  keeps only what it can reach, in **both** shapes.\n- **`warnings` and `rows` are always present**, empty rather than absent. A client that has\n  to distinguish \"no warnings\" from \"the key is missing\" writes null checks at every call\n  site, and one of them is eventually forgotten.\n\n## Flat vs. nested, and a real trap\n\n`flat=true` (the **default**) returns one row per edge, each carrying `parentItemId` and an\nempty `childRows` — losslessly re-nestable by the client. `flat=false` nests via `childRows`.\n\n**The nested shape duplicates a shared subassembly; the flat shape does not.** The traversal\nwalks a DAG and emits a shared subtree once; nesting re-materialises it under every parent\nthat uses it, because that is what a BOM tree looks like to a person expanding it. So the two\nshapes carry the same *content* but not the same row **count** — never treat a nested row\ncount as a total — and a deeply shared DAG can hit heap nested while rendering comfortably\nflat.\n\n## Reads create nothing\n\nNo DML anywhere on this path. An untouched branch stays at zero rows however many times it\nis read.\n",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/BranchId"
+          },
+          {
+            "$ref": "#/components/parameters/AsOf"
+          },
+          {
+            "$ref": "#/components/parameters/Flat"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The resolved tree.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MbomTree"
+                },
+                "examples": {
+                  "flat": {
+                    "summary": "Flat (default) — inherited, claimed, local and excluded rows",
+                    "$ref": "#/components/examples/BranchTreeFlat"
+                  },
+                  "nested": {
+                    "summary": "Nested (`flat=false`)",
+                    "$ref": "#/components/examples/BranchTreeNested"
+                  },
+                  "mixedRevision": {
+                    "summary": "With a `mixed-revision` warning",
+                    "$ref": "#/components/examples/BranchTreeMixedRevision"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`ASOF_INVALID` — `asOf` could not be parsed. `ASOF_IN_FUTURE` — `asOf` is later than now;\nthere is no configuration at a timepoint that has not happened.\n",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RestError"
+                },
+                "examples": {
+                  "asOfInvalid": {
+                    "value": {
+                      "code": "ASOF_INVALID",
+                      "message": "The timepoint could not be read. Use an ISO-8601 timestamp, for example 2026-02-01T00:00:00Z. (yesterday)"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFoundPath"
+          },
+          "422": {
+            "description": "`EBOM_CYCLE` — the source eBOM itself contains a cycle, so its structure cannot be\nresolved. Fix the eBOM; retrying is pointless.\n",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RestError"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/mbom/sources/{sourceId}/tree": {
+      "get": {
+        "tags": [
+          "Structure"
+        ],
+        "operationId": "getSourceTree",
+        "summary": "Read what a source supplies, with no branch deltas applied",
+        "description": "The \"**what would I inherit?**\" read: the structure as one source supplies it, with the\nbranch's claims, excludes and replaces deliberately **not** overlaid.\n\nUse it to answer \"what did I change relative to upstream?\" by diffing this against\n`GET /mbom/branches/{branchId}/tree`. Every row comes back `provenance: inherited`.\n\n## Why there is no `flat` parameter\n\nA source's own structure has no deltas overlaid on it, so there is no nesting decision to\nmake. An unexpected `flat` is **ignored rather than rejected**, so one parameter set can be\nsent to both tree reads.\n",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/SourceId"
+          },
+          {
+            "$ref": "#/components/parameters/AsOf"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The source's own structure.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MbomTree"
+                },
+                "examples": {
+                  "source": {
+                    "$ref": "#/components/examples/SourceTree"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`ASOF_INVALID` or `ASOF_IN_FUTURE` — see the branch tree read.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RestError"
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFoundPath"
+          },
+          "422": {
+            "description": "`EBOM_CYCLE` — the source eBOM contains a cycle.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RestError"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/mbom/branches/{branchId}/deltas": {
+      "post": {
+        "tags": [
+          "Editing"
+        ],
+        "operationId": "applyDeltaBatch",
+        "summary": "Apply a batch of delta operations to a branch",
+        "description": "The single write endpoint for editing a branch. Eight operations — `claim`, `update`, `add`,\n`exclude`, `restore`, `replace`, `revert`, `convert-to-native` — arrive in one array and are\napplied under one envelope.\n\n**Returns `200`, not `201`**, even though rows are created: the response is a *report* on a\nset of operations, not a pointer to one new resource, and under `atomic: false` some of them\nmay have failed.\n\n## How a batch executes\n\n1. **Size check** — more than 200 operations is `BATCH_TOO_LARGE` (413), refused before\n   anything is resolved.\n2. **One snapshot.** The branch is resolved **once**, at `asOf`. That is the whole reason a\n   batch endpoint exists: twenty operations resolving the branch each would be twenty\n   traversals, and the tree could shift underneath the batch halfway through.\n3. **Validate everything, then apply.** Two passes, never interleaved, so *every* fault is\n   reported rather than only the first.\n4. **Persist** in a fixed number of DML statements — twenty claims cost the same statements\n   as one.\n\n### Order is preserved, but order is not sequencing\n\nResults come back in request order with your `clientRef` echoed and `index` stated. But\n**every operation validates against the one pre-batch snapshot, so a later operation cannot\nsee an earlier one's effect.** `[claim(L), update(L)]` in one batch answers `CLAIM_REQUIRED`\non the update — and under the default `atomic: true` that rejects the whole batch.\n\n> **Dependent edits are two requests, not two operations.**\n\n## `atomic` — the failure contract is yours to choose\n\n| `atomic` | Behaviour |\n|---|---|\n| `true` (**default** — a null wins the safer contract) | All-or-nothing. Any validation failure throws: the status is the **first failure's** own code (so a batch whose only fault is `CLAIM_REQUIRED` still answers 409, not a generic 400) and the body carries a `failures[]` array with **every** failure. The branch is left exactly as it was. |\n| `false` | Apply what is valid, report the rest. `200` with per-operation `results[]`. |\n\n`atomic: false` reports per-operation **validation** failures only. It does not fall back to\nper-operation DML: the aggregate is one savepoint and one set of statements, and a failure\nthere rolls the batch back and propagates.\n\n## `asOf` chooses what a batch *validates* against; it never dates the write\n\nEvery row written is effective **now**, whatever `asOf` says. A past `asOf` means \"validate\nagainst the configuration as it stood then\" — optimistic concurrency, not time travel.\nBackdating the write would let a batch win the current fold *and* change what a read at an\nintervening timestamp returned, rewriting history in an append-only log.\n\nSeveral operations therefore **refuse a past `asOf` outright** with `INVALID_REQUEST`,\nbecause they decide from the branch's *current* state: `restore`, `revert`,\n`convert-to-native`, and any `claim` / `add` / `exclude` / `replace` that has to mint a new\nedge identity.\n\n## `Idempotency-Key`\n\nRead and passed through, and **ignored this phase**. It is accepted so a client can start\nsending it now without its first request failing, and a later phase can honour it without a\nbreaking change.\n\n## The operations\n\n| `op` | Required fields | What it does |\n|---|---|---|\n| `claim` | `ebomAssemblyId` | Takes one live eBOM line into the branch as a copy-on-write override, so the branch can diverge from it. Copies the values as they stand. Writes 5 records. |\n| `update` | `assemblyCiId` **or** `ebomAssemblyId`; `quantity` and/or `findNumber` | Revises a branch-owned edge. Edits its `CI_Rev__c` in place while Draft; otherwise allocates a new revision, freezes the old one, and returns `forked: true`. Membership is not touched. |\n| `add` | `parentItemId`, `childItemId`, `quantity`, `findNumber` | Adds a part the eBOM never supplied — packaging, fixtures, consumables. Branch-**local**: `Overrides_Source__c` stays null, and the child **floats** at `asOf`. |\n| `exclude` | `ebomAssemblyId` **or** `ciId` | Tombstones a row. **No cascade is written** — the descendant prune is computed at read time, because a descendant still supplied through another path must survive. |\n| `restore` | `ciId` | Lifts an exclusion. Appends `Add` when the branch holds content for the row, or `Revert` when it does not (an inherited row excluded straight from a stub) — appending `Add` blindly would break the next read. |\n| `replace` | `replacedEbomAssemblyId`, `newChildItemId`, `quantity`, `findNumber` | Substitutes a different child for the one an eBOM line supplies, **recording that it is a substitution** (`Replaces__c`), so the pair does not read as an unrelated removal plus an unrelated addition. |\n| `revert` | `ciId` **or** `ebomAssemblyId` | Discards the branch's override so the row falls back to what its source supplies. Nothing on disk is touched — a `Revert` marker is appended and the fold drops it entirely. |\n| `convert-to-native` | `ciId` | Severs a claimed edge's link to the source it overrides: same content, but now branch-owned in its own right (`provenance` flips `claimed` → `local`). Appends an `Add` with `Overrides_Source__c` null. |\n\n### Addressing quirks worth knowing\n\n- `update` accepts `ebomAssemblyId` **and has to**: an inherited row has no edge record, so\n  that is the only id a client holds for the row whose update must come back\n  `CLAIM_REQUIRED`. Without it the rejection could never be reached.\n- `revert` accepts `ebomAssemblyId` for the mirror reason: a reverted row renders with no\n  `CI__c` at all, so a *second* revert — which must answer `NO_OVERRIDE` — cannot be\n  addressed any other way.\n- `replace` only works on eBOM-derived rows. A branch-**local** row has a synthetic\n  `local-…` edge key and no `Assembly__c` line, so replacing local content is `update`, or\n  `exclude` plus `add`.\n\n## Access\n\nRequires **create** on `Assembly_CI__c`, `CI__c`, `Assembly_CI_Rev__c`, `CI_Rev__c` and\n`Branch_Member__c`, **and edit** on `Assembly_CI__c` (upserted) and `CI_Rev__c` (updated when\nan operation freezes a predecessor). Create and edit are not the same permission, and both\nare named so a partial grant is a 403 before any DML.\n",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/BranchId"
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "description": "Accepted and **ignored** this phase. Present so a client can start sending it without\nits first request failing.\n",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeltaBatchRequest"
+              },
+              "examples": {
+                "claimThenEdit": {
+                  "summary": "Claim two eBOM lines (atomic, the default)",
+                  "value": {
+                    "atomic": true,
+                    "operations": [
+                      {
+                        "op": "claim",
+                        "clientRef": "row-motor",
+                        "ebomAssemblyId": "a0Bg8000000Ab10EAC"
+                      },
+                      {
+                        "op": "claim",
+                        "clientRef": "row-bracket",
+                        "ebomAssemblyId": "a0Bg8000000Ab11EAC"
+                      }
+                    ]
+                  }
+                },
+                "update": {
+                  "summary": "Revise quantity and find number on a claimed edge",
+                  "value": {
+                    "operations": [
+                      {
+                        "op": "update",
+                        "clientRef": "qty-fix",
+                        "assemblyCiId": "a1Eg8000000AbD1EAK",
+                        "quantity": 4,
+                        "findNumber": 10
+                      }
+                    ]
+                  }
+                },
+                "addLocal": {
+                  "summary": "Add a part the eBOM never supplied",
+                  "value": {
+                    "operations": [
+                      {
+                        "op": "add",
+                        "clientRef": "packaging",
+                        "parentItemId": "a02g8000000Ab01EAC",
+                        "childItemId": "a02g8000000Ab90EAC",
+                        "quantity": 1,
+                        "findNumber": 90
+                      }
+                    ]
+                  }
+                },
+                "excludeAndReplace": {
+                  "summary": "Substitute an alternate part, and drop another line",
+                  "value": {
+                    "operations": [
+                      {
+                        "op": "replace",
+                        "clientRef": "alt-motor",
+                        "replacedEbomAssemblyId": "a0Bg8000000Ab10EAC",
+                        "newChildItemId": "a02g8000000Ab91EAC",
+                        "quantity": 1,
+                        "findNumber": 10
+                      },
+                      {
+                        "op": "exclude",
+                        "clientRef": "drop-harness",
+                        "ebomAssemblyId": "a0Bg8000000Ab12EAC"
+                      }
+                    ]
+                  }
+                },
+                "nonAtomic": {
+                  "summary": "Best-effort — apply what is valid, report the rest",
+                  "value": {
+                    "atomic": false,
+                    "operations": [
+                      {
+                        "op": "claim",
+                        "clientRef": "ok",
+                        "ebomAssemblyId": "a0Bg8000000Ab11EAC"
+                      },
+                      {
+                        "op": "update",
+                        "clientRef": "will-fail",
+                        "ebomAssemblyId": "a0Bg8000000Ab12EAC",
+                        "quantity": 9
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "The batch report. Also returned when `atomic: false` and some operations failed — check\n`failed` and each `results[].success`, not the status code.\n",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeltaBatchResponse"
+                },
+                "examples": {
+                  "allApplied": {
+                    "summary": "Two claims applied",
+                    "$ref": "#/components/examples/DeltaBatchApplied"
+                  },
+                  "partial": {
+                    "summary": "`atomic: false` — one applied, one refused",
+                    "$ref": "#/components/examples/DeltaBatchPartial"
+                  },
+                  "forked": {
+                    "summary": "An update that had to fork a frozen revision",
+                    "$ref": "#/components/examples/DeltaBatchForked"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`INVALID_REQUEST` — the body could not be read; or (under `atomic: true`) an operation\nfailed validation with a 400-mapped code: a missing required field, an unknown `op`, or\nan operation that refuses a past `asOf`.\n\n`ASOF_INVALID` / `ASOF_IN_FUTURE` — the batch's own `asOf`.\n",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RestError"
+                },
+                "examples": {
+                  "unknownOp": {
+                    "$ref": "#/components/examples/DeltaBatchUnknownOp"
+                  },
+                  "pastAsOfRefused": {
+                    "value": {
+                      "code": "INVALID_REQUEST",
+                      "message": "That request could not be read. Check that the body is valid JSON and that every required value is supplied. (convert-to-native decides from the branch's CURRENT provenance, which a past asOf cannot report; send it without one)"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFoundPath"
+          },
+          "409": {
+            "description": "An atomic batch failed validation, and the first failure's code was a 409. The body\ncarries **every** failure in `failures[]`, not just the first — a caller fixing them one\nround trip at a time is the behaviour this endpoint exists to avoid.\n\n| code | Cause | Remedy |\n|---|---|---|\n| `CLAIM_REQUIRED` | a write targeted an inherited row | `claim` it first |\n| `ALREADY_CLAIMED` | `claim` on a row this branch already owns | edit it directly |\n| `ALREADY_EXCLUDED` | `exclude` on a tombstoned row | `restore` it first |\n| `ALREADY_PRESENT` | `add` of a (parent, child) the branch already carries locally; or an op on a **replaced** row | edit the existing row; or act on the substitute |\n| `NO_OVERRIDE` | `restore`/`revert`/`convert-to-native` on a row the branch asserts nothing about | nothing to undo |\n| `NOT_SUPPLIED` | `revert` on a row no source supplies — falling back would make it vanish | `exclude` instead |\n| `STALE_REVISION` | `update` against a revision superseded since your view | reload and retry |\n| `NOT_EDITABLE` | the target is inside the subtree of a locally added or substituted assembly | only source-supplied content is editable |\n",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RestError"
+                },
+                "examples": {
+                  "claimRequired": {
+                    "$ref": "#/components/examples/DeltaBatchAtomicFailure"
+                  }
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "`BATCH_TOO_LARGE` — more than 200 operations. Split the change.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RestError"
+                },
+                "examples": {
+                  "tooLarge": {
+                    "value": {
+                      "code": "BATCH_TOO_LARGE",
+                      "message": "A single request can carry at most 200 operations. Split the change into smaller batches. (240 operations, maximum 200)"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Impossible against the model.\n\n| code | Cause |\n|---|---|\n| `CYCLE_DETECTED` | the requested edge would make a child an ancestor of its own parent |\n| `PARENT_NOT_IN_BRANCH` | `add` targeted a parent that is not part of this configuration |\n| `EBOM_CYCLE` | the source eBOM already contains a cycle |\n| `UNSUPPORTED_CI_TYPE` | a delta named a CI whose `Type__c` has no registered adapter |\n| `CI_IDENTITY_UNRESOLVED` | a CI of a registered type carries no payload row, or one with no join key — corruption, never skipped |\n| `CI_IDENTITY_COLLISION` | two `CI__c` rows resolve to one identity, so one of their deltas would be silently discarded |\n| `PROVENANCE_INVALID` | a delta named a source that is not this branch's |\n",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RestError"
+                },
+                "examples": {
+                  "cycle": {
+                    "value": {
+                      "code": "CYCLE_DETECTED",
+                      "message": "This change would make the child an ancestor of its own parent, which no BOM can represent. (Sub-200 is already an ancestor of Assy-100)"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/mbom/branches/{branchId}/baselines": {
+      "post": {
+        "tags": [
+          "Baselines"
+        ],
+        "operationId": "cutBaseline",
+        "summary": "Cut a baseline over a branch",
+        "description": "Records the branch's full effective structure at one timepoint — **as that timepoint**.\n\n## A baseline stores a timepoint, not rows\n\nThe cut writes one `Baseline__c` carrying `Resolution_TimePoint__c`, and nothing else about\nthe content. Reading it back **replays the resolution** at that timestamp, which is exact\nbecause the resolution is a pure function of it and because nothing can ever land at or\nbefore a past T (`Accepted_At__c` and `EffectiveDateTime__c` are both stamped with the wall\nclock).\n\nThe flattened member table this replaces cost one record per edge per cut — roughly 36 MB at\nthe measured 18,000-edge ceiling.\n\n## The freeze is what makes the replay honest\n\nA Draft `CI_Rev__c` is edited **in place** by `update`. Replaying a timepoint would therefore\nfollow an edit made *after* the cut, and the baseline would change without anyone touching\nit. So the cut freezes every revision the snapshot resolved to. From then on, every `update`\nto those rows forks a new revision instead (and comes back `forked: true`).\n\n## Two timestamps, and why they are not one\n\n`resolutionTimePoint` is what the content was resolved at; `takenAt` is the wall-clock moment\nof the cut. Kept apart, a correction to the server clock cannot change what a baseline\nresolves to. (MVP-30030 called both `cutDateTime`; the **request** still does, the response\ndoes not.)\n\n## Excluded rows are not members\n\n`memberCount` counts what the configuration *contains*, so tombstoned rows are not counted —\nwhich means it is **not** the number of rows the tree endpoint renders. The baseline read\nfilters on the same predicate, so the stored count stays comparable to a later read.\n\n## Immutable from the insert\n\nThere is no draft-baseline state and no lock step: every update to a `Baseline__c` is refused\noutright, and every hard delete too.\n\n## Access\n\nRequires **create** on `Baseline__c`, and **edit** on `Baseline__c` and `CI_Rev__c` (the\nfreeze). Named separately because a partial grant would otherwise fail half way through the\ncut — after the members resolve and before the freeze, the one state a baseline must never\nbe left in.\n",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/BranchId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BaselineCutRequest"
+              },
+              "examples": {
+                "now": {
+                  "summary": "Cut at the server clock",
+                  "value": {
+                    "label": "Pilot build 1"
+                  }
+                },
+                "backdated": {
+                  "summary": "Cut as the configuration stood at an earlier moment",
+                  "value": {
+                    "label": "Pre-ECO snapshot",
+                    "cutDateTime": "2026-03-01T00:00:00Z"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The baseline's header. 201 rather than the 200 the delta batch answers: this call names\none new resource, where a batch reports on a set of operations.\n",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Baseline"
+                },
+                "examples": {
+                  "cut": {
+                    "value": {
+                      "baselineId": "a1Fg8000000AbE1EAK",
+                      "label": "Pilot build 1",
+                      "resolutionTimePoint": "2026-04-06T14:31:02.000Z",
+                      "takenAt": "2026-04-06T14:31:02.000Z",
+                      "memberCount": 4
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`INVALID_REQUEST` — unreadable body, or a `label` longer than 80 characters.\n`ASOF_IN_FUTURE` — `cutDateTime` is later than now; a baseline of content that does not\nexist yet is not a baseline. `ASOF_INVALID` — it could not be parsed.\n",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RestError"
+                },
+                "examples": {
+                  "future": {
+                    "value": {
+                      "code": "ASOF_IN_FUTURE",
+                      "message": "A timepoint cannot be in the future. Use now or an earlier moment. (2027-01-01T00:00:00Z)"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFoundPath"
+          },
+          "422": {
+            "description": "`EBOM_CYCLE` — the source eBOM contains a cycle, so nothing can be resolved to cut.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RestError"
+                }
+              }
+            }
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/mbom/baselines/{baselineId}/tree": {
+      "get": {
+        "tags": [
+          "Baselines"
+        ],
+        "operationId": "getBaselineTree",
+        "summary": "Read the rows a baseline captured",
+        "description": "Re-resolves the branch at the baseline's stored `Resolution_TimePoint__c` and returns the\nrows.\n\n## `asOf` is refused, not ignored\n\nEvery other tree read on this API takes one, and a client that has been sending it to\n`/branches/{id}/tree` will send it here. A baseline **pins its own timepoint**, so a second\none has nothing to answer — accepting it would give the same rows to every value and let a\ncaller believe they had asked a temporal question and got a temporal answer. Sending `asOf`\nis a `400 INVALID_REQUEST`.\n\n`flat` **is** honoured, because that is a shape and not a clock.\n\n## Differences from the branch read\n\n- **Excluded rows are filtered out.** A tree read renders a tombstone so the editor can see\n  what was removed; a baseline is the record of what the branch *contained*.\n- **`edgeId`, `edgeKey` and the per-row governing clock are suppressed** — a baseline row\n  does not pretend to answer questions it cannot. `isReplaced` **is** populated: leaving it\n  null would render a substituted part identically to an ordinary one.\n- **`warnings` carries drift only.** A `mixed-revision` warning is advice about a branch\n  someone is still editing; a baseline is a record of a decision already taken, so it is\n  deliberately not forwarded.\n\n## The two drift canaries\n\n| warningCode | What moved |\n|---|---|\n| `BASELINE_COUNT_DRIFT` | the baseline re-derived a **different number of rows** than its cut recorded — a corrected release date, an edit to an already-released BOM |\n| `BASELINE_PROVENANCE_DRIFT` | the same row count, but a **different number of `claimed` rows** — the signature of a `convert-to-native` flipping a row from `claimed` to `local` after the fact |\n\nBoth **warn rather than throw**: the rows returned are still the honest answer for the\nstored timepoint, and refusing to answer would be worse than answering with a caveat. Two\ncanaries rather than one because neither can see the other's drift.\n",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/BaselineId"
+          },
+          {
+            "$ref": "#/components/parameters/Flat"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The re-resolved rows. Empty `rows` for a baseline that resolved to nothing is a `200`, not an error.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BaselineTree"
+                },
+                "examples": {
+                  "clean": {
+                    "summary": "No drift",
+                    "$ref": "#/components/examples/BaselineTreeClean"
+                  },
+                  "drifted": {
+                    "summary": "Provenance drift after a `convert-to-native`",
+                    "$ref": "#/components/examples/BaselineTreeDrift"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`INVALID_REQUEST` — `asOf` was supplied. A baseline is already resolved.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RestError"
+                },
+                "examples": {
+                  "asOfRefused": {
+                    "value": {
+                      "code": "INVALID_REQUEST",
+                      "message": "That request could not be read. Check that the body is valid JSON and that every required value is supplied. (a baseline is already resolved, so asOf has nothing to answer; read the branch if you want a timepoint)"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFoundPath"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/mbom/sources/{sourceId}/pull-preview": {
+      "get": {
+        "tags": [
+          "Pull"
+        ],
+        "operationId": "previewMbomPull",
+        "summary": "Preview the effect of accepting a newer eBOM revision",
+        "description": "Diffs the eBOM resolved at the source's current T_R against the eBOM resolved at the\ncandidate root revision's release date, and returns every difference as an individually\naddressable entry.\n\n**This call is pure.** It creates and modifies nothing — no `Branch_Member__c`, no\n`CI_Rev__c`, no source revision. Calling it twice with the same inputs against an unchanged\norg returns identical output, including identical `entryId` values.\n\n**Not every entry is a decision.** Most are informational: the caller is being told what will\nhappen, not asked. Only `override-orphaned` blocks a commit.\n\n**Already current is not an error.** If the branch already resolves against the newest\nreleased root revision, this returns `200` with `hasChanges: false` and an empty `entries`\narray — correct for a read, where a write would throw.\n\n## The correlation key — why a pull doesn't orphan every claim on every release\n\nThe two traversals are correlated on **`(Parent_Item__c, Item__c, Secondary_Unique_Key__c)`**\n— the legacy `Assembly__c.Tree_Unique__c` with the parent *revision* swapped for the parent\n*item*. **Not** on `Assembly_CI__c.Edge_Key__c`.\n\nThis is the load-bearing decision of the whole feature. When a parent item revs, Propel\nclones its entire BOM into new `Assembly__c` rows with new ids — so a branch that claimed a\nline under rev-1 holds a line id that does not exist under rev-2. A join on `Edge_Key__c`\nwould orphan every claimed edge and re-add every upstream line **on every single pull**. The\nparent item does not move when its revision does, which is exactly what lets this key survive\nthe clone. `Edge_Key__c` still identifies the edge *for display*; it just is not the join key.\n\n`Secondary_Unique_Key__c` rather than `Find_Number__c` because find-number uniqueness is org\nconfiguration, and a key built on it would give two orgs with identical data different diffs.\n\n## The two sides are deliberately asymmetric\n\n- **current** — the branch resolved at the accepted T_R, *with* its own deltas overlaid.\n- **candidate** — the **raw** upstream walk at the candidate T_R, with **no overlay at all**.\n\nOverlaying the branch onto the candidate side would match nothing (the deltas are keyed on\nline ids that do not exist under the new root) and would append every delta as an unmatched\nlocal edge — which **resurrects the orphans**, correlating a claim on a removed line with the\nbranch's own edge so `override-orphaned` is never raised. That entry is the only required\ndecision in the entire feature; silently losing it would make a commit that should block\nsucceed.\n\n## Entry kinds\n\n| kind | decision | availableActions | Meaning |\n|---|---|---|---|\n| `source-version-advance` | informational | — | The root item revision advances; nothing structural beneath it changed. |\n| `member-version-advance` | informational | — | An edge's child resolves to a newer released revision because T_R moved. |\n| `member-added` | informational | — | The candidate adds an edge the branch has no native edge on. Enters automatically. |\n| `member-removed` | informational | — | The candidate removes an edge the branch never claimed or replaced. Applies automatically. |\n| `override-retained` | informational | — | The branch's override still differs from upstream; the branch wins and upstream is suppressed. `retargeted` distinguishes a suppressed **field value** from a suppressed **re-target**. |\n| `override-superseded` | informational | — | The branch's override now *matches* what the candidate would natively produce. |\n| `override-orphaned` | **required** | `convert-to-native`, `remove` | The candidate removes an edge the branch **claimed or replaced**. **Blocks the commit.** |\n| `member-add-collision` | informational | — | The candidate adds an edge whose correlation key coincides with a branch-**native** edge. The branch's content wins automatically. |\n\n### Why a revision advance is never a decision\n\nA revision is not an independently assertable value. Once you accept that the *line* exists,\nwhich revision it resolves to is a deterministic output of the as-of traversal against T_R —\nthere is no alternative to offer. The only way to freeze a revision is `claim`, a separate\nand heavier operation that takes ownership of the whole edge.\n\n### Why upstream re-pointing an edge at a *different item* is two entries\n\nThe correlation key includes the child item, so it never correlates as one matched pair. It\ndecomposes into an independent `member-removed` (or `override-orphaned`) and an independent\n`member-added`. `retargeted: true` therefore means a different child **revision**, not a\ndifferent child item.\n\n## Truncation\n\n`entriesLimit` caps how many **informational** entries come back. **`required` entries are\nnever truncated** — they block the commit, so hiding one would silently conceal a blocker.\n`summary` always reports the *untruncated* totals, and `diffFingerprint` always covers the\ncomplete diff, so a truncated response is still safe to commit from.\n\nThis call is pure and deterministic, so retrieving more needs no cursor: re-issue with a\nlarger `entriesLimit` and get back a longer, stable prefix of the same diff.\n\n## Access\n\n**Gated on write, not read.** A read-only user is rejected before a pull is even previewed —\nthe same `Branch_Source_CI__c` update grant `pull` itself requires.\n",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/SourceId"
+          },
+          {
+            "name": "candidateRootRevisionId",
+            "in": "query",
+            "required": false,
+            "description": "The released `Item_Revision__c` of the source's root item to preview accepting. When\nomitted, defaults to that item's **latest released revision**.\n\nMust belong to the same root item the source already references, must be Released (and\nnot Cancelled or Expired — the same test that applies when an MBOM is first created), and\nmust not resolve to a timestamp at or earlier than the source's current T_R.\n",
+            "schema": {
+              "$ref": "#/components/schemas/SalesforceId"
+            }
+          },
+          {
+            "$ref": "#/components/parameters/EntriesLimit"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The computed diff, returned bare. Also returned, with `hasChanges: false` and no entries,\nwhen the branch is already current.\n",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PullPreview"
+                },
+                "examples": {
+                  "changesPending": {
+                    "summary": "Assy-100 rev-1 → rev-2, one blocking orphan",
+                    "$ref": "#/components/examples/PullPreviewWithChanges"
+                  },
+                  "alreadyCurrent": {
+                    "summary": "Branch already on the newest released revision",
+                    "$ref": "#/components/examples/PullPreviewNoChanges"
+                  },
+                  "truncated": {
+                    "summary": "Informational entries capped; the required one survives",
+                    "$ref": "#/components/examples/PullPreviewTruncated"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`INVALID_REQUEST` — `entriesLimit` was not a positive integer. Present-but-unusable is a\n400 rather than a silent fallback to the default.\n",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RestError"
+                },
+                "examples": {
+                  "badLimit": {
+                    "value": {
+                      "code": "INVALID_REQUEST",
+                      "message": "That request could not be read. Check that the body is valid JSON and that every required value is supplied. (entriesLimit 0)"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "description": "`NOT_FOUND` — the source, or `candidateRootRevisionId`, does not exist.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RestError"
+                },
+                "examples": {
+                  "notASource": {
+                    "value": {
+                      "code": "NOT_FOUND",
+                      "message": "That record does not exist, or you do not have access to it. (a1Bg8000000AbCdEAK is not a Branch_Source_CI__c)"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "409": {
+            "$ref": "#/components/responses/PullConflictPreview"
+          },
+          "422": {
+            "$ref": "#/components/responses/PullUnprocessable"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    },
+    "/mbom/sources/{sourceId}/pull": {
+      "post": {
+        "tags": [
+          "Pull"
+        ],
+        "operationId": "commitMbomPull",
+        "summary": "Commit a previewed pull, advancing T_R",
+        "description": "Accepts a newer eBOM root revision into the branch: appends a new `Branch_Source_CI_Rev__c`\nadvancing T_R, advances the source's root pointer, and applies the caller's\n`override-orphaned` dispositions — **all under one savepoint**.\n\nReturns **`201 Created`**, not 200: a new acceptance record genuinely exists.\n\n## The diff is never trusted from the client\n\nThis endpoint **re-resolves the same diff server-side**, through the same code path the\npreview used, and answers `STALE_REVISION` the moment the re-resolved `diffFingerprint`\ndisagrees with what you echoed back, or an `entryId` in `decisions[]` no longer names an\nentry in it. Re-preview and resubmit.\n\nA useful side effect: every preview-time failure mode (`NOT_RELEASED`,\n`CANDIDATE_ROOT_MISMATCH`, `CANDIDATE_NOT_NEWER`, `CYCLE_DETECTED`, `NOT_FOUND`) applies here\nfor free — nothing in the commit path re-implements them.\n\n## Decisions\n\n| Situation | Result |\n|---|---|\n| An `override-orphaned` entry with **no** decision | `409 DISPOSITION_REQUIRED` — the whole commit is rejected. There is no default-accept tier. |\n| A decision naming any **other** kind | `400 INVALID_REQUEST` — no other kind is ever actionable. |\n| An unrecognised `action` | `400 INVALID_REQUEST`. |\n\n| action | Effect |\n|---|---|\n| `convert-to-native` | Severs the provenance link, keeping the branch-owned content, which then resolves on the **branch** clock. Runs through the ordinary `convert-to-native` delta operation — every invariant that batch enforces applies unchanged. |\n| `remove` | Appends an **exclude** delta (a deletion marker). **Nothing is hard-deleted.** |\n\n## Override reconciliation: reported, never persisted\n\nFor every existing claimed/replaced field, the commit compares the override's current value\nagainst what the candidate traversal would natively produce:\n\n- **Differs** → reported as `override-retained` / **reaffirmed**. It stays active and\n  continues to govern future pulls. **Nothing new is persisted** — the comparison is\n  reconstructed from the accepted source version on every pull, so a \"reaffirmation\" record\n  would change no rendered value.\n- **Matches** → reported as `override-superseded`. Also **never deleted and never written**.\n  Retiring it would mean a branch that once happened to agree with upstream would silently\n  start accepting upstream changes from then on.\n\n`Edge_Key__c` and `Alias__c` are likewise **never re-stamped**. They keep meaning \"the\nupstream line this edge was originally minted against\", independent of the correlation key a\npull actually joins on.\n\n## Atomicity\n\nOne outer savepoint around both the disposition batch and the acceptance insert, rolled back\non any exception from either. A failure part way leaves the prior accepted revision and T_R\nin place, with no orphaned claim, exclude or override-status records.\n\n## The already-current commit\n\nA commit submitted when the candidate equals the currently-accepted root **still succeeds**:\nit appends a new acceptance (advancing `Accepted_At__c` with the same `Source_TimePoint__c`)\nand returns `applied: []`. Same reading the preview takes of the read side.\n\n## What a pull leaves alone\n\nBranch-**native** content — anything with no upstream provenance — is entirely unaffected.\n\n## Access\n\nRequires **create** on `Branch_Source_CI_Rev__c`, `Branch_Member__c`, `CI__c`, `CI_Rev__c`,\n`Assembly_CI__c` and `Assembly_CI_Rev__c`, **and edit** on `Branch_Source_CI__c`,\n`Assembly_CI__c` and `CI_Rev__c`. Both gates run **before the body is read**.\n",
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/SourceId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PullCommitRequest"
+              },
+              "examples": {
+                "withDisposition": {
+                  "summary": "Keep an orphaned claim as branch-owned content",
+                  "value": {
+                    "candidateRootRevisionId": "a0Ag8000000Ab02EAC",
+                    "diffFingerprint": "sha256:9f2c41ab7e08d3b6",
+                    "decisions": [
+                      {
+                        "entryId": "f4880c6b3e1a9d75",
+                        "action": "convert-to-native"
+                      }
+                    ]
+                  }
+                },
+                "removeOrphan": {
+                  "summary": "Let the orphaned claim go",
+                  "value": {
+                    "candidateRootRevisionId": "a0Ag8000000Ab02EAC",
+                    "diffFingerprint": "sha256:9f2c41ab7e08d3b6",
+                    "decisions": [
+                      {
+                        "entryId": "f4880c6b3e1a9d75",
+                        "action": "remove"
+                      }
+                    ]
+                  }
+                },
+                "noDecisions": {
+                  "summary": "A diff with no required entries",
+                  "value": {
+                    "candidateRootRevisionId": "a0Ag8000000Ab02EAC",
+                    "diffFingerprint": "sha256:1b7e3390cc02af41",
+                    "decisions": []
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "The pull was committed. A new `Branch_Source_CI_Rev__c` now exists.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PullCommitResult"
+                },
+                "examples": {
+                  "committed": {
+                    "$ref": "#/components/examples/PullCommitCommitted"
+                  },
+                  "alreadyCurrent": {
+                    "summary": "Committing the revision already accepted",
+                    "$ref": "#/components/examples/PullCommitAlreadyCurrent"
+                  }
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`INVALID_REQUEST` — the body could not be read; a decision names an entry that is not\n`override-orphaned`; or `action` is not one of `convert-to-native` / `remove`.\n",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RestError"
+                },
+                "examples": {
+                  "notActionable": {
+                    "value": {
+                      "code": "INVALID_REQUEST",
+                      "message": "That request could not be read. Check that the body is valid JSON and that every required value is supplied. (entryId b7204de9a1c6f358 is member-added, which is never actionable)"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "description": "`NOT_FOUND` — the source, or the candidate revision, does not exist.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RestError"
+                }
+              }
+            }
+          },
+          "409": {
+            "$ref": "#/components/responses/PullConflictCommit"
+          },
+          "422": {
+            "$ref": "#/components/responses/PullUnprocessable"
+          },
+          "500": {
+            "$ref": "#/components/responses/InternalError"
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "sessionToken": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Standard Salesforce OAuth 2.0 access token or session id, sent as\n`Authorization: Bearer <token>`.\n"
+      }
+    },
+    "parameters": {
+      "BranchId": {
+        "name": "branchId",
+        "in": "path",
+        "required": true,
+        "description": "Id of the `Branch__c`. Returned as `branchId` from `POST /mbom/mboms`.\n\nA malformed id, or a well-formed id of the wrong object, is a **404** — not a 500 and not a\n403. The URI is what names the resource, so a path naming nothing is a path to nothing, and\nthe two tree endpoints therefore cannot be confused for each other by a caller that swaps a\nbranch id for a source id.\n",
+        "schema": {
+          "$ref": "#/components/schemas/SalesforceId"
+        }
+      },
+      "SourceId": {
+        "name": "sourceId",
+        "in": "path",
+        "required": true,
+        "description": "Id of the `Branch_Source_CI__c`. Returned as **`branchSourceCiId`** from `POST /mbom/mboms`.\n\nIn Phase 1 a branch has exactly one source, of `Source_Type__c = 'Ebom'`. The owning branch is\nreached through `Branch_Source_CI__c.Downstream_Branch__c`, which is why there is no separate\n`branchId` segment on these paths.\n",
+        "schema": {
+          "$ref": "#/components/schemas/SalesforceId"
+        }
+      },
+      "BaselineId": {
+        "name": "baselineId",
+        "in": "path",
+        "required": true,
+        "description": "Id of the `Baseline__c`, returned from the cut.",
+        "schema": {
+          "$ref": "#/components/schemas/SalesforceId"
+        }
+      },
+      "AsOf": {
+        "name": "asOf",
+        "in": "query",
+        "required": false,
+        "description": "The **branch** clock for this read. Defaults to the server clock when omitted; a future value\nis `ASOF_IN_FUTURE` (400).\n\nGoverns the branch's own deltas, local content and substitutes. It does **not** govern\ninherited content, which always resolves at T_R — that is the two-clock model, and passing\n`asOf` to the inherited traversal is the single change that would quietly make a pinned MBOM\nfloat.\n\nAccepts ISO-8601 (`2026-02-01T00:00:00Z`, `2026-02-01T00:00:00+05:30`) and the\nspace-separated Apex form (`2026-02-01 03:04:05`, interpreted as GMT). A `+` offset is\nrepaired server-side after query-string decoding turns it into a space, so a legal ISO offset\ndoes not fail in transport.\n",
+        "schema": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "examples": {
+          "iso": {
+            "value": "2026-02-01T00:00:00Z"
+          }
+        }
+      },
+      "Flat": {
+        "name": "flat",
+        "in": "query",
+        "required": false,
+        "description": "Response shape. **Flat is the default, and only an explicit `flat=false` nests.**\n\nAnything unrecognised (`flat=0`, `flat=no`) falls back to flat rather than raising — partly\nbecause `Boolean.valueOf('0')` is `false` and the obvious implementation would *nest* for\n`flat=0`, the opposite of what that caller asked for, and partly because a flat response\ncarries `parentItemId` on every row and is therefore losslessly re-nestable by the client.\n\nNot accepted by `GET /mbom/sources/{sourceId}/tree` — silently ignored there, so one\nparameter set can be sent to both tree reads.\n",
+        "schema": {
+          "type": "boolean",
+          "default": true
+        }
+      },
+      "EntriesLimit": {
+        "name": "entriesLimit",
+        "in": "query",
+        "required": false,
+        "description": "Caps how many **`informational`** entries the preview returns. `required` entries are always\nreturned in full regardless of this cap.\n\nMust be a positive integer; anything else is `400 INVALID_REQUEST` rather than a silent\nfallback to the default.\n",
+        "schema": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 200
+        }
+      }
+    },
+    "schemas": {
+      "SalesforceId": {
+        "type": "string",
+        "pattern": "^[a-zA-Z0-9]{15}([a-zA-Z0-9]{3})?$",
+        "description": "A 15- or 18-character Salesforce record Id.",
+        "examples": [
+          "a1Bg8000000AbCdEAK"
+        ]
+      },
+      "Provenance": {
+        "type": "string",
+        "description": "Where a rendered row comes from. **Derived at read time, never stored** — `claimed` and\n`local` differ by exactly one field on the winning delta row.\n\n- `inherited` — supplied by the source; no branch-owned record exists.\n- `claimed` — the branch took copy-on-write ownership of a source-supplied member.\n- `local` — branch-owned with no upstream provenance (\"native\").\n\nThere is no `excluded` value: exclusion is tracked as a separate boolean alongside\nprovenance, never as a fourth value of it.\n",
+        "enum": [
+          "inherited",
+          "claimed",
+          "local"
+        ]
+      },
+      "GoverningClock": {
+        "type": "string",
+        "description": "Which clock resolves this member. `source` is the pinned T_R (it only advances when a pull is\ncommitted); `branch` is the caller's `asOf`. Both are legitimately in play at once, which is\nwhat makes mixed revisions of one item possible.\n",
+        "enum": [
+          "source",
+          "branch"
+        ]
+      },
+      "CiType": {
+        "type": "string",
+        "description": "Discriminator for the configuration-item type, and therefore for the shape of\n`MemberState.detail`. `assembly-edge` is the only member type implemented; this enum is the\nextension point where a future CI type is added.\n\n`source` appears only on the root-level `source-version-advance` entry's `target` (and on the\nroot segment of every `path[]`), because that entry is about the source's root **item**\nrather than an edge beneath it: it has no parent, no quantity and no find number.\n",
+        "enum": [
+          "assembly-edge",
+          "source"
+        ]
+      },
+      "MbomCreateRequest": {
+        "type": "object",
+        "required": [
+          "rootItemRevisionId",
+          "mbomName",
+          "branchLabel"
+        ],
+        "properties": {
+          "rootItemRevisionId": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SalesforceId"
+              }
+            ],
+            "description": "The **released** `Item_Revision__c` the MBOM is built over. Its `Released_Date_Time__c`\nbecomes T_R.\n"
+          },
+          "mbomName": {
+            "type": "string",
+            "maxLength": 80,
+            "description": "`MBOM__c.Name`. Required, and a blank value is refused with `INVALID_REQUEST` rather than\nbeing left to DML — a custom object's Text `Name` is unenforced by the API, so a blank\none would silently produce an MBOM named after its own record id that nobody can search\nfor.\n",
+            "examples": [
+              "Assy-100 Manufacturing BOM"
+            ]
+          },
+          "branchLabel": {
+            "type": "string",
+            "maxLength": 80,
+            "description": "Lands on **both** `Branch__c.Name` (what every Salesforce list view and lookup shows) and\n`Branch__c.Label__c`. Bounded by the shorter of the two fields.\n",
+            "examples": [
+              "MBOM-GDL"
+            ]
+          }
+        }
+      },
+      "MbomCreateResult": {
+        "type": "object",
+        "required": [
+          "mbomId",
+          "branchId",
+          "branchSourceCiId",
+          "branchSourceCiRevId"
+        ],
+        "properties": {
+          "mbomId": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SalesforceId"
+              }
+            ],
+            "description": "The `MBOM__c` header."
+          },
+          "branchId": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SalesforceId"
+              }
+            ],
+            "description": "The initial `Branch__c`. Use it on every `/branches/...` endpoint."
+          },
+          "branchSourceCiId": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SalesforceId"
+              }
+            ],
+            "description": "The `Branch_Source_CI__c` linking the branch to its eBOM. **This is the `sourceId`** on\nevery `/sources/...` endpoint.\n"
+          },
+          "branchSourceCiRevId": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SalesforceId"
+              }
+            ],
+            "description": "The first acceptance, carrying T_R in `Source_TimePoint__c`."
+          }
+        }
+      },
+      "MbomTree": {
+        "type": "object",
+        "description": "The response body of **both** tree reads — a branch's effective structure, and a source's structure on its own.",
+        "required": [
+          "rootRevisionId",
+          "rows",
+          "warnings"
+        ],
+        "properties": {
+          "asOf": {
+            "type": "string",
+            "format": "date-time",
+            "description": "The timepoint this tree was resolved at, echoed so the response is self-describing. Present even when the caller sent none."
+          },
+          "rootRevisionId": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SalesforceId"
+              }
+            ],
+            "description": "The root `Item_Revision__c` the structure hangs from."
+          },
+          "sourceTimePoint": {
+            "type": "string",
+            "format": "date-time",
+            "description": "**T_R** — the source timepoint inherited rows are pinned at."
+          },
+          "rows": {
+            "type": "array",
+            "description": "Always present; empty rather than absent.",
+            "items": {
+              "$ref": "#/components/schemas/TreeRow"
+            }
+          },
+          "warnings": {
+            "type": "array",
+            "description": "Always present; empty rather than absent.",
+            "items": {
+              "$ref": "#/components/schemas/TreeWarning"
+            }
+          }
+        }
+      },
+      "TreeRow": {
+        "type": "object",
+        "description": "One row of a resolved tree. The same shape serves both response shapes: in the **nested**\nshape `childRows` holds the subtree and `parentItemId` is still populated; in the **flat**\nshape every row is a sibling and `childRows` is empty — so a client can rebuild the tree from\na flat response without a second request.\n",
+        "required": [
+          "provenance",
+          "childRows"
+        ],
+        "properties": {
+          "edgeId": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SalesforceId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The `Assembly_CI__c` edge. **Null for a purely inherited row** that no branch has claimed. Suppressed on baseline rows."
+          },
+          "edgeKey": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The legacy `Assembly__c` line id, or a synthetic key for branch-local content:\n`local-{branchId}-{parentItemId}-{childItemId}` for an `add`, or\n`replaces-{branchId}-{supersededEdgeKey}` for a substitute. Suppressed on baseline rows.\n",
+            "examples": [
+              "a0Bg8000000Ab10EAC"
+            ]
+          },
+          "parentItemId": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SalesforceId"
+              }
+            ],
+            "description": "The owning **item**, not its revision. Populated in both shapes."
+          },
+          "childItemId": {
+            "$ref": "#/components/schemas/SalesforceId"
+          },
+          "childItemRevisionId": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SalesforceId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The revision this row resolves to at `governingTimestamp`."
+          },
+          "provenance": {
+            "$ref": "#/components/schemas/Provenance"
+          },
+          "governingTimestamp": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "T_R for an inherited row, `asOf` for a local or substituted one. **Null on baseline rows**, where it is suppressed."
+          },
+          "sourceId": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SalesforceId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The `Branch_Source_CI__c` this row came from. Null for a branch-local row."
+          },
+          "isClaimed": {
+            "type": "boolean"
+          },
+          "isExcluded": {
+            "type": "boolean",
+            "description": "True for a tombstoned row. **Rendered by the branch tree read** so the editor can see\nwhat was removed; **filtered out** by the baseline read.\n"
+          },
+          "isReplaced": {
+            "type": "boolean",
+            "description": "True when this row stands in for another (`replace`). Populated on baseline rows too — a null would render a substituted part identically to an ordinary one."
+          },
+          "isEditable": {
+            "type": "boolean",
+            "description": "False on any row inside the subtree of a locally added or substituted assembly. Every\ndelta op refuses those rows, so a UI offering an action on one is offering an action the\nAPI will reject.\n"
+          },
+          "quantity": {
+            "type": "number",
+            "examples": [
+              2
+            ]
+          },
+          "findNumber": {
+            "type": "number",
+            "description": "A Salesforce `Number` field, never a string.",
+            "examples": [
+              20
+            ]
+          },
+          "childRows": {
+            "type": "array",
+            "description": "Populated in the nested shape only; **empty, never null**, in the flat shape.",
+            "items": {
+              "$ref": "#/components/schemas/TreeRow"
+            }
+          }
+        }
+      },
+      "TreeWarning": {
+        "type": "object",
+        "description": "A condition worth telling the user about that does **not** block the read. Shared by the tree\nreads, the baseline read and the pull preview.\n\nThe key is **`warningCode`**, matching the existing mBOM convention — never `code`, which\nthis API reserves for the error body.\n",
+        "required": [
+          "warningCode",
+          "message"
+        ],
+        "properties": {
+          "warningCode": {
+            "type": "string",
+            "enum": [
+              "MIXED_REVISION",
+              "BASELINE_COUNT_DRIFT",
+              "BASELINE_PROVENANCE_DRIFT",
+              "NESTED_CYCLE_PRUNED"
+            ],
+            "description": "- `MIXED_REVISION` — one item rendered at more than one revision in the same tree,\n  because two clocks are in play. Legal and expected; warned, never blocked.\n- `BASELINE_COUNT_DRIFT` — a baseline re-derived a different **row count** than its cut\n  recorded.\n- `BASELINE_PROVENANCE_DRIFT` — a baseline re-derived a different **claimed count**, the\n  row count unchanged. The signature of a `convert-to-native` after the fact.\n- `NESTED_CYCLE_PRUNED` — the subtree of a locally added assembly was dropped because\n  walking it reached a cycle. A warning rather than an error because a local child floats\n  at the read clock, so a structure that was acyclic when the `add` was accepted can\n  become cyclic when that item is released again — and a read must not fail because\n  someone else released an eBOM revision.\n"
+          },
+          "message": {
+            "type": "string",
+            "description": "Human-readable, from a Custom Label. Translated; never parse it."
+          },
+          "itemId": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SalesforceId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Present on `MIXED_REVISION` — the item rendered at more than one revision."
+          },
+          "itemRevisionIds": {
+            "type": "array",
+            "description": "Present on `MIXED_REVISION` — the revisions in play.",
+            "items": {
+              "$ref": "#/components/schemas/SalesforceId"
+            }
+          },
+          "governingTimestamps": {
+            "type": "array",
+            "description": "Present on `MIXED_REVISION` — the clock that governed each, positionally aligned with `itemRevisionIds`.",
+            "items": {
+              "type": "string",
+              "format": "date-time"
+            }
+          }
+        }
+      },
+      "DeltaBatchRequest": {
+        "type": "object",
+        "required": [
+          "operations"
+        ],
+        "properties": {
+          "atomic": {
+            "type": "boolean",
+            "default": true,
+            "description": "All-or-nothing when true. **A null is treated as `true`** — the safer contract wins the\ndefault, so a caller who did not think about the failure mode gets all-or-nothing rather\nthan a half-applied branch.\n"
+          },
+          "asOf": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Resolves the branch **once** for the whole batch; every operation then validates against\nthat one snapshot, so a batch cannot see the tree shift underneath it halfway through.\n\nDefaults to the server clock; never accepted in the future. A **past** value means\n\"validate against the configuration as it stood then\" — it never dates the write. Several\noperations refuse a past value outright; see the endpoint description.\n"
+          },
+          "operations": {
+            "type": "array",
+            "maxItems": 200,
+            "description": "At most 200 — beyond that, `BATCH_TOO_LARGE` (413), refused before anything is resolved.",
+            "items": {
+              "$ref": "#/components/schemas/DeltaOperation"
+            }
+          }
+        }
+      },
+      "DeltaOperation": {
+        "type": "object",
+        "description": "One operation. The shape is a **union across all eight operations** rather than a class per\noperation, because the batch arrives as one JSON array. `op` selects which fields are\nmeaningful, and each operation validates its own required fields — an `add` with no\n`parentItemId` is that operation's error to raise, not a deserialisation failure.\n\nUnknown keys are **silently ignored** (the deserialiser is lenient), so a *mistyped* field\nname reads as a null id. `rootItemRevisionld` with an `l` will answer `NOT_FOUND`, not a\nschema error.\n",
+        "required": [
+          "op"
+        ],
+        "properties": {
+          "op": {
+            "type": "string",
+            "enum": [
+              "claim",
+              "update",
+              "add",
+              "exclude",
+              "restore",
+              "replace",
+              "revert",
+              "convert-to-native"
+            ],
+            "description": "Matched case-insensitively. An unknown value is a **per-operation** validation failure (`INVALID_REQUEST`), not an exception — one mistyped name in a batch of 200 must not read as a server fault."
+          },
+          "clientRef": {
+            "type": "string",
+            "description": "Opaque caller token, echoed verbatim on this operation's result. Set it to correlate\nresults with a UI row; the server never interprets it. Correlating on order alone breaks\nthe moment anything is reordered, and on `clientRef` alone breaks when you do not set it\n— so `index` is stated too.\n",
+            "examples": [
+              "row-motor"
+            ]
+          },
+          "ebomAssemblyId": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SalesforceId"
+              }
+            ],
+            "description": "The legacy `Assembly__c` line. Used by: `claim`, `exclude`, `update` (the `CLAIM_REQUIRED` path), `revert` (the second-revert path)."
+          },
+          "assemblyCiId": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SalesforceId"
+              }
+            ],
+            "description": "An existing `Assembly_CI__c` edge to `update`. The ordinary form."
+          },
+          "ciId": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SalesforceId"
+              }
+            ],
+            "description": "A `CI__c` to `exclude`, `restore`, `revert` or `convert-to-native`."
+          },
+          "parentItemId": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SalesforceId"
+              }
+            ],
+            "description": "`add` only — the parent **item** (never a revision)."
+          },
+          "childItemId": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SalesforceId"
+              }
+            ],
+            "description": "`add` only — the part being added."
+          },
+          "replacedEbomAssemblyId": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SalesforceId"
+              }
+            ],
+            "description": "`replace` only — the legacy line being superseded. Must be an eBOM-derived row; a branch-local row cannot be replaced."
+          },
+          "newChildItemId": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SalesforceId"
+              }
+            ],
+            "description": "`replace` only — the substitute part. Its revision **floats** at the read clock rather than being pinned."
+          },
+          "quantity": {
+            "type": "number",
+            "description": "Used by `update`, `add`, `replace`."
+          },
+          "findNumber": {
+            "type": "number",
+            "description": "Used by `update`, `add`, `replace`."
+          }
+        }
+      },
+      "DeltaBatchResponse": {
+        "type": "object",
+        "required": [
+          "branchId",
+          "atomic",
+          "asOf",
+          "applied",
+          "failed",
+          "results"
+        ],
+        "properties": {
+          "branchId": {
+            "$ref": "#/components/schemas/SalesforceId"
+          },
+          "atomic": {
+            "type": "boolean",
+            "description": "Echoed, so the response says which contract it was written under."
+          },
+          "asOf": {
+            "type": "string",
+            "format": "date-time",
+            "description": "The timepoint the whole batch resolved against. It matters more here than on a read — the\ncaller may have sent none at all, and this is the only way to learn which server clock\nthe batch actually used.\n"
+          },
+          "applied": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Count of operations that succeeded. Stated so a client can act on the summary without walking `results`."
+          },
+          "failed": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "results": {
+            "type": "array",
+            "description": "One entry per requested operation, **in request order**, success or failure.",
+            "items": {
+              "$ref": "#/components/schemas/DeltaResult"
+            }
+          }
+        }
+      },
+      "DeltaResult": {
+        "type": "object",
+        "required": [
+          "index",
+          "op",
+          "success"
+        ],
+        "properties": {
+          "index": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Zero-based position of this operation in the request."
+          },
+          "clientRef": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Your own token, echoed verbatim. Null when you set none."
+          },
+          "op": {
+            "type": "string"
+          },
+          "success": {
+            "type": "boolean"
+          },
+          "errorCode": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "An `MbomErrorCode` name on failure, null on success. Note the key is **`errorCode`**\nhere, inside a per-operation result — the top-level *error body* uses `code`.\n"
+          },
+          "message": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Human-readable, from a Custom Label. Never parsed."
+          },
+          "ciId": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SalesforceId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The `CI__c` this operation created or acted on."
+          },
+          "assemblyCiId": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SalesforceId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The `Assembly_CI__c` edge this operation created or acted on."
+          },
+          "forked": {
+            "oneOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "True when an `update` had to allocate a **new** `CI_Rev__c` rather than edit one in\nplace, because a baseline had frozen it. Surfaced because your next read will show a\nrevision number you did not ask for.\n\n**Deliberately not defaulted.** Only `update` forks. `null` means *not applicable*\n(there was nothing to fork on a `claim` or an `exclude`); `false` means *this write could\nhave forked and did not*. A client must treat them differently, so the field must be able\nto say both.\n"
+          }
+        }
+      },
+      "BaselineCutRequest": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string",
+            "maxLength": 80,
+            "description": "`Baseline__c.Name`. Over 80 characters is a 400, not a 500.",
+            "examples": [
+              "Pilot build 1"
+            ]
+          },
+          "cutDateTime": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Optional; defaults to the server clock. Becomes `resolutionTimePoint` in the response.\n**Never accepted in the future** (`ASOF_IN_FUTURE`) — a baseline of content that does not\nexist yet is not a baseline.\n\nThe request keeps MVP-30030's caller-facing name; the response returns the two timestamps\nthat name splits into.\n"
+          }
+        }
+      },
+      "Baseline": {
+        "type": "object",
+        "required": [
+          "baselineId",
+          "resolutionTimePoint",
+          "takenAt",
+          "memberCount"
+        ],
+        "properties": {
+          "baselineId": {
+            "$ref": "#/components/schemas/SalesforceId"
+          },
+          "label": {
+            "type": "string"
+          },
+          "resolutionTimePoint": {
+            "type": "string",
+            "format": "date-time",
+            "description": "What the baseline resolves against. **Stamped once, never re-derived.**"
+          },
+          "takenAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "The wall-clock moment of the cut. Kept apart from `resolutionTimePoint` so a clock correction cannot change what a baseline resolves to."
+          },
+          "memberCount": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "How many rows the cut resolved, **excluding tombstones**. This is the count of what the\nconfiguration *contains*, not the count of rows the tree endpoint renders. Also the\ncanary behind `BASELINE_COUNT_DRIFT`.\n"
+          }
+        }
+      },
+      "BaselineTree": {
+        "type": "object",
+        "required": [
+          "baselineId",
+          "resolutionTimePoint",
+          "rows",
+          "warnings"
+        ],
+        "properties": {
+          "baselineId": {
+            "$ref": "#/components/schemas/SalesforceId"
+          },
+          "label": {
+            "type": "string"
+          },
+          "resolutionTimePoint": {
+            "type": "string",
+            "format": "date-time",
+            "description": "What the baseline resolved against when it was cut."
+          },
+          "rows": {
+            "type": "array",
+            "description": "The re-resolved rows, reusing the tree shape so clients render both the same way — with\n`edgeId`, `edgeKey` and `governingTimestamp` suppressed, and excluded rows filtered out.\n",
+            "items": {
+              "$ref": "#/components/schemas/TreeRow"
+            }
+          },
+          "warnings": {
+            "type": "array",
+            "description": "**Drift only** — `BASELINE_COUNT_DRIFT` and `BASELINE_PROVENANCE_DRIFT`. Mixed-revision\nwarnings from the underlying resolution are deliberately not forwarded: they are advice\nabout a branch someone is still editing, and a baseline is a record of a decision already\ntaken.\n",
+            "items": {
+              "$ref": "#/components/schemas/TreeWarning"
+            }
+          }
+        }
+      },
+      "EntryKind": {
+        "type": "string",
+        "description": "What kind of change the diff found. Deliberately framed in generic framework terms (source /\nmember / override) rather than MBOM terms, so the taxonomy survives a second\nconfiguration-item type. See the preview endpoint's table for the full catalog.\n",
+        "enum": [
+          "source-version-advance",
+          "member-version-advance",
+          "member-added",
+          "member-removed",
+          "override-retained",
+          "override-superseded",
+          "override-orphaned",
+          "member-add-collision"
+        ]
+      },
+      "Decision": {
+        "type": "string",
+        "description": "Whether this entry needs the caller to decide anything. **Only two values** — there is no\nthird, optional-but-defaultable tier. The only decision point anywhere in a pull is disposing\nan orphaned override; everything else, including new, removed and colliding upstream content,\napplies automatically.\n",
+        "enum": [
+          "informational",
+          "required"
+        ]
+      },
+      "Action": {
+        "type": "string",
+        "description": "An action the commit endpoint can apply. Both values only ever apply to `override-orphaned`;\na decision naming any other kind is rejected with `INVALID_REQUEST`.\n\n- `convert-to-native` — sever the override's provenance link, keeping its branch-owned\n  content, which then resolves on the branch clock. (\"Native\" is the framework's existing\n  term for branch-owned content with no upstream provenance.)\n- `remove` — append a deletion marker (an exclude delta). Nothing is hard-deleted.\n",
+        "enum": [
+          "convert-to-native",
+          "remove"
+        ]
+      },
+      "PullPreview": {
+        "type": "object",
+        "required": [
+          "sourceId",
+          "branchId",
+          "sourceType",
+          "currentSourceVersion",
+          "hasChanges",
+          "summary",
+          "entries",
+          "warnings",
+          "truncated",
+          "entriesLimit",
+          "diffFingerprint",
+          "generatedAt"
+        ],
+        "properties": {
+          "sourceId": {
+            "$ref": "#/components/schemas/SalesforceId"
+          },
+          "branchId": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SalesforceId"
+              }
+            ],
+            "description": "The owning branch, denormalised for display."
+          },
+          "branchLabel": {
+            "type": "string",
+            "description": "`Branch__c.Label__c`, or `Name` when Label is blank."
+          },
+          "sourceType": {
+            "type": "string",
+            "enum": [
+              "Ebom",
+              "Pull"
+            ],
+            "description": "Only `Ebom` is in scope for Phase 1; `Pull` (branch-to-branch) is reserved."
+          },
+          "currentSourceVersion": {
+            "$ref": "#/components/schemas/SourceVersionRef"
+          },
+          "candidateSourceVersion": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SourceVersionRef"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Absent or null when `hasChanges` is false and no newer revision exists to preview."
+          },
+          "hasChanges": {
+            "type": "boolean",
+            "description": "False when the branch already resolves against the candidate, or there is no newer\nreleased revision. `entries` is empty in that case. **Not an error condition.**\n"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/DiffSummary"
+          },
+          "entries": {
+            "type": "array",
+            "description": "Every difference found, in a stable, deterministic order. Always present; empty rather\nthan absent.\n",
+            "items": {
+              "$ref": "#/components/schemas/DiffEntry"
+            }
+          },
+          "warnings": {
+            "type": "array",
+            "description": "Non-blocking conditions — typically `MIXED_REVISION` about what would render *after* the pull. Always present; empty rather than absent.",
+            "items": {
+              "$ref": "#/components/schemas/TreeWarning"
+            }
+          },
+          "truncated": {
+            "type": "boolean",
+            "description": "True when the **informational** entry set exceeded `entriesLimit` and was trimmed.\nEntries with `decision: required` are never truncated. `summary` still reflects the\nuntrimmed totals.\n"
+          },
+          "entriesLimit": {
+            "type": "integer",
+            "description": "The effective cap applied this call — the query param, or the server default of 200.",
+            "examples": [
+              200
+            ]
+          },
+          "diffFingerprint": {
+            "type": "string",
+            "description": "Opaque `sha256:`-prefixed digest of the inputs and the **complete** resolved entry set\n(not the truncated page). Echo it back on commit; a mismatch means the world moved in\nbetween and fails fast with `STALE_REVISION`.\n\nIt covers a **clock-free** projection of the entries, because a claimed row's\n`governingTimestamp` *is* the read clock — folding it in would make every commit stale on\narrival.\n",
+            "examples": [
+              "sha256:9f2c41ab7e08d3b6"
+            ]
+          },
+          "generatedAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "Server clock at computation time. Informational; **not** a resolution input, and not part of the fingerprint."
+          }
+        }
+      },
+      "SourceVersionRef": {
+        "type": "object",
+        "description": "One version of a source — the accepted eBOM root revision plus the clock that governs\ntraversal beneath it.\n\n> **Known genericity tension.** `rootItemRevisionId` / `rootItemNumber` / `rootRevisionLabel`\n> are PLM-specific: they name an `Item_Revision__c`. Correct for a `Source_Type__c = 'Ebom'`\n> source, the only type in Phase 1 scope. When a second source type is implemented, make this\n> schema a `oneOf` discriminated on the `sourceType` already present on `PullPreview` — an\n> additive change, not a rewrite.\n",
+        "required": [
+          "rootItemRevisionId",
+          "resolutionTimestamp"
+        ],
+        "properties": {
+          "sourceRevisionId": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SalesforceId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The `Branch_Source_CI_Rev__c` recording this acceptance. **Null on `candidateSourceVersion`**, which does not exist until a commit creates it."
+          },
+          "rootItemRevisionId": {
+            "$ref": "#/components/schemas/SalesforceId"
+          },
+          "rootItemNumber": {
+            "type": "string",
+            "examples": [
+              "Assy-100"
+            ]
+          },
+          "rootRevisionLabel": {
+            "type": "string",
+            "examples": [
+              "rev-1"
+            ]
+          },
+          "resolutionTimestamp": {
+            "type": "string",
+            "format": "date-time",
+            "description": "**T_R** — the timestamp the eBOM traversal resolves against. Stamped once at acceptance\nfrom the root revision's release date and read thereafter, never re-derived. Deriving it\nper-read would let a later corrected or backdated approval silently rewrite history.\n"
+          },
+          "acceptedAt": {
+            "oneOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Wall-clock moment the acceptance was committed, kept distinct from `resolutionTimestamp`. Null on `candidateSourceVersion`."
+          }
+        }
+      },
+      "DiffSummary": {
+        "type": "object",
+        "description": "Counts over the **untruncated** entry set, so a caller can render \"N informational, M requiring a decision\" without walking `entries`.",
+        "required": [
+          "total",
+          "informational",
+          "required",
+          "byKind"
+        ],
+        "properties": {
+          "total": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "informational": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "required": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Entries that will block a commit until given an explicit decision. Only `override-orphaned` counts here."
+          },
+          "byKind": {
+            "type": "object",
+            "description": "Count per `EntryKind`, keyed by kind. Kinds with no entries are omitted.",
+            "additionalProperties": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        }
+      },
+      "DiffEntry": {
+        "type": "object",
+        "required": [
+          "entryId",
+          "kind",
+          "decision",
+          "availableActions",
+          "target"
+        ],
+        "properties": {
+          "entryId": {
+            "type": "string",
+            "description": "Stable, opaque handle, passed back to the commit endpoint to attach a decision. A\n**deterministic hash of `kind` plus the correlation key** — never a database Id, never\npositional, never generated — so recomputing the same diff yields the same ids. Treat it\nas opaque; do not parse it.\n",
+            "examples": [
+              "e3f19a4c8b2d6071"
+            ]
+          },
+          "kind": {
+            "$ref": "#/components/schemas/EntryKind"
+          },
+          "decision": {
+            "$ref": "#/components/schemas/Decision"
+          },
+          "availableActions": {
+            "type": "array",
+            "description": "Empty except on `override-orphaned`, whose two dispositions are the only actions this API offers anywhere.",
+            "items": {
+              "$ref": "#/components/schemas/Action"
+            }
+          },
+          "retargeted": {
+            "oneOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "**Present only on `override-retained`; `null` on every other kind** (deliberately not\ndefaulted — a `false` would assert something about a kind for which the question is\nmeaningless).\n\nTrue when the suppressed upstream change was a **re-target**: the candidate would resolve\nthis edge to a different child *revision* than the override pins. False when only field\nvalues (quantity, find number) were suppressed. Lets a caller filter for the\nhigher-stakes case — a branch silently keeping a superseded revision after upstream moved\non — without parsing `message`.\n\nThe child *revision*, not the child *item*: see the endpoint description.\n"
+          },
+          "overrideKind": {
+            "oneOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "claim",
+                  "replace"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Present on `override-*` kinds; null elsewhere. Distinguishes an override created by\n**claiming** an upstream edge from one created by **replacing** it. Both dispose\nidentically; this exists so the UI can explain what is being orphaned.\n"
+          },
+          "message": {
+            "type": "string",
+            "description": "Human-readable, already-localized summary. Never parse it — switch on `kind`."
+          },
+          "target": {
+            "$ref": "#/components/schemas/MemberTarget"
+          },
+          "current": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MemberState"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How the branch renders this member today. **Null for `member-added`.**"
+          },
+          "candidate": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/MemberState"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How it would render after the pull. **Null for `member-removed`**, and for an `override-orphaned` resolved by `remove`."
+          }
+        }
+      },
+      "MemberTarget": {
+        "type": "object",
+        "description": "Identifies what the entry is about, independent of before/after state.",
+        "required": [
+          "ciType",
+          "label"
+        ],
+        "properties": {
+          "ciType": {
+            "$ref": "#/components/schemas/CiType"
+          },
+          "edgeId": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SalesforceId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The `Assembly_CI__c` for this member. Null for purely inherited content, which has no branch-owned record until something claims it."
+          },
+          "edgeKey": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The **display** key — `Assembly_CI__c.Edge_Key__c` / the legacy `Assembly__c` line id.\n**Not** what a pull correlates on: it moves when a parent item revs, which is exactly why\nthe diff cannot join on it.\n"
+          },
+          "label": {
+            "type": "string",
+            "description": "Short display label for the member.",
+            "examples": [
+              "ASM-A"
+            ]
+          },
+          "path": {
+            "type": "array",
+            "description": "Breadcrumb from the root to this member's parent, for UI context.",
+            "items": {
+              "$ref": "#/components/schemas/PathSegment"
+            }
+          }
+        }
+      },
+      "PathSegment": {
+        "type": "object",
+        "description": "One ancestor in a breadcrumb. Same shape as `MemberTarget` minus the path — a segment never nests its own breadcrumb.",
+        "required": [
+          "ciType",
+          "label"
+        ],
+        "properties": {
+          "ciType": {
+            "$ref": "#/components/schemas/CiType"
+          },
+          "label": {
+            "type": "string",
+            "examples": [
+              "Assy-100"
+            ]
+          },
+          "edgeId": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SalesforceId"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "edgeKey": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      },
+      "MemberState": {
+        "type": "object",
+        "description": "A member as resolved at one point in the diff (before or after). The generic fields are framework-level; everything type-specific lives in `detail`.",
+        "required": [
+          "provenance",
+          "governingClock",
+          "detail"
+        ],
+        "properties": {
+          "provenance": {
+            "$ref": "#/components/schemas/Provenance"
+          },
+          "governingClock": {
+            "$ref": "#/components/schemas/GoverningClock"
+          },
+          "governingTimestamp": {
+            "type": "string",
+            "format": "date-time",
+            "description": "The concrete timestamp `governingClock` resolved to."
+          },
+          "detail": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/AssemblyEdgeDetail"
+              }
+            ],
+            "discriminator": {
+              "propertyName": "ciType",
+              "mapping": {
+                "assembly-edge": "#/components/schemas/AssemblyEdgeDetail"
+              }
+            }
+          }
+        }
+      },
+      "AssemblyEdgeDetail": {
+        "type": "object",
+        "description": "**The one MBOM-specific schema.** Everything above this point is reusable framework\nvocabulary; this is the single place assembly/BOM concepts appear. A second\nconfiguration-item type becomes a sibling schema in `MemberState.detail`'s `oneOf` and\nchanges nothing else.\n",
+        "required": [
+          "ciType"
+        ],
+        "properties": {
+          "ciType": {
+            "type": "string",
+            "const": "assembly-edge"
+          },
+          "parentItemId": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SalesforceId"
+              }
+            ],
+            "description": "The owning **item**, not its revision. `Assembly_CI__c` carries no parent-revision lookup\nat all: a local edge's parent item is stable across revision advances while its parent\nrevision is not — and `Edge_Key__c` is unique org-wide, so two branches claiming the same\neBOM line share one row, meaning every field on it must be branch-invariant.\n"
+          },
+          "parentItemNumber": {
+            "type": "string",
+            "examples": [
+              "Assy-100"
+            ]
+          },
+          "childItemId": {
+            "$ref": "#/components/schemas/SalesforceId"
+          },
+          "childItemNumber": {
+            "type": "string",
+            "examples": [
+              "Motor-002"
+            ]
+          },
+          "childItemRevisionId": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SalesforceId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The child revision this edge resolves to at `governingTimestamp`. Null on a tombstone."
+          },
+          "childRevisionLabel": {
+            "type": "string",
+            "examples": [
+              "rev-1"
+            ]
+          },
+          "quantity": {
+            "type": "number",
+            "examples": [
+              4
+            ]
+          },
+          "findNumber": {
+            "type": "number",
+            "description": "A Salesforce `Number` field, never a string.",
+            "examples": [
+              10
+            ]
+          }
+        }
+      },
+      "PullCommitRequest": {
+        "type": "object",
+        "required": [
+          "candidateRootRevisionId",
+          "diffFingerprint"
+        ],
+        "properties": {
+          "candidateRootRevisionId": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SalesforceId"
+              }
+            ],
+            "description": "The released root revision being accepted. Same validation as the preview's query param — and re-validated here, from the re-resolved diff."
+          },
+          "diffFingerprint": {
+            "type": "string",
+            "description": "Echoed back from the preview this commit is acting on. A mismatch against the freshly re-resolved diff fails the whole commit with `STALE_REVISION`.",
+            "examples": [
+              "sha256:9f2c41ab7e08d3b6"
+            ]
+          },
+          "decisions": {
+            "type": "array",
+            "description": "One entry per `override-orphaned` entry from the preview. **Every one must appear**, or\nthe commit is rejected with `DISPOSITION_REQUIRED`; naming any other kind is rejected\nwith `INVALID_REQUEST`. Send `[]` (or omit) when the preview had no required entries.\n",
+            "items": {
+              "type": "object",
+              "required": [
+                "entryId",
+                "action"
+              ],
+              "properties": {
+                "entryId": {
+                  "type": "string",
+                  "description": "An `entryId` from the preview this commit is acting on."
+                },
+                "action": {
+                  "$ref": "#/components/schemas/Action"
+                }
+              }
+            }
+          }
+        }
+      },
+      "PullCommitResult": {
+        "type": "object",
+        "required": [
+          "sourceId",
+          "newSourceRevisionId",
+          "acceptedRootRevisionId",
+          "acceptedAt",
+          "applied"
+        ],
+        "properties": {
+          "sourceId": {
+            "$ref": "#/components/schemas/SalesforceId"
+          },
+          "newSourceRevisionId": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/SalesforceId"
+              }
+            ],
+            "description": "The `Branch_Source_CI_Rev__c` this commit created — an **insert**, never an update."
+          },
+          "acceptedRootRevisionId": {
+            "$ref": "#/components/schemas/SalesforceId"
+          },
+          "acceptedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "applied": {
+            "type": "array",
+            "description": "Every entry that took an explicit decision, plus every `override-retained` and\n`override-superseded` outcome — the set a caller needs to reconcile its held preview\nagainst what actually happened. (Re-previewing immediately after a commit is always\n`hasChanges: false`, so this is the only place to learn it.)\n",
+            "items": {
+              "$ref": "#/components/schemas/AppliedEntry"
+            }
+          }
+        }
+      },
+      "AppliedEntry": {
+        "type": "object",
+        "required": [
+          "entryId",
+          "kind"
+        ],
+        "properties": {
+          "entryId": {
+            "type": "string"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "override-orphaned",
+              "override-retained",
+              "override-superseded"
+            ]
+          },
+          "action": {
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The decided action — `convert-to-native` or `remove` — for an `override-orphaned` entry.\nNull for a kind that took no decision.\n"
+          },
+          "edgeId": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SalesforceId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The branch-owned `Assembly_CI__c` this entry's target names, if any."
+          }
+        }
+      },
+      "RestError": {
+        "type": "object",
+        "description": "The MBOM's error shape. Keyed **`code`**, not the framework's `errorCode`.\n\nA 403 body carries the label **only**: naming the object a caller was just denied would hand\nthem the schema they have no access to. It goes to the debug log instead. A 500 *does* carry\nthe exception type and message — an unmodelled fault has to be diagnosable and its caller is\nour own UI or an integration — but never the stack trace.\n",
+        "required": [
+          "code",
+          "message"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "description": "An `MbomErrorCode` name, or `INTERNAL_ERROR` on a 500. `INTERNAL_ERROR` is deliberately\n**not** in the enum: every value there is a client error by construction, and a code\nexists so a client can branch on it — which it cannot usefully do for a 500.\n",
+            "enum": [
+              "CLAIM_REQUIRED",
+              "ALREADY_CLAIMED",
+              "ALREADY_EXCLUDED",
+              "NOT_SUPPLIED",
+              "NO_OVERRIDE",
+              "HARD_DELETE_BLOCKED",
+              "IMMUTABLE_FIELD",
+              "NOT_RELEASED",
+              "STALE_REVISION",
+              "ALREADY_PRESENT",
+              "CANDIDATE_NOT_NEWER",
+              "DISPOSITION_REQUIRED",
+              "CYCLE_DETECTED",
+              "EBOM_CYCLE",
+              "PARENT_NOT_IN_BRANCH",
+              "UNSUPPORTED_CI_TYPE",
+              "CI_IDENTITY_UNRESOLVED",
+              "CI_IDENTITY_COLLISION",
+              "PROVENANCE_INVALID",
+              "CANDIDATE_ROOT_MISMATCH",
+              "AMBIGUOUS_CORRELATION",
+              "BATCH_TOO_LARGE",
+              "ASOF_IN_FUTURE",
+              "ASOF_INVALID",
+              "NOT_EDITABLE",
+              "INVALID_REQUEST",
+              "NOT_FOUND",
+              "FORBIDDEN",
+              "INTERNAL_ERROR"
+            ],
+            "examples": [
+              "NOT_RELEASED"
+            ]
+          },
+          "message": {
+            "type": "string",
+            "description": "The Custom Label for `code`, with a parenthesised **detail** appended naming the specific\nrow or value. The label says what went wrong and what to do about it; the detail says\nwhich row it happened to. Translated — never parse it.\n"
+          },
+          "failures": {
+            "type": "array",
+            "description": "Present **only** on an atomic delta batch that failed validation. Carries the complete\nper-operation failure list, so a caller does not have to find their faults one round trip\nat a time.\n",
+            "items": {
+              "$ref": "#/components/schemas/DeltaResult"
+            }
+          }
+        }
+      }
+    },
+    "responses": {
+      "Forbidden": {
+        "description": "`FORBIDDEN` (403). The caller lacks an object grant this endpoint requires. The body names no\nobject — see `RestError`.\n\nA field-level denial deeper in the stack is also answered 403: under `USER_MODE` that\nsurfaces as a `QueryException`, and every query on this path is built from a fixed field\nlist, so an access failure is far and away the likeliest cause.\n",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/RestError"
+            },
+            "examples": {
+              "denied": {
+                "value": {
+                  "code": "FORBIDDEN",
+                  "message": "You do not have permission to perform this action."
+                }
+              }
+            }
+          }
+        }
+      },
+      "NotFoundPath": {
+        "description": "`NOT_FOUND` (404). The path id is absent, unparseable, or names a **different object** than\nthis endpoint expects — the last of which is why swapping a `branchId` for a `sourceId` is a\nclean 404 rather than a 500 out of a repository.\n\nAlso answered for any unrecognised trailing segment: `GET .../branches/{id}/bogus` is the\nMBOM's own 404 in the MBOM's own shape (`code`), not the framework's (`errorCode`).\n",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/RestError"
+            },
+            "examples": {
+              "wrongObject": {
+                "value": {
+                  "code": "NOT_FOUND",
+                  "message": "That record does not exist, or you do not have access to it. (a1Cg8000000AbCeEAK is not a Branch__c)"
+                }
+              }
+            }
+          }
+        }
+      },
+      "PullConflictPreview": {
+        "description": "409 — well formed, retryable after state changes.\n\n| code | Cause |\n|---|---|\n| `NOT_RELEASED` | the candidate is not Released, or is Cancelled, Expired, or missing a release date |\n| `CANDIDATE_NOT_NEWER` | the candidate resolves at or before the source's current T_R |\n",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/RestError"
+            },
+            "examples": {
+              "notNewer": {
+                "value": {
+                  "code": "CANDIDATE_NOT_NEWER",
+                  "message": "That revision is not newer than what this branch already resolves against. Choose a later release, or none is available yet. (a0Ag8000000Ab01EAC)"
+                }
+              }
+            }
+          }
+        }
+      },
+      "PullConflictCommit": {
+        "description": "409 — well formed, retryable after state changes.\n\n| code | Cause | Remedy |\n|---|---|---|\n| `STALE_REVISION` | `diffFingerprint` mismatch, or an `entryId` that no longer names an entry in the freshly re-resolved diff | re-run `pull-preview` and resubmit |\n| `DISPOSITION_REQUIRED` | an `override-orphaned` entry has no decision | supply one for every required entry |\n| `NOT_RELEASED` / `CANDIDATE_NOT_NEWER` | revalidated at commit time and no longer qualifies | pick another candidate |\n",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/RestError"
+            },
+            "examples": {
+              "stale": {
+                "value": {
+                  "code": "STALE_REVISION",
+                  "message": "This row has been revised since the view you are working from. Reload it and try again. (diffFingerprint sha256:9f2c41ab7e08d3b6 no longer matches; re-run pull-preview and resubmit)"
+                }
+              },
+              "dispositionRequired": {
+                "value": {
+                  "code": "DISPOSITION_REQUIRED",
+                  "message": "This pull orphans an override you made. Choose to keep it as branch-owned content or remove it before committing. (f4880c6b3e1a9d75, ASM-C)"
+                }
+              }
+            }
+          }
+        }
+      },
+      "PullUnprocessable": {
+        "description": "422 — well formed, but impossible against the model. Retrying the identical request will\nnever succeed.\n\n| code | Cause |\n|---|---|\n| `CANDIDATE_ROOT_MISMATCH` | the candidate belongs to a **different root item** than the source |\n| `CYCLE_DETECTED` / `EBOM_CYCLE` | a cycle in the eBOM below the candidate root |\n| `AMBIGUOUS_CORRELATION` | two edges on the **same side** of the diff share a correlation key, so which upstream line matches which branch line cannot be determined — no branch state the caller can reach will fix it |\n",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/RestError"
+            },
+            "examples": {
+              "rootMismatch": {
+                "value": {
+                  "code": "CANDIDATE_ROOT_MISMATCH",
+                  "message": "That revision belongs to a different item than this branch's source. Choose a revision of the same root item. (a0Ag8000000Ab77EAC)"
+                }
+              },
+              "cycle": {
+                "value": {
+                  "code": "CYCLE_DETECTED",
+                  "message": "This change would make the child an ancestor of its own parent, which no BOM can represent. (beneath Assy-100 rev-2 at edge ASM-C)"
+                }
+              }
+            }
+          }
+        }
+      },
+      "InternalError": {
+        "description": "500. Unhandled server-side failure. **Not** an `MbomErrorCode` — the body carries\n`INTERNAL_ERROR` plus the exception type and message, and never the stack trace. It is never\nanswered as a 200: swallowing an unexpected failure would let a half-applied delta batch look\nsuccessful.\n",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/RestError"
+            },
+            "examples": {
+              "unexpected": {
+                "value": {
+                  "code": "INTERNAL_ERROR",
+                  "message": "System.NullPointerException: Attempt to de-reference a null object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "examples": {
+      "BranchTreeFlat": {
+        "value": {
+          "asOf": "2026-04-05T17:22:03.518Z",
+          "rootRevisionId": "a0Ag8000000Ab01EAC",
+          "sourceTimePoint": "2026-01-15T00:00:00.000Z",
+          "rows": [
+            {
+              "edgeId": "a1Eg8000000AbD1EAK",
+              "edgeKey": "a0Bg8000000Ab10EAC",
+              "parentItemId": "a02g8000000Ab01EAC",
+              "childItemId": "a02g8000000Ab20EAC",
+              "childItemRevisionId": "a0Ag8000000Ab41EAC",
+              "provenance": "claimed",
+              "governingTimestamp": "2026-01-15T00:00:00.000Z",
+              "sourceId": "a1Cg8000000AbCeEAK",
+              "isClaimed": true,
+              "isExcluded": false,
+              "isReplaced": false,
+              "isEditable": true,
+              "quantity": 4,
+              "findNumber": 10,
+              "childRows": []
+            },
+            {
+              "edgeId": null,
+              "edgeKey": "a0Bg8000000Ab11EAC",
+              "parentItemId": "a02g8000000Ab01EAC",
+              "childItemId": "a02g8000000Ab21EAC",
+              "childItemRevisionId": "a0Ag8000000Ab31EAC",
+              "provenance": "inherited",
+              "governingTimestamp": "2026-01-15T00:00:00.000Z",
+              "sourceId": "a1Cg8000000AbCeEAK",
+              "isClaimed": false,
+              "isExcluded": false,
+              "isReplaced": false,
+              "isEditable": true,
+              "quantity": 2,
+              "findNumber": 20,
+              "childRows": []
+            },
+            {
+              "edgeId": "a1Eg8000000AbD3EAK",
+              "edgeKey": "a0Bg8000000Ab12EAC",
+              "parentItemId": "a02g8000000Ab01EAC",
+              "childItemId": "a02g8000000Ab22EAC",
+              "childItemRevisionId": "a0Ag8000000Ab61EAC",
+              "provenance": "claimed",
+              "governingTimestamp": "2026-01-15T00:00:00.000Z",
+              "sourceId": "a1Cg8000000AbCeEAK",
+              "isClaimed": true,
+              "isExcluded": true,
+              "isReplaced": false,
+              "isEditable": true,
+              "quantity": 3,
+              "findNumber": 30,
+              "childRows": []
+            },
+            {
+              "edgeId": "a1Eg8000000AbD9EAK",
+              "edgeKey": "local-a1Bg8000000AbCdEAK-a02g8000000Ab01EAC-a02g8000000Ab90EAC",
+              "parentItemId": "a02g8000000Ab01EAC",
+              "childItemId": "a02g8000000Ab90EAC",
+              "childItemRevisionId": "a0Ag8000000Ab95EAC",
+              "provenance": "local",
+              "governingTimestamp": "2026-04-05T17:22:03.518Z",
+              "sourceId": null,
+              "isClaimed": false,
+              "isExcluded": false,
+              "isReplaced": false,
+              "isEditable": true,
+              "quantity": 1,
+              "findNumber": 90,
+              "childRows": []
+            }
+          ],
+          "warnings": []
+        }
+      },
+      "BranchTreeNested": {
+        "value": {
+          "asOf": "2026-04-05T17:22:03.518Z",
+          "rootRevisionId": "a0Ag8000000Ab01EAC",
+          "sourceTimePoint": "2026-01-15T00:00:00.000Z",
+          "rows": [
+            {
+              "edgeId": null,
+              "edgeKey": "a0Bg8000000Ab14EAC",
+              "parentItemId": "a02g8000000Ab01EAC",
+              "childItemId": "a02g8000000Ab30EAC",
+              "childItemRevisionId": "a0Ag8000000Ab71EAC",
+              "provenance": "inherited",
+              "governingTimestamp": "2026-01-15T00:00:00.000Z",
+              "sourceId": "a1Cg8000000AbCeEAK",
+              "isClaimed": false,
+              "isExcluded": false,
+              "isReplaced": false,
+              "isEditable": true,
+              "quantity": 1,
+              "findNumber": 50,
+              "childRows": [
+                {
+                  "edgeId": null,
+                  "edgeKey": "a0Bg8000000Ab15EAC",
+                  "parentItemId": "a02g8000000Ab30EAC",
+                  "childItemId": "a02g8000000Ab31EAC",
+                  "childItemRevisionId": "a0Ag8000000Ab72EAC",
+                  "provenance": "inherited",
+                  "governingTimestamp": "2026-01-15T00:00:00.000Z",
+                  "sourceId": "a1Cg8000000AbCeEAK",
+                  "isClaimed": false,
+                  "isExcluded": false,
+                  "isReplaced": false,
+                  "isEditable": true,
+                  "quantity": 4,
+                  "findNumber": 10,
+                  "childRows": []
+                }
+              ]
+            }
+          ],
+          "warnings": []
+        }
+      },
+      "BranchTreeMixedRevision": {
+        "value": {
+          "asOf": "2026-04-05T17:22:03.518Z",
+          "rootRevisionId": "a0Ag8000000Ab01EAC",
+          "sourceTimePoint": "2026-01-15T00:00:00.000Z",
+          "rows": [],
+          "warnings": [
+            {
+              "warningCode": "MIXED_REVISION",
+              "message": "This item appears at more than one revision in the same tree, because inherited rows are pinned to the source timepoint while claimed and local rows follow the as-of date. This is expected and does not block anything.",
+              "itemId": "a02g8000000Ab21EAC",
+              "itemRevisionIds": [
+                "a0Ag8000000Ab31EAC",
+                "a0Ag8000000Ab32EAC"
+              ],
+              "governingTimestamps": [
+                "2026-01-15T00:00:00.000Z",
+                "2026-04-05T17:22:03.518Z"
+              ]
+            }
+          ]
+        }
+      },
+      "SourceTree": {
+        "value": {
+          "asOf": "2026-04-05T17:22:03.518Z",
+          "rootRevisionId": "a0Ag8000000Ab01EAC",
+          "sourceTimePoint": "2026-01-15T00:00:00.000Z",
+          "rows": [
+            {
+              "edgeId": null,
+              "edgeKey": "a0Bg8000000Ab10EAC",
+              "parentItemId": "a02g8000000Ab01EAC",
+              "childItemId": "a02g8000000Ab20EAC",
+              "childItemRevisionId": "a0Ag8000000Ab41EAC",
+              "provenance": "inherited",
+              "governingTimestamp": "2026-01-15T00:00:00.000Z",
+              "sourceId": "a1Cg8000000AbCeEAK",
+              "isClaimed": false,
+              "isExcluded": false,
+              "isReplaced": false,
+              "isEditable": true,
+              "quantity": 1,
+              "findNumber": 10,
+              "childRows": []
+            }
+          ],
+          "warnings": []
+        }
+      },
+      "DeltaBatchApplied": {
+        "value": {
+          "branchId": "a1Bg8000000AbCdEAK",
+          "atomic": true,
+          "asOf": "2026-04-05T17:22:03.518Z",
+          "applied": 2,
+          "failed": 0,
+          "results": [
+            {
+              "index": 0,
+              "clientRef": "row-motor",
+              "op": "claim",
+              "success": true,
+              "errorCode": null,
+              "message": null,
+              "ciId": "a1Gg8000000AbF1EAK",
+              "assemblyCiId": "a1Eg8000000AbD1EAK",
+              "forked": null
+            },
+            {
+              "index": 1,
+              "clientRef": "row-bracket",
+              "op": "claim",
+              "success": true,
+              "errorCode": null,
+              "message": null,
+              "ciId": "a1Gg8000000AbF2EAK",
+              "assemblyCiId": "a1Eg8000000AbD2EAK",
+              "forked": null
+            }
+          ]
+        }
+      },
+      "DeltaBatchPartial": {
+        "value": {
+          "branchId": "a1Bg8000000AbCdEAK",
+          "atomic": false,
+          "asOf": "2026-04-05T17:25:11.004Z",
+          "applied": 1,
+          "failed": 1,
+          "results": [
+            {
+              "index": 0,
+              "clientRef": "ok",
+              "op": "claim",
+              "success": true,
+              "errorCode": null,
+              "message": null,
+              "ciId": "a1Gg8000000AbF2EAK",
+              "assemblyCiId": "a1Eg8000000AbD2EAK",
+              "forked": null
+            },
+            {
+              "index": 1,
+              "clientRef": "will-fail",
+              "op": "update",
+              "success": false,
+              "errorCode": "CLAIM_REQUIRED",
+              "message": "This row is inherited and read-only. Claim it before editing. (edge a0Bg8000000Ab12EAC)",
+              "ciId": null,
+              "assemblyCiId": null,
+              "forked": null
+            }
+          ]
+        }
+      },
+      "DeltaBatchForked": {
+        "value": {
+          "branchId": "a1Bg8000000AbCdEAK",
+          "atomic": true,
+          "asOf": "2026-04-06T15:02:00.000Z",
+          "applied": 1,
+          "failed": 0,
+          "results": [
+            {
+              "index": 0,
+              "clientRef": "qty-fix",
+              "op": "update",
+              "success": true,
+              "errorCode": null,
+              "message": null,
+              "ciId": "a1Gg8000000AbF1EAK",
+              "assemblyCiId": "a1Eg8000000AbD1EAK",
+              "forked": true
+            }
+          ]
+        }
+      },
+      "DeltaBatchAtomicFailure": {
+        "value": {
+          "code": "CLAIM_REQUIRED",
+          "message": "This row is inherited and read-only. Claim it before editing. (2 of 3 operations failed validation)",
+          "failures": [
+            {
+              "index": 1,
+              "clientRef": "will-fail",
+              "op": "update",
+              "success": false,
+              "errorCode": "CLAIM_REQUIRED",
+              "message": "This row is inherited and read-only. Claim it before editing. (edge a0Bg8000000Ab12EAC)",
+              "ciId": null,
+              "assemblyCiId": null,
+              "forked": null
+            },
+            {
+              "index": 2,
+              "clientRef": "also-fails",
+              "op": "exclude",
+              "success": false,
+              "errorCode": "ALREADY_EXCLUDED",
+              "message": "This row is already excluded from this configuration. Restore it first if you want to change it. (edge a0Bg8000000Ab13EAC is already excluded)",
+              "ciId": null,
+              "assemblyCiId": null,
+              "forked": null
+            }
+          ]
+        }
+      },
+      "DeltaBatchUnknownOp": {
+        "value": {
+          "code": "INVALID_REQUEST",
+          "message": "That request could not be read. Check that the body is valid JSON and that every required value is supplied. (1 of 1 operations failed validation)",
+          "failures": [
+            {
+              "index": 0,
+              "clientRef": "typo",
+              "op": "claimm",
+              "success": false,
+              "errorCode": "INVALID_REQUEST",
+              "message": "That request could not be read. Check that the body is valid JSON and that every required value is supplied. (unknown op claimm)",
+              "ciId": null,
+              "assemblyCiId": null,
+              "forked": null
+            }
+          ]
+        }
+      },
+      "BaselineTreeClean": {
+        "value": {
+          "baselineId": "a1Fg8000000AbE1EAK",
+          "label": "Pilot build 1",
+          "resolutionTimePoint": "2026-04-06T14:31:02.000Z",
+          "rows": [
+            {
+              "edgeId": null,
+              "edgeKey": null,
+              "parentItemId": "a02g8000000Ab01EAC",
+              "childItemId": "a02g8000000Ab20EAC",
+              "childItemRevisionId": "a0Ag8000000Ab41EAC",
+              "provenance": "claimed",
+              "governingTimestamp": null,
+              "sourceId": "a1Cg8000000AbCeEAK",
+              "isClaimed": true,
+              "isExcluded": false,
+              "isReplaced": false,
+              "isEditable": true,
+              "quantity": 4,
+              "findNumber": 10,
+              "childRows": []
+            }
+          ],
+          "warnings": []
+        }
+      },
+      "BaselineTreeDrift": {
+        "value": {
+          "baselineId": "a1Fg8000000AbE1EAK",
+          "label": "Pilot build 1",
+          "resolutionTimePoint": "2026-04-06T14:31:02.000Z",
+          "rows": [],
+          "warnings": [
+            {
+              "warningCode": "BASELINE_PROVENANCE_DRIFT",
+              "message": "This baseline now resolves a different mix of inherited and modified rows than when it was cut. The rows themselves are unchanged.",
+              "itemId": null,
+              "itemRevisionIds": [],
+              "governingTimestamps": []
+            }
+          ]
+        }
+      },
+      "PullPreviewWithChanges": {
+        "value": {
+          "sourceId": "a1Cg8000000AbCeEAK",
+          "branchId": "a1Bg8000000AbCdEAK",
+          "branchLabel": "MBOM-GDL",
+          "sourceType": "Ebom",
+          "currentSourceVersion": {
+            "sourceRevisionId": "a1Dg8000000AbCfEAK",
+            "rootItemRevisionId": "a0Ag8000000Ab01EAC",
+            "rootItemNumber": "Assy-100",
+            "rootRevisionLabel": "rev-1",
+            "resolutionTimestamp": "2026-01-15T00:00:00.000Z",
+            "acceptedAt": "2026-01-15T09:12:44.000Z"
+          },
+          "candidateSourceVersion": {
+            "sourceRevisionId": null,
+            "rootItemRevisionId": "a0Ag8000000Ab02EAC",
+            "rootItemNumber": "Assy-100",
+            "rootRevisionLabel": "rev-2",
+            "resolutionTimestamp": "2026-04-02T00:00:00.000Z",
+            "acceptedAt": null
+          },
+          "hasChanges": true,
+          "summary": {
+            "total": 5,
+            "informational": 4,
+            "required": 1,
+            "byKind": {
+              "source-version-advance": 1,
+              "member-version-advance": 1,
+              "override-retained": 1,
+              "member-added": 1,
+              "override-orphaned": 1
+            }
+          },
+          "entries": [
+            {
+              "entryId": "5c1e0a77f9b34d20",
+              "kind": "source-version-advance",
+              "decision": "informational",
+              "availableActions": [],
+              "retargeted": null,
+              "overrideKind": null,
+              "message": "The source assembly moves to a newer released revision.",
+              "target": {
+                "ciType": "source",
+                "edgeId": null,
+                "edgeKey": null,
+                "label": "Assy-100",
+                "path": [
+                  {
+                    "ciType": "source",
+                    "label": "Assy-100",
+                    "edgeId": null,
+                    "edgeKey": null
+                  }
+                ]
+              },
+              "current": null,
+              "candidate": null
+            },
+            {
+              "entryId": "a90f3b21c7d85e64",
+              "kind": "member-version-advance",
+              "decision": "informational",
+              "availableActions": [],
+              "retargeted": null,
+              "overrideKind": null,
+              "message": "This member resolves differently at the newer source timepoint. Nothing to decide: a revision is an outcome of the timepoint, not a value you can set.",
+              "target": {
+                "ciType": "assembly-edge",
+                "edgeId": null,
+                "edgeKey": "a0Bg8000000Ab11EAC",
+                "label": "ASM-B",
+                "path": [
+                  {
+                    "ciType": "source",
+                    "label": "Assy-100",
+                    "edgeId": null,
+                    "edgeKey": null
+                  }
+                ]
+              },
+              "current": {
+                "provenance": "inherited",
+                "governingClock": "source",
+                "governingTimestamp": "2026-01-15T00:00:00.000Z",
+                "detail": {
+                  "ciType": "assembly-edge",
+                  "parentItemId": "a02g8000000Ab01EAC",
+                  "parentItemNumber": "Assy-100",
+                  "childItemId": "a02g8000000Ab21EAC",
+                  "childItemNumber": "Bracket-005",
+                  "childItemRevisionId": "a0Ag8000000Ab31EAC",
+                  "childRevisionLabel": "rev-3",
+                  "quantity": 2,
+                  "findNumber": 20
+                }
+              },
+              "candidate": {
+                "provenance": "inherited",
+                "governingClock": "source",
+                "governingTimestamp": "2026-04-02T00:00:00.000Z",
+                "detail": {
+                  "ciType": "assembly-edge",
+                  "parentItemId": "a02g8000000Ab01EAC",
+                  "parentItemNumber": "Assy-100",
+                  "childItemId": "a02g8000000Ab21EAC",
+                  "childItemNumber": "Bracket-005",
+                  "childItemRevisionId": "a0Ag8000000Ab32EAC",
+                  "childRevisionLabel": "rev-4",
+                  "quantity": 2,
+                  "findNumber": 20
+                }
+              }
+            },
+            {
+              "entryId": "e3f19a4c8b2d6071",
+              "kind": "override-retained",
+              "decision": "informational",
+              "availableActions": [],
+              "retargeted": false,
+              "overrideKind": "claim",
+              "message": "Your change to this member is kept, and the newer revision's version of it is suppressed.",
+              "target": {
+                "ciType": "assembly-edge",
+                "edgeId": "a1Eg8000000AbD1EAK",
+                "edgeKey": "a0Bg8000000Ab10EAC",
+                "label": "ASM-A",
+                "path": [
+                  {
+                    "ciType": "source",
+                    "label": "Assy-100",
+                    "edgeId": null,
+                    "edgeKey": null
+                  }
+                ]
+              },
+              "current": {
+                "provenance": "claimed",
+                "governingClock": "source",
+                "governingTimestamp": "2026-01-15T00:00:00.000Z",
+                "detail": {
+                  "ciType": "assembly-edge",
+                  "parentItemId": "a02g8000000Ab01EAC",
+                  "parentItemNumber": "Assy-100",
+                  "childItemId": "a02g8000000Ab20EAC",
+                  "childItemNumber": "Motor-002",
+                  "childItemRevisionId": "a0Ag8000000Ab41EAC",
+                  "childRevisionLabel": "rev-1",
+                  "quantity": 4,
+                  "findNumber": 10
+                }
+              },
+              "candidate": {
+                "provenance": "claimed",
+                "governingClock": "source",
+                "governingTimestamp": "2026-04-02T00:00:00.000Z",
+                "detail": {
+                  "ciType": "assembly-edge",
+                  "parentItemId": "a02g8000000Ab01EAC",
+                  "parentItemNumber": "Assy-100",
+                  "childItemId": "a02g8000000Ab20EAC",
+                  "childItemNumber": "Motor-002",
+                  "childItemRevisionId": "a0Ag8000000Ab41EAC",
+                  "childRevisionLabel": "rev-1",
+                  "quantity": 4,
+                  "findNumber": 10
+                }
+              }
+            },
+            {
+              "entryId": "b7204de9a1c6f358",
+              "kind": "member-added",
+              "decision": "informational",
+              "availableActions": [],
+              "retargeted": null,
+              "overrideKind": null,
+              "message": "The newer revision adds this member. It comes in automatically.",
+              "target": {
+                "ciType": "assembly-edge",
+                "edgeId": null,
+                "edgeKey": "a0Bg8000000Ab13EAC",
+                "label": "ASM-D",
+                "path": [
+                  {
+                    "ciType": "source",
+                    "label": "Assy-100",
+                    "edgeId": null,
+                    "edgeKey": null
+                  }
+                ]
+              },
+              "current": null,
+              "candidate": {
+                "provenance": "inherited",
+                "governingClock": "source",
+                "governingTimestamp": "2026-04-02T00:00:00.000Z",
+                "detail": {
+                  "ciType": "assembly-edge",
+                  "parentItemId": "a02g8000000Ab01EAC",
+                  "parentItemNumber": "Assy-100",
+                  "childItemId": "a02g8000000Ab23EAC",
+                  "childItemNumber": "Panel-300",
+                  "childItemRevisionId": "a0Ag8000000Ab52EAC",
+                  "childRevisionLabel": "rev-2",
+                  "quantity": 1,
+                  "findNumber": 40
+                }
+              }
+            },
+            {
+              "entryId": "f4880c6b3e1a9d75",
+              "kind": "override-orphaned",
+              "decision": "required",
+              "availableActions": [
+                "convert-to-native",
+                "remove"
+              ],
+              "retargeted": null,
+              "overrideKind": "claim",
+              "message": "The newer revision removes a member you changed. Choose whether to keep it as your own content or remove it.",
+              "target": {
+                "ciType": "assembly-edge",
+                "edgeId": "a1Eg8000000AbD3EAK",
+                "edgeKey": "a0Bg8000000Ab12EAC",
+                "label": "ASM-C",
+                "path": [
+                  {
+                    "ciType": "source",
+                    "label": "Assy-100",
+                    "edgeId": null,
+                    "edgeKey": null
+                  }
+                ]
+              },
+              "current": {
+                "provenance": "claimed",
+                "governingClock": "source",
+                "governingTimestamp": "2026-01-15T00:00:00.000Z",
+                "detail": {
+                  "ciType": "assembly-edge",
+                  "parentItemId": "a02g8000000Ab01EAC",
+                  "parentItemNumber": "Assy-100",
+                  "childItemId": "a02g8000000Ab22EAC",
+                  "childItemNumber": "Harness-011",
+                  "childItemRevisionId": "a0Ag8000000Ab61EAC",
+                  "childRevisionLabel": "rev-1",
+                  "quantity": 3,
+                  "findNumber": 30
+                }
+              },
+              "candidate": null
+            }
+          ],
+          "warnings": [],
+          "truncated": false,
+          "entriesLimit": 200,
+          "diffFingerprint": "sha256:9f2c41ab7e08d3b6",
+          "generatedAt": "2026-04-05T17:22:03.518Z"
+        }
+      },
+      "PullPreviewNoChanges": {
+        "value": {
+          "sourceId": "a1Cg8000000AbCeEAK",
+          "branchId": "a1Bg8000000AbCdEAK",
+          "branchLabel": "MBOM-GDL",
+          "sourceType": "Ebom",
+          "currentSourceVersion": {
+            "sourceRevisionId": "a1Dg8000000AbCgEAK",
+            "rootItemRevisionId": "a0Ag8000000Ab02EAC",
+            "rootItemNumber": "Assy-100",
+            "rootRevisionLabel": "rev-2",
+            "resolutionTimestamp": "2026-04-02T00:00:00.000Z",
+            "acceptedAt": "2026-04-05T17:30:11.000Z"
+          },
+          "candidateSourceVersion": null,
+          "hasChanges": false,
+          "summary": {
+            "total": 0,
+            "informational": 0,
+            "required": 0,
+            "byKind": {}
+          },
+          "entries": [],
+          "warnings": [],
+          "truncated": false,
+          "entriesLimit": 200,
+          "diffFingerprint": "sha256:0000000000000000",
+          "generatedAt": "2026-04-06T08:00:00.000Z"
+        }
+      },
+      "PullPreviewTruncated": {
+        "summary": "`entriesLimit=1` — one informational entry, and the required one kept regardless",
+        "value": {
+          "sourceId": "a1Cg8000000AbCeEAK",
+          "branchId": "a1Bg8000000AbCdEAK",
+          "branchLabel": "MBOM-GDL",
+          "sourceType": "Ebom",
+          "currentSourceVersion": {
+            "sourceRevisionId": "a1Dg8000000AbCfEAK",
+            "rootItemRevisionId": "a0Ag8000000Ab01EAC",
+            "rootItemNumber": "Assy-100",
+            "rootRevisionLabel": "rev-1",
+            "resolutionTimestamp": "2026-01-15T00:00:00.000Z",
+            "acceptedAt": "2026-01-15T09:12:44.000Z"
+          },
+          "candidateSourceVersion": {
+            "sourceRevisionId": null,
+            "rootItemRevisionId": "a0Ag8000000Ab02EAC",
+            "rootItemNumber": "Assy-100",
+            "rootRevisionLabel": "rev-2",
+            "resolutionTimestamp": "2026-04-02T00:00:00.000Z",
+            "acceptedAt": null
+          },
+          "hasChanges": true,
+          "summary": {
+            "total": 5,
+            "informational": 4,
+            "required": 1,
+            "byKind": {
+              "source-version-advance": 1,
+              "member-version-advance": 1,
+              "override-retained": 1,
+              "member-added": 1,
+              "override-orphaned": 1
+            }
+          },
+          "entries": [
+            {
+              "entryId": "5c1e0a77f9b34d20",
+              "kind": "source-version-advance",
+              "decision": "informational",
+              "availableActions": [],
+              "message": "The source assembly moves to a newer released revision.",
+              "target": {
+                "ciType": "source",
+                "label": "Assy-100",
+                "path": [
+                  {
+                    "ciType": "source",
+                    "label": "Assy-100",
+                    "edgeId": null,
+                    "edgeKey": null
+                  }
+                ]
+              }
+            },
+            {
+              "entryId": "f4880c6b3e1a9d75",
+              "kind": "override-orphaned",
+              "decision": "required",
+              "availableActions": [
+                "convert-to-native",
+                "remove"
+              ],
+              "overrideKind": "claim",
+              "message": "The newer revision removes a member you changed. Choose whether to keep it as your own content or remove it.",
+              "target": {
+                "ciType": "assembly-edge",
+                "edgeId": "a1Eg8000000AbD3EAK",
+                "edgeKey": "a0Bg8000000Ab12EAC",
+                "label": "ASM-C",
+                "path": [
+                  {
+                    "ciType": "source",
+                    "label": "Assy-100",
+                    "edgeId": null,
+                    "edgeKey": null
+                  }
+                ]
+              }
+            }
+          ],
+          "warnings": [],
+          "truncated": true,
+          "entriesLimit": 1,
+          "diffFingerprint": "sha256:9f2c41ab7e08d3b6",
+          "generatedAt": "2026-04-05T17:22:03.518Z"
+        }
+      },
+      "PullCommitCommitted": {
+        "value": {
+          "sourceId": "a1Cg8000000AbCeEAK",
+          "newSourceRevisionId": "a1Dg8000000AbChEAK",
+          "acceptedRootRevisionId": "a0Ag8000000Ab02EAC",
+          "acceptedAt": "2026-04-06T14:02:51.317Z",
+          "applied": [
+            {
+              "entryId": "f4880c6b3e1a9d75",
+              "kind": "override-orphaned",
+              "action": "convert-to-native",
+              "edgeId": "a1Eg8000000AbD3EAK"
+            },
+            {
+              "entryId": "e3f19a4c8b2d6071",
+              "kind": "override-retained",
+              "action": null,
+              "edgeId": "a1Eg8000000AbD1EAK"
+            }
+          ]
+        }
+      },
+      "PullCommitAlreadyCurrent": {
+        "value": {
+          "sourceId": "a1Cg8000000AbCeEAK",
+          "newSourceRevisionId": "a1Dg8000000AbCiEAK",
+          "acceptedRootRevisionId": "a0Ag8000000Ab02EAC",
+          "acceptedAt": "2026-04-06T16:11:09.882Z",
+          "applied": []
+        }
+      }
+    }
+  }
+}
