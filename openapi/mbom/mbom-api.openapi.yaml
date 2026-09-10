@@ -71,8 +71,9 @@ info:
     ### 7. A baseline stores a timepoint, not rows
 
     Cutting a baseline records one timestamp and freezes the revisions it resolved to. Reading it
-    **re-resolves** the branch at that timestamp. The stored member count acts as a canary
-    (`BASELINE_COUNT_DRIFT`) if something the resolution depends on has moved since.
+    **re-resolves** the branch at that timestamp. Two stored counts act as canaries if something the
+    resolution depends on has moved since — `BASELINE_COUNT_DRIFT` for the row count, and
+    `BASELINE_PROVENANCE_DRIFT` for how many of those rows are the branch's own overrides.
 
     ### 8. "Pull", not "merge"
 
@@ -839,14 +840,22 @@ paths:
           someone is still editing; a baseline is a record of a decision already taken, so it is
           deliberately not forwarded.
 
-        ## The drift canary
+        ## The drift canaries
 
         | warningCode | What moved |
         |---|---|
         | `BASELINE_COUNT_DRIFT` | the baseline re-derived a **different number of rows** than its cut recorded — a corrected release date, an edit to an already-released BOM |
+        | `BASELINE_PROVENANCE_DRIFT` | the same rows came back with a **different number of them claimed** — an override severed or added since the cut. The row count cannot see this, because severing one moves no row |
 
-        It **warns rather than throws**: the rows returned are still the honest answer for the
-        stored timepoint. It is the only drift signal a baseline read carries.
+        Both **warn rather than throw**: the rows returned are still the honest answer for the
+        stored timepoint. Each comparison is skipped when the cut never recorded its counter, so a
+        baseline taken before a counter existed does not warn on every read.
+
+        Neither is complete, and the response does not pretend otherwise. A same-second revision of
+        a claimed row's quantity moves no count on either axis, and an edit to an inherited line's
+        own fields moves none either. Both gaps have one cause — a whole-second `Datetime` used as
+        the fold's boundary — and closing it needs a monotonic log position rather than a third
+        counter.
       parameters:
         - $ref: '#/components/parameters/BaselineId'
         - $ref: '#/components/parameters/Flat'
@@ -1493,7 +1502,7 @@ components:
       properties:
         warningCode:
           type: string
-          enum: [MIXED_REVISION, BASELINE_COUNT_DRIFT, NESTED_CYCLE_PRUNED, MEMBER_ADD_COLLISION]
+          enum: [MIXED_REVISION, BASELINE_COUNT_DRIFT, BASELINE_PROVENANCE_DRIFT, NESTED_CYCLE_PRUNED, MEMBER_ADD_COLLISION]
           description: |
             The complete vocabulary.
 
@@ -1501,6 +1510,11 @@ components:
               because two clocks are in play. Legal and expected; warned, never blocked.
             - `BASELINE_COUNT_DRIFT` — a baseline re-derived a different **row count** than its cut
               recorded.
+            - `BASELINE_PROVENANCE_DRIFT` — a baseline re-derived a different number of **claimed**
+              rows than its cut recorded. Separate from the count drift because severing an override
+              moves no row: the same rows come back, one of them no longer an override. Narrow —
+              only reachable when the severing delta lands in the same whole second as the cut,
+              since a saved `Datetime` has second precision.
             - `NESTED_CYCLE_PRUNED` — the subtree of a locally added assembly was dropped because
               walking it reached a cycle. The rest of the tree is still returned.
             - `MEMBER_ADD_COLLISION` — one BOM position was asserted by **both** the branch and its
@@ -1711,7 +1725,8 @@ components:
           description: |
             How many rows the cut resolved, **excluding tombstones**. This is the count of what the
             configuration *contains*, not the count of rows the tree endpoint renders. Also the
-            canary behind `BASELINE_COUNT_DRIFT`.
+            canary behind `BASELINE_COUNT_DRIFT`; `BASELINE_PROVENANCE_DRIFT` is fed by the
+            claimed-row count recorded alongside it.
 
     BaselineTree:
       type: object
@@ -1732,8 +1747,8 @@ components:
         warnings:
           type: array
           description: |
-            **Drift only** — `BASELINE_COUNT_DRIFT`. Mixed-revision and collision warnings from the
-            underlying resolution are not forwarded.
+            **Drift only** — `BASELINE_COUNT_DRIFT` and `BASELINE_PROVENANCE_DRIFT`. Mixed-revision
+            and collision warnings from the underlying resolution are not forwarded.
           items: { $ref: '#/components/schemas/TreeWarning' }
 
     # -------------------------------------------------- pull
