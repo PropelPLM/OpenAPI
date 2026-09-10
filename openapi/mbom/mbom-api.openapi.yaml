@@ -71,9 +71,8 @@ info:
     ### 7. A baseline stores a timepoint, not rows
 
     Cutting a baseline records one timestamp and freezes the revisions it resolved to. Reading it
-    **re-resolves** the branch at that timestamp. Two stored counts act as canaries
-    (`BASELINE_COUNT_DRIFT`, `BASELINE_PROVENANCE_DRIFT`) if something the resolution depends on has
-    moved since.
+    **re-resolves** the branch at that timestamp. The stored member count acts as a canary
+    (`BASELINE_COUNT_DRIFT`) if something the resolution depends on has moved since.
 
     ### 8. "Pull", not "merge"
 
@@ -86,17 +85,16 @@ info:
 
     ## Response and error conventions
 
-    The MBOM API does **not** use the Propel framework's `RestResponseHandler`. Each route
-    serialises through `MbomHttp` directly onto the HTTP response, so:
+    These conventions differ from other Propel REST endpoints:
 
-    - Success and error bodies are **plain JSON, never wrapped** in the framework's
+    - Success and error bodies are **plain JSON, never wrapped** in an
       `entity` / `entities` envelope.
-    - **Error bodies key the code as `code`, not `errorCode`.** `errorCode` is the framework's key;
-      it appears in this API only *inside* a delta batch's per-operation `results[]`.
-    - **Nulls are not suppressed.** A field a producer never set for that case is genuinely absent
-      or explicitly `null`, and the two are meaningful — see `DeltaResult.forked`.
-    - `code` values come from `MbomErrorCode`, a fixed enum. **The code is the contract; the message
-      is not.** Messages are Custom Labels and are translated; switch on `code`, never on text.
+    - **Error bodies key the code as `code`, not `errorCode`.** `errorCode` appears in this API only
+      *inside* a delta batch's per-operation `results[]`.
+    - **Nulls are not suppressed.** A field left null for that case is meaningfully null — see
+      `DeltaResult.forked`, where `null` and `false` say different things.
+    - **The code is the contract; the message is not.** Messages are translated. Switch on `code`,
+      never on text.
 
     ### Status-code scheme
 
@@ -124,15 +122,10 @@ info:
     schema, `AssemblyEdgeDetail`, reached through `MemberState.detail` and keyed by `ciType`. A
     second configuration-item type adds a sibling schema there and touches nothing else.
 
-    ## Routing
+    ## Paths
 
-    Routed through `EntryAPI` → `EntryRoute` → `MbomRoute` → (`MbomCreateRoute` | `MbomBranchRoute` |
-    `MbomSourceRoute` | `MbomBaselineRoute`) in `src/main/default/classes/api/`, **not** a standalone
-    `@RestResource`.
-
-    Note there is **no `branchId` path segment on the source endpoints**: a source already names its
-    owning branch through `Branch_Source_CI__c.Downstream_Branch__c`. `branchId` still appears in the
-    pull-preview *body*, denormalised for display.
+    There is **no `branchId` path segment on the source endpoints**: a source already names its
+    owning branch. `branchId` still appears in the pull-preview *body*, denormalised for display.
 
   contact:
     name: Propel PLM Engineering
@@ -159,14 +152,17 @@ servers:
         default: my-domain
         description: My Domain host for the target org.
       namespace:
-        default: ''
+        default: PDLM/
         enum:
-          - ''
+          - PDLM/
           - ksplm/
+          - ''
         description: |
-          Empty in a scratch/dev org where PLM is deployed unmanaged (`sfdx-project.json` sets
-          `"namespace": ""`). `ksplm/` in a package org, where the managed-package namespace
-          prefixes the REST path — `RestRequestHandlerTest` exercises `/ksplm/api/v4/...`.
+          The managed-package namespace prefixing the REST path. `PDLM/` for the MBOM/BOM package,
+          giving `/services/apexrest/PDLM/api/v4/mbom/...`. `ksplm/` for the core PLM package.
+          Empty only for a genuinely unmanaged deployment.
+
+          `GET {base}/v4` returns `"v4 live"` when the base URL and namespace resolve.
 
 security:
   - sessionToken: []
@@ -202,7 +198,7 @@ paths:
       description: |
         Creates an MBOM header, its first branch, the branch's eBOM source lineage, and that
         source's first acceptance — **four records in one transaction, and zero rows of BOM
-        structure** (`MbomCreateService`).
+        structure**.
 
         The response returns all four ids rather than just `mbomId`, because a caller that had to go
         looking for the other three would be querying schema this API exists to hide. The one you
@@ -843,16 +839,14 @@ paths:
           someone is still editing; a baseline is a record of a decision already taken, so it is
           deliberately not forwarded.
 
-        ## The two drift canaries
+        ## The drift canary
 
         | warningCode | What moved |
         |---|---|
         | `BASELINE_COUNT_DRIFT` | the baseline re-derived a **different number of rows** than its cut recorded — a corrected release date, an edit to an already-released BOM |
-        | `BASELINE_PROVENANCE_DRIFT` | the same row count, but a **different number of `claimed` rows** — the signature of a `convert-to-native` flipping a row from `claimed` to `local` after the fact |
 
-        Both **warn rather than throw**: the rows returned are still the honest answer for the
-        stored timepoint, and refusing to answer would be worse than answering with a caveat. Two
-        canaries rather than one because neither can see the other's drift.
+        It **warns rather than throws**: the rows returned are still the honest answer for the
+        stored timepoint. It is the only drift signal a baseline read carries.
       parameters:
         - $ref: '#/components/parameters/BaselineId'
         - $ref: '#/components/parameters/Flat'
@@ -867,7 +861,7 @@ paths:
                   summary: No drift
                   $ref: '#/components/examples/BaselineTreeClean'
                 drifted:
-                  summary: Provenance drift after a `convert-to-native`
+                  summary: Count drift after a direct edit to an already-released eBOM
                   $ref: '#/components/examples/BaselineTreeDrift'
         '400':
           description: '`INVALID_REQUEST` — `asOf` was supplied. A baseline is already resolved.'
@@ -945,7 +939,14 @@ paths:
         | `override-retained` | informational | — | The branch's override still differs from upstream; the branch wins and upstream is suppressed. `retargeted` distinguishes a suppressed **field value** from a suppressed **re-target**. |
         | `override-superseded` | informational | — | The branch's override now *matches* what the candidate would natively produce. |
         | `override-orphaned` | **required** | `convert-to-native`, `remove` | The candidate removes an edge the branch **claimed or replaced**. **Blocks the commit.** |
-        | `member-add-collision` | informational | — | The candidate adds an edge whose correlation key coincides with a branch-**native** edge. The branch's content wins automatically. |
+        | `member-add-collision` | informational | — | The candidate adds an edge whose correlation key coincides with a branch-**native** edge, and the two **differ**. The branch's content wins automatically and is left untouched. |
+        | `member-add-converged` | informational | — | The same collision, except the candidate's quantity, find number **and** resolved child revision are all identical to the branch's own. The commit retires the branch's now-redundant local edge (`action: "retired"`); the position becomes ordinary inherited content. |
+
+        `member-add-collision` and `member-add-converged` are the same coincidence resolving two
+        ways. Converged requires all three of quantity, find number and resolved child revision to
+        match; any difference makes it a plain collision. Neither is ever a decision: on a
+        collision nothing is written and the branch's row stands, and on a converged entry the
+        commit retires the branch's local edge. An `override-superseded` override is never retired.
 
         ### Why a revision advance is never a decision
 
@@ -1042,8 +1043,8 @@ paths:
       summary: Commit a previewed pull, advancing T_R
       description: |
         Accepts a newer eBOM root revision into the branch: appends a new `Branch_Source_CI_Rev__c`
-        advancing T_R, advances the source's root pointer, and applies the caller's
-        `override-orphaned` dispositions — **all under one savepoint**.
+        advancing T_R, advances the source's root pointer, applies the caller's `override-orphaned`
+        dispositions, and retires any `member-add-converged` local edge — **all under one savepoint**.
 
         Returns **`201 Created`**, not 200: a new acceptance record genuinely exists.
 
@@ -1088,6 +1089,17 @@ paths:
         upstream line this edge was originally minted against", independent of the correlation key a
         pull actually joins on.
 
+        ## Retiring a converged local add
+
+        A `member-add-converged` entry is retired without a decision. "Retired" means **one appended
+        `Branch_Member__c` row of `Delta_Type__c = 'Revert'`**, with `Overrides_Source__c` null —
+        nothing is deleted, and a read dated before this commit still renders the local add. The
+        position becomes ordinary inherited content pinned at the new T_R, so it follows the source
+        from then on.
+
+        Reported in `applied[]` as `{"kind": "member-add-converged", "action": "retired"}`, inside
+        the same savepoint as the rest of the commit.
+
         ## Atomicity
 
         One outer savepoint around both the disposition batch and the acceptance insert, rolled back
@@ -1102,7 +1114,9 @@ paths:
 
         ## What a pull leaves alone
 
-        Branch-**native** content — anything with no upstream provenance — is entirely unaffected.
+        Branch-**native** content is unaffected, with one exception: the `member-add-converged`
+        retirement above. A local add that still differs from the source (`member-add-collision`) is
+        left untouched, as is native content the source never collided with.
 
         ## Access
 
@@ -1297,10 +1311,14 @@ components:
         - `inherited` — supplied by the source; no branch-owned record exists.
         - `claimed` — the branch took copy-on-write ownership of a source-supplied member.
         - `local` — branch-owned with no upstream provenance ("native").
+        - `nested` — a descendant of a locally added or substituted assembly, rendered from that
+          item's own eBOM. Read-only: every row in such a subtree carries `isEditable: false`, and
+          the pull diff excludes them entirely. Appears on tree rows only, never in a diff entry's
+          `MemberState`.
 
         There is no `excluded` value: exclusion is tracked as a separate boolean alongside
-        provenance, never as a fourth value of it.
-      enum: [inherited, claimed, local]
+        provenance, never as a value of it.
+      enum: [inherited, claimed, local, nested]
 
     GoverningClock:
       type: string
@@ -1444,6 +1462,15 @@ components:
             False on any row inside the subtree of a locally added or substituted assembly. Every
             delta op refuses those rows, so a UI offering an action on one is offering an action the
             API will reject.
+        isCollapsedCollision:
+          type: boolean
+          description: |
+            True when one BOM position is asserted by both the branch and its source and the two
+            render as a single row, with the branch's content winning. A tree read carries a
+            `MEMBER_ADD_COLLISION` warning alongside it.
+
+            Defaults to `false`. Populated on baseline rows too, where — because a baseline
+            forwards drift warnings only — it is the sole signal of the collapse.
         quantity: { type: number, examples: [2] }
         findNumber:
           type: number
@@ -1466,25 +1493,28 @@ components:
       properties:
         warningCode:
           type: string
-          enum: [MIXED_REVISION, BASELINE_COUNT_DRIFT, BASELINE_PROVENANCE_DRIFT, NESTED_CYCLE_PRUNED]
+          enum: [MIXED_REVISION, BASELINE_COUNT_DRIFT, NESTED_CYCLE_PRUNED, MEMBER_ADD_COLLISION]
           description: |
+            The complete vocabulary.
+
             - `MIXED_REVISION` — one item rendered at more than one revision in the same tree,
               because two clocks are in play. Legal and expected; warned, never blocked.
             - `BASELINE_COUNT_DRIFT` — a baseline re-derived a different **row count** than its cut
               recorded.
-            - `BASELINE_PROVENANCE_DRIFT` — a baseline re-derived a different **claimed count**, the
-              row count unchanged. The signature of a `convert-to-native` after the fact.
             - `NESTED_CYCLE_PRUNED` — the subtree of a locally added assembly was dropped because
-              walking it reached a cycle. A warning rather than an error because a local child floats
-              at the read clock, so a structure that was acyclic when the `add` was accepted can
-              become cyclic when that item is released again — and a read must not fail because
-              someone else released an eBOM revision.
+              walking it reached a cycle. The rest of the tree is still returned.
+            - `MEMBER_ADD_COLLISION` — one BOM position was asserted by **both** the branch and its
+              source, and the branch's content won. The two rows render as one, carrying
+              `isCollapsedCollision: true`. Not raised once a pull has retired a *converged* local
+              add, because only the source asserts the position from then on.
         message:
           type: string
           description: Human-readable, from a Custom Label. Translated; never parse it.
         itemId:
           oneOf: [{ $ref: '#/components/schemas/SalesforceId' }, { type: 'null' }]
-          description: Present on `MIXED_REVISION` — the item rendered at more than one revision.
+          description: |
+            Present on `MIXED_REVISION` — the item rendered at more than one revision — and on
+            `MEMBER_ADD_COLLISION`, naming the child item whose position collapsed.
         itemRevisionIds:
           type: array
           description: Present on `MIXED_REVISION` — the revisions in play.
@@ -1617,8 +1647,8 @@ components:
         errorCode:
           oneOf: [{ type: string }, { type: 'null' }]
           description: |
-            An `MbomErrorCode` name on failure, null on success. Note the key is **`errorCode`**
-            here, inside a per-operation result — the top-level *error body* uses `code`.
+            The error code on failure, null on success. Note the key is **`errorCode`** here, inside
+            a per-operation result — the top-level *error body* uses `code`.
         message:
           oneOf: [{ type: string }, { type: 'null' }]
           description: Human-readable, from a Custom Label. Never parsed.
@@ -1702,10 +1732,8 @@ components:
         warnings:
           type: array
           description: |
-            **Drift only** — `BASELINE_COUNT_DRIFT` and `BASELINE_PROVENANCE_DRIFT`. Mixed-revision
-            warnings from the underlying resolution are deliberately not forwarded: they are advice
-            about a branch someone is still editing, and a baseline is a record of a decision already
-            taken.
+            **Drift only** — `BASELINE_COUNT_DRIFT`. Mixed-revision and collision warnings from the
+            underlying resolution are not forwarded.
           items: { $ref: '#/components/schemas/TreeWarning' }
 
     # -------------------------------------------------- pull
@@ -1725,6 +1753,7 @@ components:
         - override-superseded
         - override-orphaned
         - member-add-collision
+        - member-add-converged
 
     Decision:
       type: string
@@ -1920,8 +1949,11 @@ components:
             the diff cannot join on it.
         label:
           type: string
-          description: Short display label for the member.
-          examples: ['ASM-A']
+          description: |
+            Short display label for the member — the **child item's** item number
+            (`Item__c.Name`). On a `source` target it is the root item's number instead, because
+            that entry is about the root item and has no child.
+          examples: ['Motor-002']
         path:
           type: array
           description: Breadcrumb from the root to this member's parent, for UI context.
@@ -2026,25 +2058,39 @@ components:
         applied:
           type: array
           description: |
-            Every entry that took an explicit decision, plus every `override-retained` and
-            `override-superseded` outcome — the set a caller needs to reconcile its held preview
-            against what actually happened. (Re-previewing immediately after a commit is always
-            `hasChanges: false`, so this is the only place to learn it.)
+            Every entry that took an explicit decision, plus every `override-retained`,
+            `override-superseded` and `member-add-converged` outcome — the set a caller needs to
+            reconcile its held preview against what actually happened. (Re-previewing immediately
+            after a commit is always `hasChanges: false`, so this is the only place to learn it.)
+
+            `member-add-converged` reports `action: "retired"`; see the endpoint description.
           items: { $ref: '#/components/schemas/AppliedEntry' }
 
     AppliedEntry:
       type: object
+      description: |
+        One outcome the commit is reporting back. Four kinds appear here and no others:
+        `override-orphaned` (the decision you supplied), `override-retained` and
+        `override-superseded` (informational), and `member-add-converged` (retired by the commit).
+
+        A re-preview straight after a commit is always `hasChanges: false`, so this array is the
+        only place the retained and superseded outcomes can be read.
       required: [entryId, kind]
       properties:
         entryId: { type: string }
         kind:
           type: string
-          enum: [override-orphaned, override-retained, override-superseded]
+          enum: [override-orphaned, override-retained, override-superseded, member-add-converged]
         action:
           oneOf: [{ type: string }, { type: 'null' }]
           description: |
-            The decided action — `convert-to-native` or `remove` — for an `override-orphaned` entry.
-            Null for a kind that took no decision.
+            What was done:
+
+            - `convert-to-native` or `remove` — the decision supplied for an `override-orphaned`
+              entry.
+            - `retired` — on `member-add-converged`. The commit appended a `Revert` delta dropping
+              the branch's now-redundant local assertion. No decision is accepted for this kind.
+            - `null` — on `override-retained` and `override-superseded`, where nothing was written.
         edgeId:
           oneOf: [{ $ref: '#/components/schemas/SalesforceId' }, { type: 'null' }]
           description: The branch-owned `Assembly_CI__c` this entry's target names, if any.
@@ -2065,9 +2111,8 @@ components:
         code:
           type: string
           description: |
-            An `MbomErrorCode` name, or `INTERNAL_ERROR` on a 500. `INTERNAL_ERROR` is deliberately
-            **not** in the enum: every value there is a client error by construction, and a code
-            exists so a client can branch on it — which it cannot usefully do for a 500.
+            The stable error code. Every value below is a client error; a 500 carries
+            `INTERNAL_ERROR`, which is listed here for completeness but is not a code to branch on.
           enum:
             [CLAIM_REQUIRED, ALREADY_CLAIMED, ALREADY_EXCLUDED, NOT_SUPPLIED, NO_OVERRIDE,
              HARD_DELETE_BLOCKED, IMMUTABLE_FIELD, NOT_RELEASED, STALE_REVISION, ALREADY_PRESENT,
@@ -2166,7 +2211,7 @@ components:
             dispositionRequired:
               value:
                 code: DISPOSITION_REQUIRED
-                message: 'This pull orphans an override you made. Choose to keep it as branch-owned content or remove it before committing. (f4880c6b3e1a9d75, ASM-C)'
+                message: 'This pull orphans an override you made. Choose to keep it as branch-owned content or remove it before committing. (f4880c6b3e1a9d75, Harness-011)'
 
     PullUnprocessable:
       description: |
@@ -2189,14 +2234,12 @@ components:
             cycle:
               value:
                 code: CYCLE_DETECTED
-                message: 'This change would make the child an ancestor of its own parent, which no BOM can represent. (beneath Assy-100 rev-2 at edge ASM-C)'
+                message: 'This change would make the child an ancestor of its own parent, which no BOM can represent. (beneath Assy-100 rev-2 at edge Harness-011)'
 
     InternalError:
       description: |
-        500. Unhandled server-side failure. **Not** an `MbomErrorCode` — the body carries
-        `INTERNAL_ERROR` plus the exception type and message, and never the stack trace. It is never
-        answered as a 200: swallowing an unexpected failure would let a half-applied delta batch look
-        successful.
+        500. Unhandled server-side failure. The body carries `INTERNAL_ERROR` plus the exception
+        type and message, and never the stack trace. Never answered as a 200.
       content:
         application/json:
           schema: { $ref: '#/components/schemas/RestError' }
@@ -2493,8 +2536,8 @@ components:
         resolutionTimePoint: '2026-04-06T14:31:02.000Z'
         rows: []
         warnings:
-          - warningCode: BASELINE_PROVENANCE_DRIFT
-            message: 'This baseline now resolves a different mix of inherited and modified rows than when it was cut. The rows themselves are unchanged.'
+          - warningCode: BASELINE_COUNT_DRIFT
+            message: 'This baseline now resolves a different number of rows than when it was cut. The stored timepoint has not moved; something it depends on has.'
             itemId: null
             itemRevisionIds: []
             governingTimestamps: []
@@ -2521,8 +2564,8 @@ components:
           acceptedAt: null
         hasChanges: true
         summary:
-          total: 5
-          informational: 4
+          total: 6
+          informational: 5
           required: 1
           byKind:
             source-version-advance: 1
@@ -2530,6 +2573,7 @@ components:
             override-retained: 1
             member-added: 1
             override-orphaned: 1
+            member-add-converged: 1
         entries:
           - entryId: '5c1e0a77f9b34d20'
             kind: source-version-advance
@@ -2559,7 +2603,7 @@ components:
               ciType: assembly-edge
               edgeId: null
               edgeKey: a0Bg8000000Ab11EAC
-              label: ASM-B
+              label: Bracket-005
               path:
                 - { ciType: source, label: Assy-100, edgeId: null, edgeKey: null }
             current:
@@ -2602,7 +2646,7 @@ components:
               ciType: assembly-edge
               edgeId: a1Eg8000000AbD1EAK
               edgeKey: a0Bg8000000Ab10EAC
-              label: ASM-A
+              label: Motor-002
               path:
                 - { ciType: source, label: Assy-100, edgeId: null, edgeKey: null }
             current:
@@ -2645,7 +2689,7 @@ components:
               ciType: assembly-edge
               edgeId: null
               edgeKey: a0Bg8000000Ab13EAC
-              label: ASM-D
+              label: Panel-300
               path:
                 - { ciType: source, label: Assy-100, edgeId: null, edgeKey: null }
             current: null
@@ -2675,7 +2719,7 @@ components:
               ciType: assembly-edge
               edgeId: a1Eg8000000AbD3EAK
               edgeKey: a0Bg8000000Ab12EAC
-              label: ASM-C
+              label: Harness-011
               path:
                 - { ciType: source, label: Assy-100, edgeId: null, edgeKey: null }
             current:
@@ -2693,6 +2737,49 @@ components:
                 quantity: 3
                 findNumber: 30
             candidate: null
+
+          - entryId: '2d6be1470f83a9c5'
+            kind: member-add-converged
+            decision: informational
+            availableActions: []
+            retargeted: null
+            overrideKind: null
+            message: 'The newer revision now supplies this member exactly as you added it. Your local copy is retired and the position becomes inherited content.'
+            target:
+              ciType: assembly-edge
+              edgeId: a1Eg8000000AbD5EAK
+              edgeKey: 'local-a1Bg8000000AbCdEAK-a02g8000000Ab01EAC-a02g8000000Ab24EAC'
+              label: Label-400
+              path:
+                - { ciType: source, label: Assy-100, edgeId: null, edgeKey: null }
+            current:
+              provenance: local
+              governingClock: branch
+              governingTimestamp: '2026-04-05T17:22:03.518Z'
+              detail:
+                ciType: assembly-edge
+                parentItemId: a02g8000000Ab01EAC
+                parentItemNumber: Assy-100
+                childItemId: a02g8000000Ab24EAC
+                childItemNumber: Label-400
+                childItemRevisionId: a0Ag8000000Ab71EAC
+                childRevisionLabel: rev-1
+                quantity: 1
+                findNumber: 60
+            candidate:
+              provenance: inherited
+              governingClock: source
+              governingTimestamp: '2026-04-02T00:00:00.000Z'
+              detail:
+                ciType: assembly-edge
+                parentItemId: a02g8000000Ab01EAC
+                parentItemNumber: Assy-100
+                childItemId: a02g8000000Ab24EAC
+                childItemNumber: Label-400
+                childItemRevisionId: a0Ag8000000Ab71EAC
+                childRevisionLabel: rev-1
+                quantity: 1
+                findNumber: 60
         warnings: []
         truncated: false
         entriesLimit: 200
@@ -2778,7 +2865,7 @@ components:
               ciType: assembly-edge
               edgeId: a1Eg8000000AbD3EAK
               edgeKey: a0Bg8000000Ab12EAC
-              label: ASM-C
+              label: Harness-011
               path: [{ ciType: source, label: Assy-100, edgeId: null, edgeKey: null }]
         warnings: []
         truncated: true
@@ -2801,6 +2888,10 @@ components:
             kind: override-retained
             action: null
             edgeId: a1Eg8000000AbD1EAK
+          - entryId: '2d6be1470f83a9c5'
+            kind: member-add-converged
+            action: retired
+            edgeId: a1Eg8000000AbD5EAK
 
     PullCommitAlreadyCurrent:
       value:

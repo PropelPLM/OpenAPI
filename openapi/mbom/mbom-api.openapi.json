@@ -4,7 +4,7 @@
     "title": "Propel MBOM API",
     "version": "1.0.0",
     "summary": "Create, read, edit, baseline and reconcile a Manufacturing BOM.",
-    "description": "The complete REST surface of Propel's Manufacturing BOM (MBOM), built on the new\n**branch / baseline / configuration-item** framework. Eight endpoints cover the whole\nlifecycle: create an MBOM over a released eBOM revision, read its structure, edit it with\ndelta operations, freeze it as a baseline, and reconcile it against a newer eBOM revision.\n\n---\n\n## Read this first: the eight ideas the whole API rests on\n\n### 1. An MBOM inherits its structure. It never copies it.\n\nCreating an MBOM writes **four records and not one row of BOM structure**. The branch stores\nonly its own *deltas*; everything else is resolved at read time by walking the live legacy\n`Assembly__c` graph beneath the accepted eBOM root revision. An untouched branch holds zero\nper-edge records however many times it is read.\n\n### 2. `T_R` — the pinned source clock\n\nWhen an MBOM is created (or a pull is committed), the accepted root revision's\n**release date** is stamped once as `Source_TimePoint__c`. That timestamp is **T_R**, and every\ninherited row resolves against it: a child item renders at whichever revision was released as\nof T_R.\n\nT_R is *stamped, then read* — never re-derived. So when engineering releases `Assy-100` rev-2,\n**nothing happens to the MBOM**. It still resolves against rev-1's T_R until someone explicitly\naccepts the newer revision with a [pull](#tag/Pull).\n\n### 3. `asOf` — the branch clock, and why there are two\n\nEvery read also takes an `asOf` timestamp (defaulting to now). That one governs the *branch's*\nown content — its deltas, its locally added parts, its substitutes.\n\nTwo clocks are therefore legitimately in play at once, and each row states which one governs it\n(`TreeRowDTO.governingTimestamp`, `MemberState.governingClock`):\n\n| Row kind | Governing clock |\n|---|---|\n| `inherited` — supplied by the source, untouched | **T_R** (`source`) |\n| `claimed` — the branch took copy-on-write ownership | **T_R** for the child revision it pins |\n| `local` — branch-owned, no upstream provenance | **`asOf`** (`branch`) |\n| a *substitute* (from `replace`) | **`asOf`** — its child floats |\n\nA direct consequence is that **one item can render at two different revisions in the same\ntree**. That is expected, not a fault, and is reported as a `mixed-revision` warning beside the\ndata rather than an error instead of it.\n\n### 4. Provenance: `inherited` / `claimed` / `local`\n\nDerived at read time, never stored. `claimed` and `local` differ by exactly one field on the\nwinning delta row (`Overrides_Source__c` set vs. null), and that difference is what makes\n\"what did I change relative to upstream?\" answerable.\n\n### 5. Copy-on-write: you must `claim` before you can edit\n\nAn inherited row is read-only. Editing it is refused with `CLAIM_REQUIRED`, carrying the eBOM\nline id so the client can offer the claim. Divergence from upstream is always an explicit act.\n\n### 6. Nothing is ever deleted\n\nRemoval is an **exclude delta** — a tombstone appended to an append-only log. `restore` lifts\nit. A hard delete of any branch-owned row is refused (`HARD_DELETE_BLOCKED`). This is what makes\na read at a past `asOf`, and therefore a baseline, reproducible.\n\n### 7. A baseline stores a timepoint, not rows\n\nCutting a baseline records one timestamp and freezes the revisions it resolved to. Reading it\n**re-resolves** the branch at that timestamp. Two stored counts act as canaries\n(`BASELINE_COUNT_DRIFT`, `BASELINE_PROVENANCE_DRIFT`) if something the resolution depends on has\nmoved since.\n\n### 8. \"Pull\", not \"merge\"\n\nA pull is the **downstream-initiated acceptance of a newer upstream source version**, matching\n`Branch_Source_CI__c.Source_Type__c`. The word *merge* is deliberately reserved for the Phase 2\nbranch-to-branch operation, which is bidirectional and common-ancestor-based — genuinely\ndifferent.\n\n---\n\n## Response and error conventions\n\nThe MBOM API does **not** use the Propel framework's `RestResponseHandler`. Each route\nserialises through `MbomHttp` directly onto the HTTP response, so:\n\n- Success and error bodies are **plain JSON, never wrapped** in the framework's\n  `entity` / `entities` envelope.\n- **Error bodies key the code as `code`, not `errorCode`.** `errorCode` is the framework's key;\n  it appears in this API only *inside* a delta batch's per-operation `results[]`.\n- **Nulls are not suppressed.** A field a producer never set for that case is genuinely absent\n  or explicitly `null`, and the two are meaningful — see `DeltaResult.forked`.\n- `code` values come from `MbomErrorCode`, a fixed enum. **The code is the contract; the message\n  is not.** Messages are Custom Labels and are translated; switch on `code`, never on text.\n\n### Status-code scheme\n\n| Status | Meaning |\n|---|---|\n| **400** | The request could not be read, or a value is out of range. Fix the request. |\n| **403** | No permission. The body carries the label only — never the object that was denied. |\n| **404** | The path, or an id in the body, names nothing. |\n| **409** | Well formed, and **retryable after changing state** — claim it first, restore it first, re-preview. |\n| **413** | More than 200 operations in one delta batch. |\n| **422** | Well formed, but **impossible against the model**. Retrying unchanged will never succeed (a cycle is still a cycle). |\n| **500** | Unmodelled server failure. Carries the exception type and message, never the stack trace. |\n\nThe 409/422 split is deliberate: a client that retries on a generic 4xx would spin forever on a\ncycle, and the two cases want different UI.\n\n---\n\n## Design intent: MBOM-specific paths, generic vocabulary\n\nMBOM is the first application of a general branch / baseline / configuration-item framework. The\npath is namespaced under `/mbom` so MBOM-only rules have somewhere to live, but the nouns below\nthat segment — **branch**, **source**, **member**, **override**, **baseline** — are framework\nconcepts, not MBOM concepts. Everything MBOM-specific is confined to a single discriminated\nschema, `AssemblyEdgeDetail`, reached through `MemberState.detail` and keyed by `ciType`. A\nsecond configuration-item type adds a sibling schema there and touches nothing else.\n\n## Routing\n\nRouted through `EntryAPI` → `EntryRoute` → `MbomRoute` → (`MbomCreateRoute` | `MbomBranchRoute` |\n`MbomSourceRoute` | `MbomBaselineRoute`) in `src/main/default/classes/api/`, **not** a standalone\n`@RestResource`.\n\nNote there is **no `branchId` path segment on the source endpoints**: a source already names its\nowning branch through `Branch_Source_CI__c.Downstream_Branch__c`. `branchId` still appears in the\npull-preview *body*, denormalised for display.\n",
+    "description": "The complete REST surface of Propel's Manufacturing BOM (MBOM), built on the new\n**branch / baseline / configuration-item** framework. Eight endpoints cover the whole\nlifecycle: create an MBOM over a released eBOM revision, read its structure, edit it with\ndelta operations, freeze it as a baseline, and reconcile it against a newer eBOM revision.\n\n---\n\n## Read this first: the eight ideas the whole API rests on\n\n### 1. An MBOM inherits its structure. It never copies it.\n\nCreating an MBOM writes **four records and not one row of BOM structure**. The branch stores\nonly its own *deltas*; everything else is resolved at read time by walking the live legacy\n`Assembly__c` graph beneath the accepted eBOM root revision. An untouched branch holds zero\nper-edge records however many times it is read.\n\n### 2. `T_R` — the pinned source clock\n\nWhen an MBOM is created (or a pull is committed), the accepted root revision's\n**release date** is stamped once as `Source_TimePoint__c`. That timestamp is **T_R**, and every\ninherited row resolves against it: a child item renders at whichever revision was released as\nof T_R.\n\nT_R is *stamped, then read* — never re-derived. So when engineering releases `Assy-100` rev-2,\n**nothing happens to the MBOM**. It still resolves against rev-1's T_R until someone explicitly\naccepts the newer revision with a [pull](#tag/Pull).\n\n### 3. `asOf` — the branch clock, and why there are two\n\nEvery read also takes an `asOf` timestamp (defaulting to now). That one governs the *branch's*\nown content — its deltas, its locally added parts, its substitutes.\n\nTwo clocks are therefore legitimately in play at once, and each row states which one governs it\n(`TreeRowDTO.governingTimestamp`, `MemberState.governingClock`):\n\n| Row kind | Governing clock |\n|---|---|\n| `inherited` — supplied by the source, untouched | **T_R** (`source`) |\n| `claimed` — the branch took copy-on-write ownership | **T_R** for the child revision it pins |\n| `local` — branch-owned, no upstream provenance | **`asOf`** (`branch`) |\n| a *substitute* (from `replace`) | **`asOf`** — its child floats |\n\nA direct consequence is that **one item can render at two different revisions in the same\ntree**. That is expected, not a fault, and is reported as a `mixed-revision` warning beside the\ndata rather than an error instead of it.\n\n### 4. Provenance: `inherited` / `claimed` / `local`\n\nDerived at read time, never stored. `claimed` and `local` differ by exactly one field on the\nwinning delta row (`Overrides_Source__c` set vs. null), and that difference is what makes\n\"what did I change relative to upstream?\" answerable.\n\n### 5. Copy-on-write: you must `claim` before you can edit\n\nAn inherited row is read-only. Editing it is refused with `CLAIM_REQUIRED`, carrying the eBOM\nline id so the client can offer the claim. Divergence from upstream is always an explicit act.\n\n### 6. Nothing is ever deleted\n\nRemoval is an **exclude delta** — a tombstone appended to an append-only log. `restore` lifts\nit. A hard delete of any branch-owned row is refused (`HARD_DELETE_BLOCKED`). This is what makes\na read at a past `asOf`, and therefore a baseline, reproducible.\n\n### 7. A baseline stores a timepoint, not rows\n\nCutting a baseline records one timestamp and freezes the revisions it resolved to. Reading it\n**re-resolves** the branch at that timestamp. The stored member count acts as a canary\n(`BASELINE_COUNT_DRIFT`) if something the resolution depends on has moved since.\n\n### 8. \"Pull\", not \"merge\"\n\nA pull is the **downstream-initiated acceptance of a newer upstream source version**, matching\n`Branch_Source_CI__c.Source_Type__c`. The word *merge* is deliberately reserved for the Phase 2\nbranch-to-branch operation, which is bidirectional and common-ancestor-based — genuinely\ndifferent.\n\n---\n\n## Response and error conventions\n\nThese conventions differ from other Propel REST endpoints:\n\n- Success and error bodies are **plain JSON, never wrapped** in an\n  `entity` / `entities` envelope.\n- **Error bodies key the code as `code`, not `errorCode`.** `errorCode` appears in this API only\n  *inside* a delta batch's per-operation `results[]`.\n- **Nulls are not suppressed.** A field left null for that case is meaningfully null — see\n  `DeltaResult.forked`, where `null` and `false` say different things.\n- **The code is the contract; the message is not.** Messages are translated. Switch on `code`,\n  never on text.\n\n### Status-code scheme\n\n| Status | Meaning |\n|---|---|\n| **400** | The request could not be read, or a value is out of range. Fix the request. |\n| **403** | No permission. The body carries the label only — never the object that was denied. |\n| **404** | The path, or an id in the body, names nothing. |\n| **409** | Well formed, and **retryable after changing state** — claim it first, restore it first, re-preview. |\n| **413** | More than 200 operations in one delta batch. |\n| **422** | Well formed, but **impossible against the model**. Retrying unchanged will never succeed (a cycle is still a cycle). |\n| **500** | Unmodelled server failure. Carries the exception type and message, never the stack trace. |\n\nThe 409/422 split is deliberate: a client that retries on a generic 4xx would spin forever on a\ncycle, and the two cases want different UI.\n\n---\n\n## Design intent: MBOM-specific paths, generic vocabulary\n\nMBOM is the first application of a general branch / baseline / configuration-item framework. The\npath is namespaced under `/mbom` so MBOM-only rules have somewhere to live, but the nouns below\nthat segment — **branch**, **source**, **member**, **override**, **baseline** — are framework\nconcepts, not MBOM concepts. Everything MBOM-specific is confined to a single discriminated\nschema, `AssemblyEdgeDetail`, reached through `MemberState.detail` and keyed by `ciType`. A\nsecond configuration-item type adds a sibling schema there and touches nothing else.\n\n## Paths\n\nThere is **no `branchId` path segment on the source endpoints**: a source already names its\nowning branch. `branchId` still appears in the pull-preview *body*, denormalised for display.\n",
     "contact": {
       "name": "Propel PLM Engineering"
     },
@@ -35,12 +35,13 @@
           "description": "My Domain host for the target org."
         },
         "namespace": {
-          "default": "",
+          "default": "PDLM/",
           "enum": [
-            "",
-            "ksplm/"
+            "PDLM/",
+            "ksplm/",
+            ""
           ],
-          "description": "Empty in a scratch/dev org where PLM is deployed unmanaged (`sfdx-project.json` sets\n`\"namespace\": \"\"`). `ksplm/` in a package org, where the managed-package namespace\nprefixes the REST path — `RestRequestHandlerTest` exercises `/ksplm/api/v4/...`.\n"
+          "description": "The managed-package namespace prefixing the REST path. `PDLM/` for the MBOM/BOM package,\ngiving `/services/apexrest/PDLM/api/v4/mbom/...`. `ksplm/` for the core PLM package.\nEmpty only for a genuinely unmanaged deployment.\n\n`GET {base}/v4` returns `\"v4 live\"` when the base URL and namespace resolve.\n"
         }
       }
     }
@@ -80,7 +81,7 @@
         ],
         "operationId": "createMbom",
         "summary": "Create an MBOM over a released eBOM revision",
-        "description": "Creates an MBOM header, its first branch, the branch's eBOM source lineage, and that\nsource's first acceptance — **four records in one transaction, and zero rows of BOM\nstructure** (`MbomCreateService`).\n\nThe response returns all four ids rather than just `mbomId`, because a caller that had to go\nlooking for the other three would be querying schema this API exists to hide. The one you\nwill use most is `branchSourceCiId` — it is the `sourceId` every `/sources/...` endpoint\ntakes.\n\n## The root revision must be Released\n\nIts `Released_Date_Time__c` becomes **T_R**, the timepoint every inherited row is pinned at.\nAn unreleased revision has no such date, so there is nothing to pin to.\n\nFour shapes are refused with `NOT_RELEASED` (409, not 400 — releasing the revision makes the\nidentical request succeed): not released; **Cancelled**; **Expired**; released but carrying\nno release date. Cancelled and Expired are excluded because the eBOM's own as-of read would\nnever resolve them either.\n\n## Timestamps stamped here\n\n| Field | Value | Why it matters |\n|---|---|---|\n| `Source_TimePoint__c` (**T_R**) | the root revision's release date | what inherited rows resolve at, forever |\n| `Accepted_At__c` | the **wall clock**, now | which acceptance governs a given `asOf` |\n\nA consequence worth knowing before you write a test: because `Accepted_At__c` is the wall\nclock, a branch created now renders **nothing** when read at an `asOf` in the past. That is\nthe acceptance not existing yet at that timestamp, not a defect.\n\n## Access\n\nGated **before the body is read**: a caller with no create grant gets 403 whatever they sent.\nRequires create on `MBOM__c`, `Branch__c`, `Branch_Source_CI__c` and\n`Branch_Source_CI_Rev__c`, plus read on `Item_Revision__c`. All five are named so a partial\ngrant is a clean 403 rather than a 500 out of the middle of the DML.\n",
+        "description": "Creates an MBOM header, its first branch, the branch's eBOM source lineage, and that\nsource's first acceptance — **four records in one transaction, and zero rows of BOM\nstructure**.\n\nThe response returns all four ids rather than just `mbomId`, because a caller that had to go\nlooking for the other three would be querying schema this API exists to hide. The one you\nwill use most is `branchSourceCiId` — it is the `sourceId` every `/sources/...` endpoint\ntakes.\n\n## The root revision must be Released\n\nIts `Released_Date_Time__c` becomes **T_R**, the timepoint every inherited row is pinned at.\nAn unreleased revision has no such date, so there is nothing to pin to.\n\nFour shapes are refused with `NOT_RELEASED` (409, not 400 — releasing the revision makes the\nidentical request succeed): not released; **Cancelled**; **Expired**; released but carrying\nno release date. Cancelled and Expired are excluded because the eBOM's own as-of read would\nnever resolve them either.\n\n## Timestamps stamped here\n\n| Field | Value | Why it matters |\n|---|---|---|\n| `Source_TimePoint__c` (**T_R**) | the root revision's release date | what inherited rows resolve at, forever |\n| `Accepted_At__c` | the **wall clock**, now | which acceptance governs a given `asOf` |\n\nA consequence worth knowing before you write a test: because `Accepted_At__c` is the wall\nclock, a branch created now renders **nothing** when read at an `asOf` in the past. That is\nthe acceptance not existing yet at that timestamp, not a defect.\n\n## Access\n\nGated **before the body is read**: a caller with no create grant gets 403 whatever they sent.\nRequires create on `MBOM__c`, `Branch__c`, `Branch_Source_CI__c` and\n`Branch_Source_CI_Rev__c`, plus read on `Item_Revision__c`. All five are named so a partial\ngrant is a clean 403 rather than a 500 out of the middle of the DML.\n",
         "requestBody": {
           "required": true,
           "content": {
@@ -669,7 +670,7 @@
         ],
         "operationId": "getBaselineTree",
         "summary": "Read the rows a baseline captured",
-        "description": "Re-resolves the branch at the baseline's stored `Resolution_TimePoint__c` and returns the\nrows.\n\n## `asOf` is refused, not ignored\n\nEvery other tree read on this API takes one, and a client that has been sending it to\n`/branches/{id}/tree` will send it here. A baseline **pins its own timepoint**, so a second\none has nothing to answer — accepting it would give the same rows to every value and let a\ncaller believe they had asked a temporal question and got a temporal answer. Sending `asOf`\nis a `400 INVALID_REQUEST`.\n\n`flat` **is** honoured, because that is a shape and not a clock.\n\n## Differences from the branch read\n\n- **Excluded rows are filtered out.** A tree read renders a tombstone so the editor can see\n  what was removed; a baseline is the record of what the branch *contained*.\n- **`edgeId`, `edgeKey` and the per-row governing clock are suppressed** — a baseline row\n  does not pretend to answer questions it cannot. `isReplaced` **is** populated: leaving it\n  null would render a substituted part identically to an ordinary one.\n- **`warnings` carries drift only.** A `mixed-revision` warning is advice about a branch\n  someone is still editing; a baseline is a record of a decision already taken, so it is\n  deliberately not forwarded.\n\n## The two drift canaries\n\n| warningCode | What moved |\n|---|---|\n| `BASELINE_COUNT_DRIFT` | the baseline re-derived a **different number of rows** than its cut recorded — a corrected release date, an edit to an already-released BOM |\n| `BASELINE_PROVENANCE_DRIFT` | the same row count, but a **different number of `claimed` rows** — the signature of a `convert-to-native` flipping a row from `claimed` to `local` after the fact |\n\nBoth **warn rather than throw**: the rows returned are still the honest answer for the\nstored timepoint, and refusing to answer would be worse than answering with a caveat. Two\ncanaries rather than one because neither can see the other's drift.\n",
+        "description": "Re-resolves the branch at the baseline's stored `Resolution_TimePoint__c` and returns the\nrows.\n\n## `asOf` is refused, not ignored\n\nEvery other tree read on this API takes one, and a client that has been sending it to\n`/branches/{id}/tree` will send it here. A baseline **pins its own timepoint**, so a second\none has nothing to answer — accepting it would give the same rows to every value and let a\ncaller believe they had asked a temporal question and got a temporal answer. Sending `asOf`\nis a `400 INVALID_REQUEST`.\n\n`flat` **is** honoured, because that is a shape and not a clock.\n\n## Differences from the branch read\n\n- **Excluded rows are filtered out.** A tree read renders a tombstone so the editor can see\n  what was removed; a baseline is the record of what the branch *contained*.\n- **`edgeId`, `edgeKey` and the per-row governing clock are suppressed** — a baseline row\n  does not pretend to answer questions it cannot. `isReplaced` **is** populated: leaving it\n  null would render a substituted part identically to an ordinary one.\n- **`warnings` carries drift only.** A `mixed-revision` warning is advice about a branch\n  someone is still editing; a baseline is a record of a decision already taken, so it is\n  deliberately not forwarded.\n\n## The drift canary\n\n| warningCode | What moved |\n|---|---|\n| `BASELINE_COUNT_DRIFT` | the baseline re-derived a **different number of rows** than its cut recorded — a corrected release date, an edit to an already-released BOM |\n\nIt **warns rather than throws**: the rows returned are still the honest answer for the\nstored timepoint. It is the only drift signal a baseline read carries.\n",
         "parameters": [
           {
             "$ref": "#/components/parameters/BaselineId"
@@ -692,7 +693,7 @@
                     "$ref": "#/components/examples/BaselineTreeClean"
                   },
                   "drifted": {
-                    "summary": "Provenance drift after a `convert-to-native`",
+                    "summary": "Count drift after a direct edit to an already-released eBOM",
                     "$ref": "#/components/examples/BaselineTreeDrift"
                   }
                 }
@@ -736,7 +737,7 @@
         ],
         "operationId": "previewMbomPull",
         "summary": "Preview the effect of accepting a newer eBOM revision",
-        "description": "Diffs the eBOM resolved at the source's current T_R against the eBOM resolved at the\ncandidate root revision's release date, and returns every difference as an individually\naddressable entry.\n\n**This call is pure.** It creates and modifies nothing — no `Branch_Member__c`, no\n`CI_Rev__c`, no source revision. Calling it twice with the same inputs against an unchanged\norg returns identical output, including identical `entryId` values.\n\n**Not every entry is a decision.** Most are informational: the caller is being told what will\nhappen, not asked. Only `override-orphaned` blocks a commit.\n\n**Already current is not an error.** If the branch already resolves against the newest\nreleased root revision, this returns `200` with `hasChanges: false` and an empty `entries`\narray — correct for a read, where a write would throw.\n\n## The correlation key — why a pull doesn't orphan every claim on every release\n\nThe two traversals are correlated on **`(Parent_Item__c, Item__c, Secondary_Unique_Key__c)`**\n— the legacy `Assembly__c.Tree_Unique__c` with the parent *revision* swapped for the parent\n*item*. **Not** on `Assembly_CI__c.Edge_Key__c`.\n\nThis is the load-bearing decision of the whole feature. When a parent item revs, Propel\nclones its entire BOM into new `Assembly__c` rows with new ids — so a branch that claimed a\nline under rev-1 holds a line id that does not exist under rev-2. A join on `Edge_Key__c`\nwould orphan every claimed edge and re-add every upstream line **on every single pull**. The\nparent item does not move when its revision does, which is exactly what lets this key survive\nthe clone. `Edge_Key__c` still identifies the edge *for display*; it just is not the join key.\n\n`Secondary_Unique_Key__c` rather than `Find_Number__c` because find-number uniqueness is org\nconfiguration, and a key built on it would give two orgs with identical data different diffs.\n\n## The two sides are deliberately asymmetric\n\n- **current** — the branch resolved at the accepted T_R, *with* its own deltas overlaid.\n- **candidate** — the **raw** upstream walk at the candidate T_R, with **no overlay at all**.\n\nOverlaying the branch onto the candidate side would match nothing (the deltas are keyed on\nline ids that do not exist under the new root) and would append every delta as an unmatched\nlocal edge — which **resurrects the orphans**, correlating a claim on a removed line with the\nbranch's own edge so `override-orphaned` is never raised. That entry is the only required\ndecision in the entire feature; silently losing it would make a commit that should block\nsucceed.\n\n## Entry kinds\n\n| kind | decision | availableActions | Meaning |\n|---|---|---|---|\n| `source-version-advance` | informational | — | The root item revision advances; nothing structural beneath it changed. |\n| `member-version-advance` | informational | — | An edge's child resolves to a newer released revision because T_R moved. |\n| `member-added` | informational | — | The candidate adds an edge the branch has no native edge on. Enters automatically. |\n| `member-removed` | informational | — | The candidate removes an edge the branch never claimed or replaced. Applies automatically. |\n| `override-retained` | informational | — | The branch's override still differs from upstream; the branch wins and upstream is suppressed. `retargeted` distinguishes a suppressed **field value** from a suppressed **re-target**. |\n| `override-superseded` | informational | — | The branch's override now *matches* what the candidate would natively produce. |\n| `override-orphaned` | **required** | `convert-to-native`, `remove` | The candidate removes an edge the branch **claimed or replaced**. **Blocks the commit.** |\n| `member-add-collision` | informational | — | The candidate adds an edge whose correlation key coincides with a branch-**native** edge. The branch's content wins automatically. |\n\n### Why a revision advance is never a decision\n\nA revision is not an independently assertable value. Once you accept that the *line* exists,\nwhich revision it resolves to is a deterministic output of the as-of traversal against T_R —\nthere is no alternative to offer. The only way to freeze a revision is `claim`, a separate\nand heavier operation that takes ownership of the whole edge.\n\n### Why upstream re-pointing an edge at a *different item* is two entries\n\nThe correlation key includes the child item, so it never correlates as one matched pair. It\ndecomposes into an independent `member-removed` (or `override-orphaned`) and an independent\n`member-added`. `retargeted: true` therefore means a different child **revision**, not a\ndifferent child item.\n\n## Truncation\n\n`entriesLimit` caps how many **informational** entries come back. **`required` entries are\nnever truncated** — they block the commit, so hiding one would silently conceal a blocker.\n`summary` always reports the *untruncated* totals, and `diffFingerprint` always covers the\ncomplete diff, so a truncated response is still safe to commit from.\n\nThis call is pure and deterministic, so retrieving more needs no cursor: re-issue with a\nlarger `entriesLimit` and get back a longer, stable prefix of the same diff.\n\n## Access\n\n**Gated on write, not read.** A read-only user is rejected before a pull is even previewed —\nthe same `Branch_Source_CI__c` update grant `pull` itself requires.\n",
+        "description": "Diffs the eBOM resolved at the source's current T_R against the eBOM resolved at the\ncandidate root revision's release date, and returns every difference as an individually\naddressable entry.\n\n**This call is pure.** It creates and modifies nothing — no `Branch_Member__c`, no\n`CI_Rev__c`, no source revision. Calling it twice with the same inputs against an unchanged\norg returns identical output, including identical `entryId` values.\n\n**Not every entry is a decision.** Most are informational: the caller is being told what will\nhappen, not asked. Only `override-orphaned` blocks a commit.\n\n**Already current is not an error.** If the branch already resolves against the newest\nreleased root revision, this returns `200` with `hasChanges: false` and an empty `entries`\narray — correct for a read, where a write would throw.\n\n## The correlation key — why a pull doesn't orphan every claim on every release\n\nThe two traversals are correlated on **`(Parent_Item__c, Item__c, Secondary_Unique_Key__c)`**\n— the legacy `Assembly__c.Tree_Unique__c` with the parent *revision* swapped for the parent\n*item*. **Not** on `Assembly_CI__c.Edge_Key__c`.\n\nThis is the load-bearing decision of the whole feature. When a parent item revs, Propel\nclones its entire BOM into new `Assembly__c` rows with new ids — so a branch that claimed a\nline under rev-1 holds a line id that does not exist under rev-2. A join on `Edge_Key__c`\nwould orphan every claimed edge and re-add every upstream line **on every single pull**. The\nparent item does not move when its revision does, which is exactly what lets this key survive\nthe clone. `Edge_Key__c` still identifies the edge *for display*; it just is not the join key.\n\n`Secondary_Unique_Key__c` rather than `Find_Number__c` because find-number uniqueness is org\nconfiguration, and a key built on it would give two orgs with identical data different diffs.\n\n## The two sides are deliberately asymmetric\n\n- **current** — the branch resolved at the accepted T_R, *with* its own deltas overlaid.\n- **candidate** — the **raw** upstream walk at the candidate T_R, with **no overlay at all**.\n\nOverlaying the branch onto the candidate side would match nothing (the deltas are keyed on\nline ids that do not exist under the new root) and would append every delta as an unmatched\nlocal edge — which **resurrects the orphans**, correlating a claim on a removed line with the\nbranch's own edge so `override-orphaned` is never raised. That entry is the only required\ndecision in the entire feature; silently losing it would make a commit that should block\nsucceed.\n\n## Entry kinds\n\n| kind | decision | availableActions | Meaning |\n|---|---|---|---|\n| `source-version-advance` | informational | — | The root item revision advances; nothing structural beneath it changed. |\n| `member-version-advance` | informational | — | An edge's child resolves to a newer released revision because T_R moved. |\n| `member-added` | informational | — | The candidate adds an edge the branch has no native edge on. Enters automatically. |\n| `member-removed` | informational | — | The candidate removes an edge the branch never claimed or replaced. Applies automatically. |\n| `override-retained` | informational | — | The branch's override still differs from upstream; the branch wins and upstream is suppressed. `retargeted` distinguishes a suppressed **field value** from a suppressed **re-target**. |\n| `override-superseded` | informational | — | The branch's override now *matches* what the candidate would natively produce. |\n| `override-orphaned` | **required** | `convert-to-native`, `remove` | The candidate removes an edge the branch **claimed or replaced**. **Blocks the commit.** |\n| `member-add-collision` | informational | — | The candidate adds an edge whose correlation key coincides with a branch-**native** edge, and the two **differ**. The branch's content wins automatically and is left untouched. |\n| `member-add-converged` | informational | — | The same collision, except the candidate's quantity, find number **and** resolved child revision are all identical to the branch's own. The commit retires the branch's now-redundant local edge (`action: \"retired\"`); the position becomes ordinary inherited content. |\n\n`member-add-collision` and `member-add-converged` are the same coincidence resolving two\nways. Converged requires all three of quantity, find number and resolved child revision to\nmatch; any difference makes it a plain collision. Neither is ever a decision: on a\ncollision nothing is written and the branch's row stands, and on a converged entry the\ncommit retires the branch's local edge. An `override-superseded` override is never retired.\n\n### Why a revision advance is never a decision\n\nA revision is not an independently assertable value. Once you accept that the *line* exists,\nwhich revision it resolves to is a deterministic output of the as-of traversal against T_R —\nthere is no alternative to offer. The only way to freeze a revision is `claim`, a separate\nand heavier operation that takes ownership of the whole edge.\n\n### Why upstream re-pointing an edge at a *different item* is two entries\n\nThe correlation key includes the child item, so it never correlates as one matched pair. It\ndecomposes into an independent `member-removed` (or `override-orphaned`) and an independent\n`member-added`. `retargeted: true` therefore means a different child **revision**, not a\ndifferent child item.\n\n## Truncation\n\n`entriesLimit` caps how many **informational** entries come back. **`required` entries are\nnever truncated** — they block the commit, so hiding one would silently conceal a blocker.\n`summary` always reports the *untruncated* totals, and `diffFingerprint` always covers the\ncomplete diff, so a truncated response is still safe to commit from.\n\nThis call is pure and deterministic, so retrieving more needs no cursor: re-issue with a\nlarger `entriesLimit` and get back a longer, stable prefix of the same diff.\n\n## Access\n\n**Gated on write, not read.** A read-only user is rejected before a pull is even previewed —\nthe same `Branch_Source_CI__c` update grant `pull` itself requires.\n",
         "parameters": [
           {
             "$ref": "#/components/parameters/SourceId"
@@ -837,7 +838,7 @@
         ],
         "operationId": "commitMbomPull",
         "summary": "Commit a previewed pull, advancing T_R",
-        "description": "Accepts a newer eBOM root revision into the branch: appends a new `Branch_Source_CI_Rev__c`\nadvancing T_R, advances the source's root pointer, and applies the caller's\n`override-orphaned` dispositions — **all under one savepoint**.\n\nReturns **`201 Created`**, not 200: a new acceptance record genuinely exists.\n\n## The diff is never trusted from the client\n\nThis endpoint **re-resolves the same diff server-side**, through the same code path the\npreview used, and answers `STALE_REVISION` the moment the re-resolved `diffFingerprint`\ndisagrees with what you echoed back, or an `entryId` in `decisions[]` no longer names an\nentry in it. Re-preview and resubmit.\n\nA useful side effect: every preview-time failure mode (`NOT_RELEASED`,\n`CANDIDATE_ROOT_MISMATCH`, `CANDIDATE_NOT_NEWER`, `CYCLE_DETECTED`, `NOT_FOUND`) applies here\nfor free — nothing in the commit path re-implements them.\n\n## Decisions\n\n| Situation | Result |\n|---|---|\n| An `override-orphaned` entry with **no** decision | `409 DISPOSITION_REQUIRED` — the whole commit is rejected. There is no default-accept tier. |\n| A decision naming any **other** kind | `400 INVALID_REQUEST` — no other kind is ever actionable. |\n| An unrecognised `action` | `400 INVALID_REQUEST`. |\n\n| action | Effect |\n|---|---|\n| `convert-to-native` | Severs the provenance link, keeping the branch-owned content, which then resolves on the **branch** clock. Runs through the ordinary `convert-to-native` delta operation — every invariant that batch enforces applies unchanged. |\n| `remove` | Appends an **exclude** delta (a deletion marker). **Nothing is hard-deleted.** |\n\n## Override reconciliation: reported, never persisted\n\nFor every existing claimed/replaced field, the commit compares the override's current value\nagainst what the candidate traversal would natively produce:\n\n- **Differs** → reported as `override-retained` / **reaffirmed**. It stays active and\n  continues to govern future pulls. **Nothing new is persisted** — the comparison is\n  reconstructed from the accepted source version on every pull, so a \"reaffirmation\" record\n  would change no rendered value.\n- **Matches** → reported as `override-superseded`. Also **never deleted and never written**.\n  Retiring it would mean a branch that once happened to agree with upstream would silently\n  start accepting upstream changes from then on.\n\n`Edge_Key__c` and `Alias__c` are likewise **never re-stamped**. They keep meaning \"the\nupstream line this edge was originally minted against\", independent of the correlation key a\npull actually joins on.\n\n## Atomicity\n\nOne outer savepoint around both the disposition batch and the acceptance insert, rolled back\non any exception from either. A failure part way leaves the prior accepted revision and T_R\nin place, with no orphaned claim, exclude or override-status records.\n\n## The already-current commit\n\nA commit submitted when the candidate equals the currently-accepted root **still succeeds**:\nit appends a new acceptance (advancing `Accepted_At__c` with the same `Source_TimePoint__c`)\nand returns `applied: []`. Same reading the preview takes of the read side.\n\n## What a pull leaves alone\n\nBranch-**native** content — anything with no upstream provenance — is entirely unaffected.\n\n## Access\n\nRequires **create** on `Branch_Source_CI_Rev__c`, `Branch_Member__c`, `CI__c`, `CI_Rev__c`,\n`Assembly_CI__c` and `Assembly_CI_Rev__c`, **and edit** on `Branch_Source_CI__c`,\n`Assembly_CI__c` and `CI_Rev__c`. Both gates run **before the body is read**.\n",
+        "description": "Accepts a newer eBOM root revision into the branch: appends a new `Branch_Source_CI_Rev__c`\nadvancing T_R, advances the source's root pointer, applies the caller's `override-orphaned`\ndispositions, and retires any `member-add-converged` local edge — **all under one savepoint**.\n\nReturns **`201 Created`**, not 200: a new acceptance record genuinely exists.\n\n## The diff is never trusted from the client\n\nThis endpoint **re-resolves the same diff server-side**, through the same code path the\npreview used, and answers `STALE_REVISION` the moment the re-resolved `diffFingerprint`\ndisagrees with what you echoed back, or an `entryId` in `decisions[]` no longer names an\nentry in it. Re-preview and resubmit.\n\nA useful side effect: every preview-time failure mode (`NOT_RELEASED`,\n`CANDIDATE_ROOT_MISMATCH`, `CANDIDATE_NOT_NEWER`, `CYCLE_DETECTED`, `NOT_FOUND`) applies here\nfor free — nothing in the commit path re-implements them.\n\n## Decisions\n\n| Situation | Result |\n|---|---|\n| An `override-orphaned` entry with **no** decision | `409 DISPOSITION_REQUIRED` — the whole commit is rejected. There is no default-accept tier. |\n| A decision naming any **other** kind | `400 INVALID_REQUEST` — no other kind is ever actionable. |\n| An unrecognised `action` | `400 INVALID_REQUEST`. |\n\n| action | Effect |\n|---|---|\n| `convert-to-native` | Severs the provenance link, keeping the branch-owned content, which then resolves on the **branch** clock. Runs through the ordinary `convert-to-native` delta operation — every invariant that batch enforces applies unchanged. |\n| `remove` | Appends an **exclude** delta (a deletion marker). **Nothing is hard-deleted.** |\n\n## Override reconciliation: reported, never persisted\n\nFor every existing claimed/replaced field, the commit compares the override's current value\nagainst what the candidate traversal would natively produce:\n\n- **Differs** → reported as `override-retained` / **reaffirmed**. It stays active and\n  continues to govern future pulls. **Nothing new is persisted** — the comparison is\n  reconstructed from the accepted source version on every pull, so a \"reaffirmation\" record\n  would change no rendered value.\n- **Matches** → reported as `override-superseded`. Also **never deleted and never written**.\n  Retiring it would mean a branch that once happened to agree with upstream would silently\n  start accepting upstream changes from then on.\n\n`Edge_Key__c` and `Alias__c` are likewise **never re-stamped**. They keep meaning \"the\nupstream line this edge was originally minted against\", independent of the correlation key a\npull actually joins on.\n\n## Retiring a converged local add\n\nA `member-add-converged` entry is retired without a decision. \"Retired\" means **one appended\n`Branch_Member__c` row of `Delta_Type__c = 'Revert'`**, with `Overrides_Source__c` null —\nnothing is deleted, and a read dated before this commit still renders the local add. The\nposition becomes ordinary inherited content pinned at the new T_R, so it follows the source\nfrom then on.\n\nReported in `applied[]` as `{\"kind\": \"member-add-converged\", \"action\": \"retired\"}`, inside\nthe same savepoint as the rest of the commit.\n\n## Atomicity\n\nOne outer savepoint around both the disposition batch and the acceptance insert, rolled back\non any exception from either. A failure part way leaves the prior accepted revision and T_R\nin place, with no orphaned claim, exclude or override-status records.\n\n## The already-current commit\n\nA commit submitted when the candidate equals the currently-accepted root **still succeeds**:\nit appends a new acceptance (advancing `Accepted_At__c` with the same `Source_TimePoint__c`)\nand returns `applied: []`. Same reading the preview takes of the read side.\n\n## What a pull leaves alone\n\nBranch-**native** content is unaffected, with one exception: the `member-add-converged`\nretirement above. A local add that still differs from the source (`member-add-collision`) is\nleft untouched, as is native content the source never collided with.\n\n## Access\n\nRequires **create** on `Branch_Source_CI_Rev__c`, `Branch_Member__c`, `CI__c`, `CI_Rev__c`,\n`Assembly_CI__c` and `Assembly_CI_Rev__c`, **and edit** on `Branch_Source_CI__c`,\n`Assembly_CI__c` and `CI_Rev__c`. Both gates run **before the body is read**.\n",
         "parameters": [
           {
             "$ref": "#/components/parameters/SourceId"
@@ -1037,11 +1038,12 @@
       },
       "Provenance": {
         "type": "string",
-        "description": "Where a rendered row comes from. **Derived at read time, never stored** — `claimed` and\n`local` differ by exactly one field on the winning delta row.\n\n- `inherited` — supplied by the source; no branch-owned record exists.\n- `claimed` — the branch took copy-on-write ownership of a source-supplied member.\n- `local` — branch-owned with no upstream provenance (\"native\").\n\nThere is no `excluded` value: exclusion is tracked as a separate boolean alongside\nprovenance, never as a fourth value of it.\n",
+        "description": "Where a rendered row comes from. **Derived at read time, never stored** — `claimed` and\n`local` differ by exactly one field on the winning delta row.\n\n- `inherited` — supplied by the source; no branch-owned record exists.\n- `claimed` — the branch took copy-on-write ownership of a source-supplied member.\n- `local` — branch-owned with no upstream provenance (\"native\").\n- `nested` — a descendant of a locally added or substituted assembly, rendered from that\n  item's own eBOM. Read-only: every row in such a subtree carries `isEditable: false`, and\n  the pull diff excludes them entirely. Appears on tree rows only, never in a diff entry's\n  `MemberState`.\n\nThere is no `excluded` value: exclusion is tracked as a separate boolean alongside\nprovenance, never as a value of it.\n",
         "enum": [
           "inherited",
           "claimed",
-          "local"
+          "local",
+          "nested"
         ]
       },
       "GoverningClock": {
@@ -1276,6 +1278,10 @@
             "type": "boolean",
             "description": "False on any row inside the subtree of a locally added or substituted assembly. Every\ndelta op refuses those rows, so a UI offering an action on one is offering an action the\nAPI will reject.\n"
           },
+          "isCollapsedCollision": {
+            "type": "boolean",
+            "description": "True when one BOM position is asserted by both the branch and its source and the two\nrender as a single row, with the branch's content winning. A tree read carries a\n`MEMBER_ADD_COLLISION` warning alongside it.\n\nDefaults to `false`. Populated on baseline rows too, where — because a baseline\nforwards drift warnings only — it is the sole signal of the collapse.\n"
+          },
           "quantity": {
             "type": "number",
             "examples": [
@@ -1311,10 +1317,10 @@
             "enum": [
               "MIXED_REVISION",
               "BASELINE_COUNT_DRIFT",
-              "BASELINE_PROVENANCE_DRIFT",
-              "NESTED_CYCLE_PRUNED"
+              "NESTED_CYCLE_PRUNED",
+              "MEMBER_ADD_COLLISION"
             ],
-            "description": "- `MIXED_REVISION` — one item rendered at more than one revision in the same tree,\n  because two clocks are in play. Legal and expected; warned, never blocked.\n- `BASELINE_COUNT_DRIFT` — a baseline re-derived a different **row count** than its cut\n  recorded.\n- `BASELINE_PROVENANCE_DRIFT` — a baseline re-derived a different **claimed count**, the\n  row count unchanged. The signature of a `convert-to-native` after the fact.\n- `NESTED_CYCLE_PRUNED` — the subtree of a locally added assembly was dropped because\n  walking it reached a cycle. A warning rather than an error because a local child floats\n  at the read clock, so a structure that was acyclic when the `add` was accepted can\n  become cyclic when that item is released again — and a read must not fail because\n  someone else released an eBOM revision.\n"
+            "description": "The complete vocabulary.\n\n- `MIXED_REVISION` — one item rendered at more than one revision in the same tree,\n  because two clocks are in play. Legal and expected; warned, never blocked.\n- `BASELINE_COUNT_DRIFT` — a baseline re-derived a different **row count** than its cut\n  recorded.\n- `NESTED_CYCLE_PRUNED` — the subtree of a locally added assembly was dropped because\n  walking it reached a cycle. The rest of the tree is still returned.\n- `MEMBER_ADD_COLLISION` — one BOM position was asserted by **both** the branch and its\n  source, and the branch's content won. The two rows render as one, carrying\n  `isCollapsedCollision: true`. Not raised once a pull has retired a *converged* local\n  add, because only the source asserts the position from then on.\n"
           },
           "message": {
             "type": "string",
@@ -1329,7 +1335,7 @@
                 "type": "null"
               }
             ],
-            "description": "Present on `MIXED_REVISION` — the item rendered at more than one revision."
+            "description": "Present on `MIXED_REVISION` — the item rendered at more than one revision — and on\n`MEMBER_ADD_COLLISION`, naming the child item whose position collapsed.\n"
           },
           "itemRevisionIds": {
             "type": "array",
@@ -1548,7 +1554,7 @@
                 "type": "null"
               }
             ],
-            "description": "An `MbomErrorCode` name on failure, null on success. Note the key is **`errorCode`**\nhere, inside a per-operation result — the top-level *error body* uses `code`.\n"
+            "description": "The error code on failure, null on success. Note the key is **`errorCode`** here, inside\na per-operation result — the top-level *error body* uses `code`.\n"
           },
           "message": {
             "oneOf": [
@@ -1675,7 +1681,7 @@
           },
           "warnings": {
             "type": "array",
-            "description": "**Drift only** — `BASELINE_COUNT_DRIFT` and `BASELINE_PROVENANCE_DRIFT`. Mixed-revision\nwarnings from the underlying resolution are deliberately not forwarded: they are advice\nabout a branch someone is still editing, and a baseline is a record of a decision already\ntaken.\n",
+            "description": "**Drift only** — `BASELINE_COUNT_DRIFT`. Mixed-revision and collision warnings from the\nunderlying resolution are not forwarded.\n",
             "items": {
               "$ref": "#/components/schemas/TreeWarning"
             }
@@ -1693,7 +1699,8 @@
           "override-retained",
           "override-superseded",
           "override-orphaned",
-          "member-add-collision"
+          "member-add-collision",
+          "member-add-converged"
         ]
       },
       "Decision": {
@@ -2020,9 +2027,9 @@
           },
           "label": {
             "type": "string",
-            "description": "Short display label for the member.",
+            "description": "Short display label for the member — the **child item's** item number\n(`Item__c.Name`). On a `source` target it is the root item's number instead, because\nthat entry is about the root item and has no child.\n",
             "examples": [
-              "ASM-A"
+              "Motor-002"
             ]
           },
           "path": {
@@ -2248,7 +2255,7 @@
           },
           "applied": {
             "type": "array",
-            "description": "Every entry that took an explicit decision, plus every `override-retained` and\n`override-superseded` outcome — the set a caller needs to reconcile its held preview\nagainst what actually happened. (Re-previewing immediately after a commit is always\n`hasChanges: false`, so this is the only place to learn it.)\n",
+            "description": "Every entry that took an explicit decision, plus every `override-retained`,\n`override-superseded` and `member-add-converged` outcome — the set a caller needs to\nreconcile its held preview against what actually happened. (Re-previewing immediately\nafter a commit is always `hasChanges: false`, so this is the only place to learn it.)\n\n`member-add-converged` reports `action: \"retired\"`; see the endpoint description.\n",
             "items": {
               "$ref": "#/components/schemas/AppliedEntry"
             }
@@ -2257,6 +2264,7 @@
       },
       "AppliedEntry": {
         "type": "object",
+        "description": "One outcome the commit is reporting back. Four kinds appear here and no others:\n`override-orphaned` (the decision you supplied), `override-retained` and\n`override-superseded` (informational), and `member-add-converged` (retired by the commit).\n\nA re-preview straight after a commit is always `hasChanges: false`, so this array is the\nonly place the retained and superseded outcomes can be read.\n",
         "required": [
           "entryId",
           "kind"
@@ -2270,7 +2278,8 @@
             "enum": [
               "override-orphaned",
               "override-retained",
-              "override-superseded"
+              "override-superseded",
+              "member-add-converged"
             ]
           },
           "action": {
@@ -2282,7 +2291,7 @@
                 "type": "null"
               }
             ],
-            "description": "The decided action — `convert-to-native` or `remove` — for an `override-orphaned` entry.\nNull for a kind that took no decision.\n"
+            "description": "What was done:\n\n- `convert-to-native` or `remove` — the decision supplied for an `override-orphaned`\n  entry.\n- `retired` — on `member-add-converged`. The commit appended a `Revert` delta dropping\n  the branch's now-redundant local assertion. No decision is accepted for this kind.\n- `null` — on `override-retained` and `override-superseded`, where nothing was written.\n"
           },
           "edgeId": {
             "oneOf": [
@@ -2307,7 +2316,7 @@
         "properties": {
           "code": {
             "type": "string",
-            "description": "An `MbomErrorCode` name, or `INTERNAL_ERROR` on a 500. `INTERNAL_ERROR` is deliberately\n**not** in the enum: every value there is a client error by construction, and a code\nexists so a client can branch on it — which it cannot usefully do for a 500.\n",
+            "description": "The stable error code. Every value below is a client error; a 500 carries\n`INTERNAL_ERROR`, which is listed here for completeness but is not a code to branch on.\n",
             "enum": [
               "CLAIM_REQUIRED",
               "ALREADY_CLAIMED",
@@ -2429,7 +2438,7 @@
               "dispositionRequired": {
                 "value": {
                   "code": "DISPOSITION_REQUIRED",
-                  "message": "This pull orphans an override you made. Choose to keep it as branch-owned content or remove it before committing. (f4880c6b3e1a9d75, ASM-C)"
+                  "message": "This pull orphans an override you made. Choose to keep it as branch-owned content or remove it before committing. (f4880c6b3e1a9d75, Harness-011)"
                 }
               }
             }
@@ -2453,7 +2462,7 @@
               "cycle": {
                 "value": {
                   "code": "CYCLE_DETECTED",
-                  "message": "This change would make the child an ancestor of its own parent, which no BOM can represent. (beneath Assy-100 rev-2 at edge ASM-C)"
+                  "message": "This change would make the child an ancestor of its own parent, which no BOM can represent. (beneath Assy-100 rev-2 at edge Harness-011)"
                 }
               }
             }
@@ -2461,7 +2470,7 @@
         }
       },
       "InternalError": {
-        "description": "500. Unhandled server-side failure. **Not** an `MbomErrorCode` — the body carries\n`INTERNAL_ERROR` plus the exception type and message, and never the stack trace. It is never\nanswered as a 200: swallowing an unexpected failure would let a half-applied delta batch look\nsuccessful.\n",
+        "description": "500. Unhandled server-side failure. The body carries `INTERNAL_ERROR` plus the exception\ntype and message, and never the stack trace. Never answered as a 200.\n",
         "content": {
           "application/json": {
             "schema": {
@@ -2825,8 +2834,8 @@
           "rows": [],
           "warnings": [
             {
-              "warningCode": "BASELINE_PROVENANCE_DRIFT",
-              "message": "This baseline now resolves a different mix of inherited and modified rows than when it was cut. The rows themselves are unchanged.",
+              "warningCode": "BASELINE_COUNT_DRIFT",
+              "message": "This baseline now resolves a different number of rows than when it was cut. The stored timepoint has not moved; something it depends on has.",
               "itemId": null,
               "itemRevisionIds": [],
               "governingTimestamps": []
@@ -2858,15 +2867,16 @@
           },
           "hasChanges": true,
           "summary": {
-            "total": 5,
-            "informational": 4,
+            "total": 6,
+            "informational": 5,
             "required": 1,
             "byKind": {
               "source-version-advance": 1,
               "member-version-advance": 1,
               "override-retained": 1,
               "member-added": 1,
-              "override-orphaned": 1
+              "override-orphaned": 1,
+              "member-add-converged": 1
             }
           },
           "entries": [
@@ -2907,7 +2917,7 @@
                 "ciType": "assembly-edge",
                 "edgeId": null,
                 "edgeKey": "a0Bg8000000Ab11EAC",
-                "label": "ASM-B",
+                "label": "Bracket-005",
                 "path": [
                   {
                     "ciType": "source",
@@ -2962,7 +2972,7 @@
                 "ciType": "assembly-edge",
                 "edgeId": "a1Eg8000000AbD1EAK",
                 "edgeKey": "a0Bg8000000Ab10EAC",
-                "label": "ASM-A",
+                "label": "Motor-002",
                 "path": [
                   {
                     "ciType": "source",
@@ -3017,7 +3027,7 @@
                 "ciType": "assembly-edge",
                 "edgeId": null,
                 "edgeKey": "a0Bg8000000Ab13EAC",
-                "label": "ASM-D",
+                "label": "Panel-300",
                 "path": [
                   {
                     "ciType": "source",
@@ -3060,7 +3070,7 @@
                 "ciType": "assembly-edge",
                 "edgeId": "a1Eg8000000AbD3EAK",
                 "edgeKey": "a0Bg8000000Ab12EAC",
-                "label": "ASM-C",
+                "label": "Harness-011",
                 "path": [
                   {
                     "ciType": "source",
@@ -3087,6 +3097,61 @@
                 }
               },
               "candidate": null
+            },
+            {
+              "entryId": "2d6be1470f83a9c5",
+              "kind": "member-add-converged",
+              "decision": "informational",
+              "availableActions": [],
+              "retargeted": null,
+              "overrideKind": null,
+              "message": "The newer revision now supplies this member exactly as you added it. Your local copy is retired and the position becomes inherited content.",
+              "target": {
+                "ciType": "assembly-edge",
+                "edgeId": "a1Eg8000000AbD5EAK",
+                "edgeKey": "local-a1Bg8000000AbCdEAK-a02g8000000Ab01EAC-a02g8000000Ab24EAC",
+                "label": "Label-400",
+                "path": [
+                  {
+                    "ciType": "source",
+                    "label": "Assy-100",
+                    "edgeId": null,
+                    "edgeKey": null
+                  }
+                ]
+              },
+              "current": {
+                "provenance": "local",
+                "governingClock": "branch",
+                "governingTimestamp": "2026-04-05T17:22:03.518Z",
+                "detail": {
+                  "ciType": "assembly-edge",
+                  "parentItemId": "a02g8000000Ab01EAC",
+                  "parentItemNumber": "Assy-100",
+                  "childItemId": "a02g8000000Ab24EAC",
+                  "childItemNumber": "Label-400",
+                  "childItemRevisionId": "a0Ag8000000Ab71EAC",
+                  "childRevisionLabel": "rev-1",
+                  "quantity": 1,
+                  "findNumber": 60
+                }
+              },
+              "candidate": {
+                "provenance": "inherited",
+                "governingClock": "source",
+                "governingTimestamp": "2026-04-02T00:00:00.000Z",
+                "detail": {
+                  "ciType": "assembly-edge",
+                  "parentItemId": "a02g8000000Ab01EAC",
+                  "parentItemNumber": "Assy-100",
+                  "childItemId": "a02g8000000Ab24EAC",
+                  "childItemNumber": "Label-400",
+                  "childItemRevisionId": "a0Ag8000000Ab71EAC",
+                  "childRevisionLabel": "rev-1",
+                  "quantity": 1,
+                  "findNumber": 60
+                }
+              }
             }
           ],
           "warnings": [],
@@ -3196,7 +3261,7 @@
                 "ciType": "assembly-edge",
                 "edgeId": "a1Eg8000000AbD3EAK",
                 "edgeKey": "a0Bg8000000Ab12EAC",
-                "label": "ASM-C",
+                "label": "Harness-011",
                 "path": [
                   {
                     "ciType": "source",
@@ -3233,6 +3298,12 @@
               "kind": "override-retained",
               "action": null,
               "edgeId": "a1Eg8000000AbD1EAK"
+            },
+            {
+              "entryId": "2d6be1470f83a9c5",
+              "kind": "member-add-converged",
+              "action": "retired",
+              "edgeId": "a1Eg8000000AbD5EAK"
             }
           ]
         }
