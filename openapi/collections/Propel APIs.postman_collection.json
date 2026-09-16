@@ -9635,6 +9635,396 @@
 							"createdAt": "2026-09-04T13:53:21.000Z",
 							"updatedAt": "2026-09-04T13:55:30.000Z",
 							"uid": "46943044-ed3d83cb-c989-4b43-aef3-da7fcfd277bc"
+						},
+						{
+							"name": "Comparisons",
+							"item": [
+								{
+									"name": "Compare a Branch to its Source",
+									"event": [
+										{
+											"listen": "test",
+											"script": {
+												"type": "text/javascript",
+												"exec": [
+													"// The headline comparison. Chain the eBOM root the source currently supplies forward, so",
+													"// 'Compare a Branch to an eBOM Revision' below has a revision to point at.",
+													"if (pm.response.code === 200) {",
+													"    const b = pm.response.json();",
+													"    if (b.right.rootRevisionId) {",
+													"        pm.collectionVariables.set('mbomAgainstEbomRevisionId', b.right.rootRevisionId);",
+													"    }",
+													"    pm.collectionVariables.set('mbomCompareEntryId', b.entries.length ? b.entries[0].entryId : '');",
+													"",
+													"    pm.test('byKind is pre-seeded with all five kinds', () => {",
+													"        ['root-version-differs', 'member-added', 'member-removed', 'member-differs', 'member-unchanged']",
+													"            .forEach((kind) => pm.expect(b.summary.byKind).to.have.property(kind));",
+													"    });",
+													"",
+													"    pm.test('identical agrees with the entries, not with the summary', () => {",
+													"        if (b.truncated) return;  // a prefix cannot prove it",
+													"        const changed = b.entries.filter((e) => e.kind !== 'member-unchanged').length;",
+													"        pm.expect(b.identical).to.eql(changed === 0);",
+													"    });",
+													"}"
+												],
+												"id": "2d896844-8038-43e5-b7a9-0c660beb65f0"
+											}
+										}
+									],
+									"id": "1c91e910-bea0-4bf6-b79e-4c75c66c0859",
+									"protocolProfileBehavior": {
+										"disableBodyPruning": true
+									},
+									"request": {
+										"method": "GET",
+										"header": [
+											{
+												"key": "Accept",
+												"value": "application/json"
+											}
+										],
+										"url": {
+											"raw": "{{propelApiUrl}}/v4/mbom/branches/:branchId/comparison?againstType=source&againstId={{mbomSourceId}}&asOf=&includeUnchanged=false&entriesLimit=200",
+											"host": [
+												"{{propelApiUrl}}"
+											],
+											"path": [
+												"v4",
+												"mbom",
+												"branches",
+												":branchId",
+												"comparison"
+											],
+											"query": [
+												{
+													"key": "againstType",
+													"value": "source",
+													"description": "(Required) branch | baseline | source | ebom. Matched CASE-INSENSITIVELY at the route, but send lower case — that is the published spelling and what comes back in right.type."
+												},
+												{
+													"key": "againstId",
+													"value": "{{mbomSourceId}}",
+													"description": "(Required) Id of the Branch_Source_CI__c — returned as branchSourceCiId from Create an MBOM."
+												},
+												{
+													"key": "asOf",
+													"value": "",
+													"description": "(Optional, default now) The LEFT side's clock. Governs the branch's own deltas, local content and substitutes — never inherited content, which resolves at T_R. ISO-8601, e.g. 2026-02-01T00:00:00Z."
+												},
+												{
+													"key": "includeUnchanged",
+													"value": "false",
+													"description": "(Optional, default false) Emit a member-unchanged entry per matching correlation key, turning the response into the complete merged BOM. ONLY an explicit 'true' turns it on; anything else falls back to false rather than raising. Does not raise entriesLimit, and moves summary.total and summary.byKind but not summary.unchanged."
+												},
+												{
+													"key": "entriesLimit",
+													"value": "200",
+													"description": "(Optional, default 200) Caps entries as a plain prefix — a comparison has no required tier to protect. summary still reports untruncated totals. Must be a positive integer; entriesLimit=0 is a 400."
+												}
+											],
+											"variable": [
+												{
+													"id": "3911a3f7-2cb5-42bf-a859-08e1bc276c15",
+													"key": "branchId",
+													"value": "{{mbomBranchId}}",
+													"description": "(Required) Id of the Branch__c on the LEFT of the comparison — returned as branchId from Create an MBOM."
+												}
+											]
+										},
+										"description": "**The one to run first.** Answers *\"what have I changed relative to upstream?\"* — the branch with its deltas overlaid on the left, and what its source *supplies* on the right, with no deltas folded in.\n\n**This call is pure.** No DML anywhere behind it. Two calls with the same inputs against an unchanged org return identical output, `entryId` values included.\n\nEvery claim, exclude, add and replace the branch has made shows up here — except one worth knowing about up front: a member the branch **claimed but did not change** comes back `member-unchanged`, because provenance is reported, never classified. The same part at the same quantity in the same position is the same member however each side came to hold it. `left.provenance` is where you see the claim.\n\n## Path parameters\n\n| Parameter | Type | Required | Description |\n| --- | --- | --- | --- |\n| `branchId` | Id | **Yes** | The `Branch__c` on the **left**. A well-formed id of the wrong object is a 404 |\n\n## Query parameters\n\n| Parameter | Type | Required | Default | Description |\n| --- | --- | --- | --- | --- |\n| `againstType` | Enum | **Yes** | — | `branch` \\| `baseline` \\| `source` \\| `ebom`. Matched case-insensitively |\n| `againstId` | Id | **Yes** | — | The record the right side is. Must be the object `againstType` implies. **Missing is a 400; present but unusable is a 404** |\n| `asOf` | ISO-8601 | No | now | The **left** side's clock. Refused for a baseline left side |\n| `againstAsOf` | ISO-8601 | No | see below | The **right** side's clock. Refused for a baseline right side; defaults to an eBOM revision's own release date |\n| `includeUnchanged` | Boolean | No | `false` | Emit a `member-unchanged` entry per matching key. **Only an explicit `true` turns it on** — `1` and `yes` fall back to false rather than 400ing |\n| `entriesLimit` | Integer | No | 200 | Caps `entries` as a plain prefix. Must be positive; `0` is a 400. **Not raised by `includeUnchanged`** |\n\n## Response fields\n\n| Field | Description |\n| --- | --- |\n| `left` / `right` | What each side WAS: its type, id, label, root item and revision, and its two clocks. Published for both sides because `member-added` means nothing until you know what the right side is |\n| `identical` | True when nothing but `member-unchanged` was emitted. A `root-version-differs` entry alone makes it false |\n| `summary.total` / `summary.byKind` | Counts of entries **emitted** — both move with `includeUnchanged` |\n| `summary.added` / `removed` / `differing` / `unchanged` | Counts of **correlation keys** — none of them move with `includeUnchanged` |\n| `summary.unchanged` | Populated **whether or not the unchanged rows were asked for**. So it does NOT always equal `byKind['member-unchanged']`, which is `0` by default |\n| `entries[]` | One per differing correlation key, ordered by breadcrumb path, then find number, then child item id, then kind |\n| `entries[].differingFields` | On `member-differs` only: which of `quantity` / `findNumber` / `childRevision` disagree. Empty (never null) elsewhere |\n| `entries[].left` / `.right` | How each side renders the member. `left` is null on `member-added`, `right` on `member-removed` |\n| `leftWarnings[]` / `rightWarnings[]` | Each side's own resolution warnings. `COMPARE_ROOTS_DIFFER` is about the pair and is reported on **`leftWarnings`** |\n| `truncated` / `entriesLimit` | Whether `entries` was capped, and at what. `summary` still reports untruncated totals |\n| `generatedAt` | Server clock, read once for the whole call so the two sides are never resolved microseconds apart |\n\n## Entry kinds\n\n| kind | Meaning |\n| --- | --- |\n| `root-version-differs` | The two sides resolve **different root revisions** — including when the roots are different items. One entry per comparison |\n| `member-added` | Present on the **right** only |\n| `member-removed` | Present on the **left** only |\n| `member-differs` | Present on both; `differingFields` names what disagrees |\n| `member-unchanged` | Present on both and identical. **Only emitted with `includeUnchanged=true`** |\n\n## Watch out for\n\n- **Read access is the gate, not write** — deliberately unlike `pull-preview`, which needs the same write grant the commit does because previewing a pull is initiating one. A comparison initiates nothing, so a read-only user may run it.\n- **There is no decision tier and no actions.** `decision`, `availableActions`, `retargeted` and `overrideKind` are **absent**, not defaulted — a comparison decides nothing, so there is no default a client could misread as an answer.\n- **There is no `diffFingerprint`.** The pull carries one so a commit can fail fast on a stale preview. Nothing here is committed, so a digest would be a field nobody could act on.\n- **Exclusion tombstones are filtered from both sides before the join.** A member excluded on the left surfaces as `member-added` against a right that still supplies it — the left does not contain it and the right does.\n- **Provenance is reported, never classified.** A branch that claimed a member without changing it reads as *unchanged* against its own source; `left.provenance` is where you see the claim.\n- **`againstType` is matched case-insensitively.** `Branch` is a 200. Send lower case — that is the published spelling and what comes back in `right.type`.\n- **Truncation is a plain prefix and `summary` is left alone.** That is what makes `truncated: true` actionable: re-issue with a larger `entriesLimit` for a longer, stable prefix of the same comparison.\n\n## Error responses\n\n| Status | code | Cause |\n| --- | --- | --- |\n| 400 | `INVALID_REQUEST` | `againstType` missing or unknown; `againstId` missing; `entriesLimit` not a positive integer (`entriesLimit=0` is refused, **not** silently defaulted); `againstAsOf` sent for a baseline right side |\n| 400 | `ASOF_INVALID` / `ASOF_IN_FUTURE` | Either clock could not be parsed, or names a moment that has not happened |\n| 403 | `FORBIDDEN` | No **read** on an object one of the sides needs |\n| 404 | `NOT_FOUND` | A path id or `againstId` names nothing or the wrong object, or the path carries a trailing segment |\n| 409 | `NOT_RELEASED` | `againstType=ebom` names a revision that is not Released, or is Cancelled, Expired, or has no release date |\n| 422 | `AMBIGUOUS_CORRELATION` | Two edges on one side share a correlation key. Its message says `current side` for the **left** and `candidate side` for the **right** — the join's vocabulary, shared with pull-preview |\n| 422 | `CYCLE_DETECTED` | A cycle in the eBOM beneath either side's root. A comparison always reports a cycle under this code, never the traversal's own `EBOM_CYCLE` |\n| 500 | `INTERNAL_ERROR` | Unmodelled server failure |\n"
+									},
+									"response": []
+								},
+								{
+									"name": "Compare Two Branches",
+									"event": [
+										{
+											"listen": "test",
+											"script": {
+												"type": "text/javascript",
+												"exec": [
+													"// Two independent configurations, neither privileged. Each side keeps its OWN clock.",
+													"if (pm.response.code === 200) {",
+													"    const b = pm.response.json();",
+													"    const differing = b.entries.find((e) => e.kind === 'member-differs');",
+													"    pm.collectionVariables.set('mbomCompareEntryId', differing ? differing.entryId : '');",
+													"",
+													"    pm.test('added and removed each name exactly one side', () => {",
+													"        b.entries.filter((e) => e.kind === 'member-added').forEach((e) => {",
+													"            pm.expect(e.left, 'member-added has no left state').to.be.null;",
+													"            pm.expect(e.right, 'member-added has a right state').to.not.be.null;",
+													"        });",
+													"        b.entries.filter((e) => e.kind === 'member-removed').forEach((e) => {",
+													"            pm.expect(e.right, 'member-removed has no right state').to.be.null;",
+													"            pm.expect(e.left, 'member-removed has a left state').to.not.be.null;",
+													"        });",
+													"    });",
+													"",
+													"    pm.test('differingFields is populated on member-differs and empty everywhere else', () => {",
+													"        b.entries.forEach((e) => {",
+													"            if (e.kind === 'member-differs') pm.expect(e.differingFields).to.not.be.empty;",
+													"            else pm.expect(e.differingFields).to.eql([]);",
+													"        });",
+													"    });",
+													"}"
+												],
+												"id": "03a3e357-9dee-4acb-92f9-d39c39849ac6"
+											}
+										}
+									],
+									"id": "49ff326a-27e9-42b4-93cd-16ac2fe4fac5",
+									"protocolProfileBehavior": {
+										"disableBodyPruning": true
+									},
+									"request": {
+										"method": "GET",
+										"header": [
+											{
+												"key": "Accept",
+												"value": "application/json"
+											}
+										],
+										"url": {
+											"raw": "{{propelApiUrl}}/v4/mbom/branches/:branchId/comparison?againstType=branch&againstId={{mbomAgainstBranchId}}&asOf=&againstAsOf=&entriesLimit=200",
+											"host": [
+												"{{propelApiUrl}}"
+											],
+											"path": [
+												"v4",
+												"mbom",
+												"branches",
+												":branchId",
+												"comparison"
+											],
+											"query": [
+												{
+													"key": "againstType",
+													"value": "branch",
+													"description": "(Required) branch | baseline | source | ebom. Matched CASE-INSENSITIVELY at the route, but send lower case — that is the published spelling and what comes back in right.type."
+												},
+												{
+													"key": "againstId",
+													"value": "{{mbomAgainstBranchId}}",
+													"description": "(Required) Id of the OTHER Branch__c to compare against. Set mbomAgainstBranchId by hand, or re-run Create an MBOM against a second branch and copy its branchId."
+												},
+												{
+													"key": "asOf",
+													"value": "",
+													"description": "(Optional, default now) The LEFT side's clock. Governs the branch's own deltas, local content and substitutes — never inherited content, which resolves at T_R. ISO-8601, e.g. 2026-02-01T00:00:00Z."
+												},
+												{
+													"key": "againstAsOf",
+													"value": "",
+													"description": "(Optional, default now) The RIGHT side's clock, kept separate from asOf because each side answers on its own. A branch read at now against one read in March is two configurations at two instants, and both are published on the response."
+												},
+												{
+													"key": "entriesLimit",
+													"value": "200",
+													"description": "(Optional, default 200) Caps entries as a plain prefix — a comparison has no required tier to protect. summary still reports untruncated totals. Must be a positive integer; entriesLimit=0 is a 400."
+												}
+											],
+											"variable": [
+												{
+													"id": "127ac885-5de5-43b8-bbad-6c5d6b8bed83",
+													"key": "branchId",
+													"value": "{{mbomBranchId}}",
+													"description": "(Required) Id of the Branch__c on the LEFT of the comparison — returned as branchId from Create an MBOM."
+												}
+											]
+										},
+										"description": "MBOM against MBOM: two branches resolved independently and joined on the correlation key. Neither side is privileged — that is the whole difference from `pull-preview`, whose two sides are deliberately asymmetric.\n\n**Each side keeps its own pair of clocks and never borrows the other's.** `asOf` governs the left, `againstAsOf` the right, and both resolved instants come back on `left` / `right`. That is why there are two parameters rather than one.\n\nThe two branches need not share a root. If they do not, you get a `COMPARE_ROOTS_DIFFER` warning on **`leftWarnings`** and a comparison in which every member is an addition or a removal for that reason alone — the honest answer for a read, where refusing would not be. You also get a `root-version-differs` entry, which fires whenever the two resolved root **revisions** differ, different root *items* included: that is what stops `identical` reporting two unrelated assemblies as the same configuration.\n\n## Path parameters\n\n| Parameter | Type | Required | Description |\n| --- | --- | --- | --- |\n| `branchId` | Id | **Yes** | The `Branch__c` on the **left** |\n\n## Query parameters\n\n| Parameter | Type | Required | Default | Description |\n| --- | --- | --- | --- | --- |\n| `againstType` | Enum | **Yes** | — | `branch` \\| `baseline` \\| `source` \\| `ebom`. Matched case-insensitively |\n| `againstId` | Id | **Yes** | — | The record the right side is. Must be the object `againstType` implies. **Missing is a 400; present but unusable is a 404** |\n| `asOf` | ISO-8601 | No | now | The **left** side's clock. Refused for a baseline left side |\n| `againstAsOf` | ISO-8601 | No | see below | The **right** side's clock. Refused for a baseline right side; defaults to an eBOM revision's own release date |\n| `includeUnchanged` | Boolean | No | `false` | Emit a `member-unchanged` entry per matching key. **Only an explicit `true` turns it on** — `1` and `yes` fall back to false rather than 400ing |\n| `entriesLimit` | Integer | No | 200 | Caps `entries` as a plain prefix. Must be positive; `0` is a 400. **Not raised by `includeUnchanged`** |\n\n## Response fields\n\n| Field | Description |\n| --- | --- |\n| `left` / `right` | What each side WAS: its type, id, label, root item and revision, and its two clocks. Published for both sides because `member-added` means nothing until you know what the right side is |\n| `identical` | True when nothing but `member-unchanged` was emitted. A `root-version-differs` entry alone makes it false |\n| `summary.total` / `summary.byKind` | Counts of entries **emitted** — both move with `includeUnchanged` |\n| `summary.added` / `removed` / `differing` / `unchanged` | Counts of **correlation keys** — none of them move with `includeUnchanged` |\n| `summary.unchanged` | Populated **whether or not the unchanged rows were asked for**. So it does NOT always equal `byKind['member-unchanged']`, which is `0` by default |\n| `entries[]` | One per differing correlation key, ordered by breadcrumb path, then find number, then child item id, then kind |\n| `entries[].differingFields` | On `member-differs` only: which of `quantity` / `findNumber` / `childRevision` disagree. Empty (never null) elsewhere |\n| `entries[].left` / `.right` | How each side renders the member. `left` is null on `member-added`, `right` on `member-removed` |\n| `leftWarnings[]` / `rightWarnings[]` | Each side's own resolution warnings. `COMPARE_ROOTS_DIFFER` is about the pair and is reported on **`leftWarnings`** |\n| `truncated` / `entriesLimit` | Whether `entries` was capped, and at what. `summary` still reports untruncated totals |\n| `generatedAt` | Server clock, read once for the whole call so the two sides are never resolved microseconds apart |\n\n## Entry kinds\n\n| kind | Meaning |\n| --- | --- |\n| `root-version-differs` | The two sides resolve **different root revisions** — including when the roots are different items. One entry per comparison |\n| `member-added` | Present on the **right** only |\n| `member-removed` | Present on the **left** only |\n| `member-differs` | Present on both; `differingFields` names what disagrees |\n| `member-unchanged` | Present on both and identical. **Only emitted with `includeUnchanged=true`** |\n\n## Watch out for\n\n- **Read access is the gate, not write** — deliberately unlike `pull-preview`, which needs the same write grant the commit does because previewing a pull is initiating one. A comparison initiates nothing, so a read-only user may run it.\n- **There is no decision tier and no actions.** `decision`, `availableActions`, `retargeted` and `overrideKind` are **absent**, not defaulted — a comparison decides nothing, so there is no default a client could misread as an answer.\n- **There is no `diffFingerprint`.** The pull carries one so a commit can fail fast on a stale preview. Nothing here is committed, so a digest would be a field nobody could act on.\n- **Exclusion tombstones are filtered from both sides before the join.** A member excluded on the left surfaces as `member-added` against a right that still supplies it — the left does not contain it and the right does.\n- **Provenance is reported, never classified.** A branch that claimed a member without changing it reads as *unchanged* against its own source; `left.provenance` is where you see the claim.\n- **`againstType` is matched case-insensitively.** `Branch` is a 200. Send lower case — that is the published spelling and what comes back in `right.type`.\n- **Truncation is a plain prefix and `summary` is left alone.** That is what makes `truncated: true` actionable: re-issue with a larger `entriesLimit` for a longer, stable prefix of the same comparison.\n\n## Error responses\n\n| Status | code | Cause |\n| --- | --- | --- |\n| 400 | `INVALID_REQUEST` | `againstType` missing or unknown; `againstId` missing; `entriesLimit` not a positive integer (`entriesLimit=0` is refused, **not** silently defaulted); `againstAsOf` sent for a baseline right side |\n| 400 | `ASOF_INVALID` / `ASOF_IN_FUTURE` | Either clock could not be parsed, or names a moment that has not happened |\n| 403 | `FORBIDDEN` | No **read** on an object one of the sides needs |\n| 404 | `NOT_FOUND` | A path id or `againstId` names nothing or the wrong object, or the path carries a trailing segment |\n| 409 | `NOT_RELEASED` | `againstType=ebom` names a revision that is not Released, or is Cancelled, Expired, or has no release date |\n| 422 | `AMBIGUOUS_CORRELATION` | Two edges on one side share a correlation key. Its message says `current side` for the **left** and `candidate side` for the **right** — the join's vocabulary, shared with pull-preview |\n| 422 | `CYCLE_DETECTED` | A cycle in the eBOM beneath either side's root. A comparison always reports a cycle under this code, never the traversal's own `EBOM_CYCLE` |\n| 500 | `INTERNAL_ERROR` | Unmodelled server failure |\n"
+									},
+									"response": []
+								},
+								{
+									"name": "Compare a Branch to a Baseline",
+									"event": [
+										{
+											"listen": "test",
+											"script": {
+												"type": "text/javascript",
+												"exec": [
+													"// 'What has this branch done since we froze it?' The baseline answers on its own frozen",
+													"// clock — which is why againstAsOf is REFUSED for a baseline side rather than ignored.",
+													"if (pm.response.code === 200) {",
+													"    const b = pm.response.json();",
+													"",
+													"    pm.test('the baseline side reports the timepoint its cut recorded', () => {",
+													"        pm.expect(b.right.type).to.eql('baseline');",
+													"        pm.expect(b.right.asOf, 'a baseline always resolves at a recorded timepoint').to.be.a('string');",
+													"    });",
+													"",
+													"    pm.test('with includeUnchanged off, every emitted entry is accounted for', () => {",
+													"        pm.expect(b.summary.byKind['member-unchanged']).to.eql(0);",
+													"        pm.expect(b.summary.total).to.eql(",
+													"            b.summary.added + b.summary.removed + b.summary.differing",
+													"            + b.summary.byKind['root-version-differs']);",
+													"    });",
+													"}"
+												],
+												"id": "82dac276-ca0b-420d-9a02-030335d6845a"
+											}
+										}
+									],
+									"id": "fb24c6fa-20b1-4f27-9010-fe338c6eec6c",
+									"protocolProfileBehavior": {
+										"disableBodyPruning": true
+									},
+									"request": {
+										"method": "GET",
+										"header": [
+											{
+												"key": "Accept",
+												"value": "application/json"
+											}
+										],
+										"url": {
+											"raw": "{{propelApiUrl}}/v4/mbom/branches/:branchId/comparison?againstType=baseline&againstId={{mbomBaselineId}}&asOf=&includeUnchanged=false",
+											"host": [
+												"{{propelApiUrl}}"
+											],
+											"path": [
+												"v4",
+												"mbom",
+												"branches",
+												":branchId",
+												"comparison"
+											],
+											"query": [
+												{
+													"key": "againstType",
+													"value": "baseline",
+													"description": "(Required) branch | baseline | source | ebom. Matched CASE-INSENSITIVELY at the route, but send lower case — that is the published spelling and what comes back in right.type."
+												},
+												{
+													"key": "againstId",
+													"value": "{{mbomBaselineId}}",
+													"description": "(Required) Id of the Baseline__c — captured by Cut a Baseline."
+												},
+												{
+													"key": "asOf",
+													"value": "",
+													"description": "(Optional, default now) The LEFT side's clock. Governs the branch's own deltas, local content and substitutes — never inherited content, which resolves at T_R. ISO-8601, e.g. 2026-02-01T00:00:00Z."
+												},
+												{
+													"key": "includeUnchanged",
+													"value": "false",
+													"description": "(Optional, default false) Emit a member-unchanged entry per matching correlation key, turning the response into the complete merged BOM. ONLY an explicit 'true' turns it on; anything else falls back to false rather than raising. Does not raise entriesLimit, and moves summary.total and summary.byKind but not summary.unchanged."
+												}
+											],
+											"variable": [
+												{
+													"id": "07499eab-3576-41bb-a4e9-f478426ca9b9",
+													"key": "branchId",
+													"value": "{{mbomBranchId}}",
+													"description": "(Required) Id of the Branch__c on the LEFT of the comparison — returned as branchId from Create an MBOM."
+												}
+											]
+										},
+										"description": "*\"What has this branch done since we froze it?\"* — the live branch on the left, a baseline of it on the right.\n\n## The baseline side resolves at its own recorded timepoint\n\nA baseline stores a timepoint, not rows, and reading it **replays** the branch at that timepoint — the same resolution `GET /mbom/baselines/:baselineId/tree` performs, pinned by the same two bounds, so a comparison sees exactly the rows that endpoint renders.\n\nBecause of that, **`againstAsOf` is refused, not ignored** (`400 INVALID_REQUEST`). Ignoring it would hand you the baseline's own answer while you believed you had asked a temporal question. `asOf` is still accepted here, because the *left* side is a live branch.\n\n> To put the baseline on the **left** instead — comparing one build against another, or > against a newer eBOM — use `GET /v4/mbom/baselines/:baselineId/comparison`, which is the > same endpoint with the sides swapped. There `asOf` is the parameter that gets refused.\n\n## `summary.unchanged` is populated even though you asked for no unchanged rows\n\nThat is the point of it: the default comparison emits no entry for an identical member, and you still need to know how much of the configuration matched without paying for the rows. So `summary.unchanged` and `summary.byKind['member-unchanged']` are **not** the same number here — the second is `0` because nothing was emitted.\n\n## Path parameters\n\n| Parameter | Type | Required | Description |\n| --- | --- | --- | --- |\n| `branchId` | Id | **Yes** | The `Branch__c` on the **left** |\n\n## Query parameters\n\n| Parameter | Type | Required | Default | Description |\n| --- | --- | --- | --- | --- |\n| `againstType` | Enum | **Yes** | — | `branch` \\| `baseline` \\| `source` \\| `ebom`. Matched case-insensitively |\n| `againstId` | Id | **Yes** | — | The record the right side is. Must be the object `againstType` implies. **Missing is a 400; present but unusable is a 404** |\n| `asOf` | ISO-8601 | No | now | The **left** side's clock. Refused for a baseline left side |\n| `againstAsOf` | ISO-8601 | No | see below | The **right** side's clock. Refused for a baseline right side; defaults to an eBOM revision's own release date |\n| `includeUnchanged` | Boolean | No | `false` | Emit a `member-unchanged` entry per matching key. **Only an explicit `true` turns it on** — `1` and `yes` fall back to false rather than 400ing |\n| `entriesLimit` | Integer | No | 200 | Caps `entries` as a plain prefix. Must be positive; `0` is a 400. **Not raised by `includeUnchanged`** |\n\n## Response fields\n\n| Field | Description |\n| --- | --- |\n| `left` / `right` | What each side WAS: its type, id, label, root item and revision, and its two clocks. Published for both sides because `member-added` means nothing until you know what the right side is |\n| `identical` | True when nothing but `member-unchanged` was emitted. A `root-version-differs` entry alone makes it false |\n| `summary.total` / `summary.byKind` | Counts of entries **emitted** — both move with `includeUnchanged` |\n| `summary.added` / `removed` / `differing` / `unchanged` | Counts of **correlation keys** — none of them move with `includeUnchanged` |\n| `summary.unchanged` | Populated **whether or not the unchanged rows were asked for**. So it does NOT always equal `byKind['member-unchanged']`, which is `0` by default |\n| `entries[]` | One per differing correlation key, ordered by breadcrumb path, then find number, then child item id, then kind |\n| `entries[].differingFields` | On `member-differs` only: which of `quantity` / `findNumber` / `childRevision` disagree. Empty (never null) elsewhere |\n| `entries[].left` / `.right` | How each side renders the member. `left` is null on `member-added`, `right` on `member-removed` |\n| `leftWarnings[]` / `rightWarnings[]` | Each side's own resolution warnings. `COMPARE_ROOTS_DIFFER` is about the pair and is reported on **`leftWarnings`** |\n| `truncated` / `entriesLimit` | Whether `entries` was capped, and at what. `summary` still reports untruncated totals |\n| `generatedAt` | Server clock, read once for the whole call so the two sides are never resolved microseconds apart |\n\n## Entry kinds\n\n| kind | Meaning |\n| --- | --- |\n| `root-version-differs` | The two sides resolve **different root revisions** — including when the roots are different items. One entry per comparison |\n| `member-added` | Present on the **right** only |\n| `member-removed` | Present on the **left** only |\n| `member-differs` | Present on both; `differingFields` names what disagrees |\n| `member-unchanged` | Present on both and identical. **Only emitted with `includeUnchanged=true`** |\n\n## Watch out for\n\n- **Read access is the gate, not write** — deliberately unlike `pull-preview`, which needs the same write grant the commit does because previewing a pull is initiating one. A comparison initiates nothing, so a read-only user may run it.\n- **There is no decision tier and no actions.** `decision`, `availableActions`, `retargeted` and `overrideKind` are **absent**, not defaulted — a comparison decides nothing, so there is no default a client could misread as an answer.\n- **There is no `diffFingerprint`.** The pull carries one so a commit can fail fast on a stale preview. Nothing here is committed, so a digest would be a field nobody could act on.\n- **Exclusion tombstones are filtered from both sides before the join.** A member excluded on the left surfaces as `member-added` against a right that still supplies it — the left does not contain it and the right does.\n- **Provenance is reported, never classified.** A branch that claimed a member without changing it reads as *unchanged* against its own source; `left.provenance` is where you see the claim.\n- **`againstType` is matched case-insensitively.** `Branch` is a 200. Send lower case — that is the published spelling and what comes back in `right.type`.\n- **Truncation is a plain prefix and `summary` is left alone.** That is what makes `truncated: true` actionable: re-issue with a larger `entriesLimit` for a longer, stable prefix of the same comparison.\n\n## Error responses\n\n| Status | code | Cause |\n| --- | --- | --- |\n| 400 | `INVALID_REQUEST` | `againstType` missing or unknown; `againstId` missing; `entriesLimit` not a positive integer (`entriesLimit=0` is refused, **not** silently defaulted); `againstAsOf` sent for a baseline right side |\n| 400 | `ASOF_INVALID` / `ASOF_IN_FUTURE` | Either clock could not be parsed, or names a moment that has not happened |\n| 403 | `FORBIDDEN` | No **read** on an object one of the sides needs |\n| 404 | `NOT_FOUND` | A path id or `againstId` names nothing or the wrong object, or the path carries a trailing segment |\n| 409 | `NOT_RELEASED` | `againstType=ebom` names a revision that is not Released, or is Cancelled, Expired, or has no release date |\n| 422 | `AMBIGUOUS_CORRELATION` | Two edges on one side share a correlation key. Its message says `current side` for the **left** and `candidate side` for the **right** — the join's vocabulary, shared with pull-preview |\n| 422 | `CYCLE_DETECTED` | A cycle in the eBOM beneath either side's root. A comparison always reports a cycle under this code, never the traversal's own `EBOM_CYCLE` |\n| 500 | `INTERNAL_ERROR` | Unmodelled server failure |\n"
+									},
+									"response": []
+								},
+								{
+									"name": "Compare a Branch to an eBOM Revision",
+									"event": [
+										{
+											"listen": "test",
+											"script": {
+												"type": "text/javascript",
+												"exec": [
+													"// includeUnchanged=true turns the response into the complete merged BOM — one entry per",
+													"// correlation key across both sides, which is what a side-by-side tree renders from.",
+													"if (pm.response.code === 200) {",
+													"    const b = pm.response.json();",
+													"",
+													"    pm.test('with includeUnchanged on, the emitted rows match the unchanged count', () => {",
+													"        pm.expect(b.summary.byKind['member-unchanged']).to.eql(b.summary.unchanged);",
+													"    });",
+													"",
+													"    pm.test('summary reports the UNTRUNCATED comparison', () => {",
+													"        if (b.truncated) pm.expect(b.entries.length).to.eql(b.entriesLimit);",
+													"        else pm.expect(b.entries.length).to.eql(b.summary.total);",
+													"    });",
+													"",
+													"    pm.test('a raw eBOM side publishes one clock as both of its clocks', () => {",
+													"        pm.expect(b.right.type).to.eql('ebom');",
+													"        pm.expect(b.right.sourceTimePoint).to.eql(b.right.asOf);",
+													"    });",
+													"}"
+												],
+												"id": "f098811e-c70e-4651-a700-0ad1dff1a960"
+											}
+										}
+									],
+									"id": "57d2515e-eed3-4d5a-9cd9-1fa1bd4ad732",
+									"protocolProfileBehavior": {
+										"disableBodyPruning": true
+									},
+									"request": {
+										"method": "GET",
+										"header": [
+											{
+												"key": "Accept",
+												"value": "application/json"
+											}
+										],
+										"url": {
+											"raw": "{{propelApiUrl}}/v4/mbom/branches/:branchId/comparison?againstType=ebom&againstId={{mbomAgainstEbomRevisionId}}&againstAsOf=&includeUnchanged=true&entriesLimit=200",
+											"host": [
+												"{{propelApiUrl}}"
+											],
+											"path": [
+												"v4",
+												"mbom",
+												"branches",
+												":branchId",
+												"comparison"
+											],
+											"query": [
+												{
+													"key": "againstType",
+													"value": "ebom",
+													"description": "(Required) branch | baseline | source | ebom. Matched CASE-INSENSITIVELY at the route, but send lower case — that is the published spelling and what comes back in right.type."
+												},
+												{
+													"key": "againstId",
+													"value": "{{mbomAgainstEbomRevisionId}}",
+													"description": "(Required) Id of a RELEASED Item_Revision__c to walk. Captured from right.rootRevisionId by 'Compare a Branch to its Source'; point it at a newer released revision to see what accepting one would look like. Not released, or Cancelled/Expired/undated, is a 409 NOT_RELEASED."
+												},
+												{
+													"key": "againstAsOf",
+													"value": "",
+													"description": "(Optional, default THAT REVISION'S RELEASE DATE) The right side's clock. A raw eBOM walk has no acceptance to pin it, so the honest reading of 'the eBOM of revision X' is the eBOM as it stood when X was released — which is the default, not now."
+												},
+												{
+													"key": "includeUnchanged",
+													"value": "true",
+													"description": "(Optional, default false) Emit a member-unchanged entry per matching correlation key, turning the response into the complete merged BOM. ONLY an explicit 'true' turns it on; anything else falls back to false rather than raising. Does not raise entriesLimit, and moves summary.total and summary.byKind but not summary.unchanged."
+												},
+												{
+													"key": "entriesLimit",
+													"value": "200",
+													"description": "(Optional, default 200) Caps entries as a plain prefix — a comparison has no required tier to protect. summary still reports untruncated totals. Must be a positive integer; entriesLimit=0 is a 400."
+												}
+											],
+											"variable": [
+												{
+													"id": "cc28bb8e-3d58-469a-9ae2-431eb1fcf65b",
+													"key": "branchId",
+													"value": "{{mbomBranchId}}",
+													"description": "(Required) Id of the Branch__c on the LEFT of the comparison — returned as branchId from Create an MBOM."
+												}
+											]
+										},
+										"description": "eBOM against MBOM: the branch on the left, a **raw walk** beneath one released eBOM revision on the right, with no branch in the picture at all.\n\nPoint `againstId` at the revision the branch already resolves against and you are asking \"how far has my MBOM drifted from engineering's?\". Point it at a **newer** released revision and you are asking what accepting that revision would mean — a read-only preview of the same question `pull-preview` answers, but symmetric, undecided, and available to a read-only user.\n\n> It is **not** a substitute for `pull-preview`. A pull classifies (`override-orphaned` > blocks a commit; `override-retained` says the branch wins) and produces a `diffFingerprint` > you commit against. A comparison classifies nothing and commits nothing.\n\n## This request sends `includeUnchanged=true`\n\nWhich turns the response into the **complete merged BOM** — one entry per correlation key across both sides, the shape a side-by-side tree UI needs from a single call. It costs no extra query.\n\nTwo things move when you set it, and four do not:\n\n| | With `includeUnchanged=false` | With `includeUnchanged=true` |\n| --- | --- | --- |\n| `summary.total` | differing entries only | **+ one per matching key** |\n| `summary.byKind['member-unchanged']` | `0` | **the unchanged count** |\n| `summary.added` / `removed` / `differing` / `unchanged` | unchanged | unchanged |\n\nIt does **not** raise `entriesLimit`, deliberately: a 500-edge BOM truncates at 200 and says so, rather than silently returning a response an order of magnitude larger than you asked for. Raising it is one parameter.\n\n## Path parameters\n\n| Parameter | Type | Required | Description |\n| --- | --- | --- | --- |\n| `branchId` | Id | **Yes** | The `Branch__c` on the **left** |\n\n## Query parameters\n\n| Parameter | Type | Required | Default | Description |\n| --- | --- | --- | --- | --- |\n| `againstType` | Enum | **Yes** | — | `branch` \\| `baseline` \\| `source` \\| `ebom`. Matched case-insensitively |\n| `againstId` | Id | **Yes** | — | The record the right side is. Must be the object `againstType` implies. **Missing is a 400; present but unusable is a 404** |\n| `asOf` | ISO-8601 | No | now | The **left** side's clock. Refused for a baseline left side |\n| `againstAsOf` | ISO-8601 | No | see below | The **right** side's clock. Refused for a baseline right side; defaults to an eBOM revision's own release date |\n| `includeUnchanged` | Boolean | No | `false` | Emit a `member-unchanged` entry per matching key. **Only an explicit `true` turns it on** — `1` and `yes` fall back to false rather than 400ing |\n| `entriesLimit` | Integer | No | 200 | Caps `entries` as a plain prefix. Must be positive; `0` is a 400. **Not raised by `includeUnchanged`** |\n\n## Response fields\n\n| Field | Description |\n| --- | --- |\n| `left` / `right` | What each side WAS: its type, id, label, root item and revision, and its two clocks. Published for both sides because `member-added` means nothing until you know what the right side is |\n| `identical` | True when nothing but `member-unchanged` was emitted. A `root-version-differs` entry alone makes it false |\n| `summary.total` / `summary.byKind` | Counts of entries **emitted** — both move with `includeUnchanged` |\n| `summary.added` / `removed` / `differing` / `unchanged` | Counts of **correlation keys** — none of them move with `includeUnchanged` |\n| `summary.unchanged` | Populated **whether or not the unchanged rows were asked for**. So it does NOT always equal `byKind['member-unchanged']`, which is `0` by default |\n| `entries[]` | One per differing correlation key, ordered by breadcrumb path, then find number, then child item id, then kind |\n| `entries[].differingFields` | On `member-differs` only: which of `quantity` / `findNumber` / `childRevision` disagree. Empty (never null) elsewhere |\n| `entries[].left` / `.right` | How each side renders the member. `left` is null on `member-added`, `right` on `member-removed` |\n| `leftWarnings[]` / `rightWarnings[]` | Each side's own resolution warnings. `COMPARE_ROOTS_DIFFER` is about the pair and is reported on **`leftWarnings`** |\n| `truncated` / `entriesLimit` | Whether `entries` was capped, and at what. `summary` still reports untruncated totals |\n| `generatedAt` | Server clock, read once for the whole call so the two sides are never resolved microseconds apart |\n\n## Entry kinds\n\n| kind | Meaning |\n| --- | --- |\n| `root-version-differs` | The two sides resolve **different root revisions** — including when the roots are different items. One entry per comparison |\n| `member-added` | Present on the **right** only |\n| `member-removed` | Present on the **left** only |\n| `member-differs` | Present on both; `differingFields` names what disagrees |\n| `member-unchanged` | Present on both and identical. **Only emitted with `includeUnchanged=true`** |\n\n## Watch out for\n\n- **Read access is the gate, not write** — deliberately unlike `pull-preview`, which needs the same write grant the commit does because previewing a pull is initiating one. A comparison initiates nothing, so a read-only user may run it.\n- **There is no decision tier and no actions.** `decision`, `availableActions`, `retargeted` and `overrideKind` are **absent**, not defaulted — a comparison decides nothing, so there is no default a client could misread as an answer.\n- **There is no `diffFingerprint`.** The pull carries one so a commit can fail fast on a stale preview. Nothing here is committed, so a digest would be a field nobody could act on.\n- **Exclusion tombstones are filtered from both sides before the join.** A member excluded on the left surfaces as `member-added` against a right that still supplies it — the left does not contain it and the right does.\n- **Provenance is reported, never classified.** A branch that claimed a member without changing it reads as *unchanged* against its own source; `left.provenance` is where you see the claim.\n- **`againstType` is matched case-insensitively.** `Branch` is a 200. Send lower case — that is the published spelling and what comes back in `right.type`.\n- **Truncation is a plain prefix and `summary` is left alone.** That is what makes `truncated: true` actionable: re-issue with a larger `entriesLimit` for a longer, stable prefix of the same comparison.\n\n## Error responses\n\n| Status | code | Cause |\n| --- | --- | --- |\n| 400 | `INVALID_REQUEST` | `againstType` missing or unknown; `againstId` missing; `entriesLimit` not a positive integer (`entriesLimit=0` is refused, **not** silently defaulted); `againstAsOf` sent for a baseline right side |\n| 400 | `ASOF_INVALID` / `ASOF_IN_FUTURE` | Either clock could not be parsed, or names a moment that has not happened |\n| 403 | `FORBIDDEN` | No **read** on an object one of the sides needs |\n| 404 | `NOT_FOUND` | A path id or `againstId` names nothing or the wrong object, or the path carries a trailing segment |\n| 409 | `NOT_RELEASED` | `againstType=ebom` names a revision that is not Released, or is Cancelled, Expired, or has no release date |\n| 422 | `AMBIGUOUS_CORRELATION` | Two edges on one side share a correlation key. Its message says `current side` for the **left** and `candidate side` for the **right** — the join's vocabulary, shared with pull-preview |\n| 422 | `CYCLE_DETECTED` | A cycle in the eBOM beneath either side's root. A comparison always reports a cycle under this code, never the traversal's own `EBOM_CYCLE` |\n| 500 | `INTERNAL_ERROR` | Unmodelled server failure |\n"
+									},
+									"response": []
+								}
+							],
+							"id": "9be580ec-13d1-4d9e-8baf-f5f3e5470a7d",
+							"description": "**How do these two configurations differ?** One read-only endpoint pair, answering that for any pair drawn from {MBOM branch, baseline, source, released eBOM revision}.\n\n```\nGET /v4/mbom/branches/:branchId/comparison\nGET /v4/mbom/baselines/:baselineId/comparison\n      ?againstType=branch|baseline|source|ebom\n      &againstId=<id>\n      &asOf=<iso8601>          // left side; refused when the left is a baseline\n      &againstAsOf=<iso8601>   // right side; refused when the right is a baseline\n      &includeUnchanged=true   // default false\n      &entriesLimit=<n>        // default 200\n```\n\nThe **left** side is named by the path; the **right** by the query string. That is what lets one endpoint serve eBOM-against-MBOM, MBOM-against-MBOM and MBOM-against-its-own-baseline rather than three, and it is why a baseline can sit on either side.\n\n## What a comparison is not\n\nIt is **symmetric** and it **decides nothing**. No decision tier, no available actions, no `diffFingerprint`, and read access rather than write access as the gate — a read-only user may compare, which is deliberately unlike `pull-preview`, where previewing a pull is initiating one.\n\nThe join underneath is the pull's: `(Parent_Item__c, Item__c, Secondary_Unique_Key__c)`, for the reason the Pull folder explains in full — the parent *item* does not move when its revision does, so the key survives the BOM clone a revision advance performs.\n\n## The four requests\n\n| Request | Left | Right | Asks |\n| --- | --- | --- | --- |\n| Compare a Branch to its Source | branch | its own source | What have I changed relative to upstream? |\n| Compare Two Branches | branch | another branch | How do these two MBOMs differ? |\n| Compare a Branch to a Baseline | branch | a baseline of it | What has changed since we froze it? |\n| Compare a Branch to an eBOM Revision | branch | a released revision | How far has my MBOM drifted from engineering's? |\n\nThey chain: the first captures the eBOM root its source supplies into `mbomAgainstEbomRevisionId`, which the last one uses. `mbomAgainstBranchId` is the one value you have to supply by hand — create a second MBOM to get one.\n\n## The thing most likely to trip you up\n\n`summary.total` and `summary.byKind` count entries **emitted**, so both move with `includeUnchanged`. `summary.unchanged` counts **correlation keys** and is populated whether or not the unchanged rows were asked for — so `summary.unchanged` and `summary.byKind['member-unchanged']` are different numbers by default, and the same number with the flag on.\n\nJira: MVP-30296 (Use Case 5, epic MVP-30018)."
 						}
 					],
 					"id": "3cd4497f-50c8-452b-a2df-cd81b57da76e",
@@ -14106,6 +14496,18 @@
 		},
 		{
 			"key": "mbomOrphanEntryId",
+			"value": ""
+		},
+		{
+			"key": "mbomAgainstBranchId",
+			"value": ""
+		},
+		{
+			"key": "mbomAgainstEbomRevisionId",
+			"value": ""
+		},
+		{
+			"key": "mbomCompareEntryId",
 			"value": ""
 		}
 	]
