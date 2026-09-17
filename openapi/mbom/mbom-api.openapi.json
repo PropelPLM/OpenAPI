@@ -1478,7 +1478,7 @@
                 "type": "null"
               }
             ],
-            "description": "T_R for an inherited row, `asOf` for a local or substituted one. **Null on baseline rows**, where it is suppressed."
+            "description": "T_R for an inherited row, `asOf` for a local or substituted one.\n\n**On a baseline row it is collapsed, not suppressed:** every row carries the baseline's\nown `resolutionTimePoint`. A frozen record honours exactly one timepoint, so a per-row\nclock there would imply the reader could re-resolve at it — but the value is stated\nrather than nulled, so one client code path renders baseline and tree rows alike.\n"
           },
           "sourceId": {
             "oneOf": [
@@ -1891,7 +1891,7 @@
           },
           "rows": {
             "type": "array",
-            "description": "The re-resolved rows, reusing the tree shape so clients render both the same way — with\n`edgeId`, `edgeKey` and `governingTimestamp` suppressed, and excluded rows filtered out.\n",
+            "description": "The re-resolved rows, reusing the tree shape so clients render both the same way — with\n`edgeId` and `edgeKey` nulled, `governingTimestamp` collapsed onto this baseline's own\n`resolutionTimePoint`, and excluded rows filtered out.\n",
             "items": {
               "$ref": "#/components/schemas/TreeRow"
             }
@@ -2334,7 +2334,7 @@
       },
       "AssemblyEdgeDetail": {
         "type": "object",
-        "description": "**The one MBOM-specific schema.** Everything above this point is reusable framework\nvocabulary; this is the single place assembly/BOM concepts appear. A second\nconfiguration-item type becomes a sibling schema in `MemberState.detail`'s `oneOf` and\nchanges nothing else.\n",
+        "description": "**The one MBOM-specific schema.** Everything above this point is reusable framework\nvocabulary; this is the single place assembly/BOM concepts appear. A second\nconfiguration-item type becomes a sibling schema in `MemberState.detail`'s `oneOf` and\nchanges nothing else.\n\n## The three name fields are null on a tree read\n\n`parentItemNumber`, `childItemNumber` and `childRevisionLabel` are populated **only on the\ndiff paths** — the pull preview and the comparisons. Those build a name cache with a\nrepository read of their own; the tree reads deliberately do not pay for one, so they return\nall three as `null`. Treat them as optional display sugar, never as evidence that an item has\nno number. The identity and content fields beside them are populated everywhere.\n",
         "required": [
           "ciKind"
         ],
@@ -2344,15 +2344,26 @@
             "const": "assembly-edge"
           },
           "parentItemId": {
-            "allOf": [
+            "oneOf": [
               {
                 "$ref": "#/components/schemas/SalesforceId"
+              },
+              {
+                "type": "null"
               }
             ],
-            "description": "The owning **item**, not its revision. `Assembly_CI__c` carries no parent-revision lookup\nat all: a local edge's parent item is stable across revision advances while its parent\nrevision is not — and `Edge_Key__c` is unique org-wide, so two branches claiming the same\neBOM line share one row, meaning every field on it must be branch-invariant.\n"
+            "description": "The owning **item**, not its revision. `Assembly_CI__c` carries no parent-revision lookup\nat all: a local edge's parent item is stable across revision advances while its parent\nrevision is not — and `Edge_Key__c` is unique org-wide, so two branches claiming the same\neBOM line share one row, meaning every field on it must be branch-invariant.\n\n**Null on a root entry** — see `quantity` for why.\n"
           },
           "parentItemNumber": {
-            "type": "string",
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null on tree reads — see the schema description.",
             "examples": [
               "Assy-100"
             ]
@@ -2361,7 +2372,15 @@
             "$ref": "#/components/schemas/SalesforceId"
           },
           "childItemNumber": {
-            "type": "string",
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null on tree reads — see the schema description.",
             "examples": [
               "Motor-002"
             ]
@@ -2378,20 +2397,43 @@
             "description": "The child revision this edge resolves to at `governingTimestamp`. Null on a tombstone."
           },
           "childRevisionLabel": {
-            "type": "string",
+            "oneOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null on tree reads — see the schema description.",
             "examples": [
               "rev-1"
             ]
           },
           "quantity": {
-            "type": "number",
+            "oneOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "**Null on a root entry.** The `source-version-advance` / `root-version-differs` entry at\nthe top of a pull diff or comparison is about the root *item*, which has no parent, no\nquantity and no find number — its `target.ciKind` is `source`, not `assembly-edge`. Every\nedge entry populates all three.\n",
             "examples": [
               4
             ]
           },
           "findNumber": {
-            "type": "number",
-            "description": "A Salesforce `Number` field, never a string.",
+            "oneOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "A Salesforce `Number` field, never a string. **Null on a root entry** — see `quantity`.",
             "examples": [
               10
             ]
@@ -3398,7 +3440,7 @@
                 "findNumber": 10
               },
               "provenance": "claimed",
-              "governingTimestamp": null,
+              "governingTimestamp": "2026-04-06T14:31:02.000Z",
               "sourceId": "a1Cg8000000AbCeEAK",
               "isClaimed": true,
               "isExcluded": false,

@@ -1808,7 +1808,13 @@ components:
         provenance: { $ref: '#/components/schemas/Provenance' }
         governingTimestamp:
           oneOf: [{ type: string, format: date-time }, { type: 'null' }]
-          description: T_R for an inherited row, `asOf` for a local or substituted one. **Null on baseline rows**, where it is suppressed.
+          description: |
+            T_R for an inherited row, `asOf` for a local or substituted one.
+
+            **On a baseline row it is collapsed, not suppressed:** every row carries the baseline's
+            own `resolutionTimePoint`. A frozen record honours exactly one timepoint, so a per-row
+            clock there would imply the reader could re-resolve at it — but the value is stated
+            rather than nulled, so one client code path renders baseline and tree rows alike.
         sourceId:
           oneOf: [{ $ref: '#/components/schemas/SalesforceId' }, { type: 'null' }]
           description: The `Branch_Source__c` this row came from. Null for a branch-local row.
@@ -2101,7 +2107,8 @@ components:
           type: array
           description: |
             The re-resolved rows, reusing the tree shape so clients render both the same way — with
-            `edgeId`, `edgeKey` and `governingTimestamp` suppressed, and excluded rows filtered out.
+            `edgeId` and `edgeKey` nulled, `governingTimestamp` collapsed onto this baseline's own
+            `resolutionTimePoint`, and excluded rows filtered out.
           items: { $ref: '#/components/schemas/TreeRow' }
         warnings:
           type: array
@@ -2370,27 +2377,53 @@ components:
         vocabulary; this is the single place assembly/BOM concepts appear. A second
         configuration-item type becomes a sibling schema in `MemberState.detail`'s `oneOf` and
         changes nothing else.
+
+        ## The three name fields are null on a tree read
+
+        `parentItemNumber`, `childItemNumber` and `childRevisionLabel` are populated **only on the
+        diff paths** — the pull preview and the comparisons. Those build a name cache with a
+        repository read of their own; the tree reads deliberately do not pay for one, so they return
+        all three as `null`. Treat them as optional display sugar, never as evidence that an item has
+        no number. The identity and content fields beside them are populated everywhere.
       required: [ciKind]
       properties:
         ciKind: { type: string, const: assembly-edge }
         parentItemId:
-          allOf: [{ $ref: '#/components/schemas/SalesforceId' }]
+          oneOf: [{ $ref: '#/components/schemas/SalesforceId' }, { type: 'null' }]
           description: |
             The owning **item**, not its revision. `Assembly_CI__c` carries no parent-revision lookup
             at all: a local edge's parent item is stable across revision advances while its parent
             revision is not — and `Edge_Key__c` is unique org-wide, so two branches claiming the same
             eBOM line share one row, meaning every field on it must be branch-invariant.
-        parentItemNumber: { type: string, examples: ['Assy-100'] }
+
+            **Null on a root entry** — see `quantity` for why.
+        parentItemNumber:
+          oneOf: [{ type: string }, { type: 'null' }]
+          description: 'Null on tree reads — see the schema description.'
+          examples: ['Assy-100']
         childItemId: { $ref: '#/components/schemas/SalesforceId' }
-        childItemNumber: { type: string, examples: ['Motor-002'] }
+        childItemNumber:
+          oneOf: [{ type: string }, { type: 'null' }]
+          description: 'Null on tree reads — see the schema description.'
+          examples: ['Motor-002']
         childItemRevisionId:
           oneOf: [{ $ref: '#/components/schemas/SalesforceId' }, { type: 'null' }]
           description: The child revision this edge resolves to at `governingTimestamp`. Null on a tombstone.
-        childRevisionLabel: { type: string, examples: ['rev-1'] }
-        quantity: { type: number, examples: [4] }
+        childRevisionLabel:
+          oneOf: [{ type: string }, { type: 'null' }]
+          description: 'Null on tree reads — see the schema description.'
+          examples: ['rev-1']
+        quantity:
+          oneOf: [{ type: number }, { type: 'null' }]
+          description: |
+            **Null on a root entry.** The `source-version-advance` / `root-version-differs` entry at
+            the top of a pull diff or comparison is about the root *item*, which has no parent, no
+            quantity and no find number — its `target.ciKind` is `source`, not `assembly-edge`. Every
+            edge entry populates all three.
+          examples: [4]
         findNumber:
-          type: number
-          description: A Salesforce `Number` field, never a string.
+          oneOf: [{ type: number }, { type: 'null' }]
+          description: A Salesforce `Number` field, never a string. **Null on a root entry** — see `quantity`.
           examples: [10]
 
     PullCommitRequest:
@@ -3202,7 +3235,7 @@ components:
               quantity: 4
               findNumber: 10
             provenance: claimed
-            governingTimestamp: null
+            governingTimestamp: '2026-04-06T14:31:02.000Z'
             sourceId: a1Cg8000000AbCeEAK
             isClaimed: true
             isExcluded: false
