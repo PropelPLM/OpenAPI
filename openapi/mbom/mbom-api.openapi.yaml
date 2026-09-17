@@ -142,6 +142,7 @@ info:
     baselineRead: MVP-30031
     pullPreview: MVP-30076
     pullCommit: MVP-30077
+    comparison: MVP-30296
   x-design-doc: docs/architecture/mbom/mbom-pull-api.md
   x-demo-plan: docs/architecture/mbom/mbom-demo-test-plan.md
 
@@ -186,6 +187,10 @@ tags:
     description: |
       Reconciling an MBOM branch against a newer version of the eBOM source it inherits from —
       a two-step preview/commit flow.
+  - name: Comparison
+    description: |
+      Answering "how do these two configurations differ?" for any pair drawn from branch, baseline,
+      source and released eBOM revision. Read-only, symmetric, and decides nothing.
 
 paths:
 
@@ -1197,6 +1202,286 @@ paths:
         '422': { $ref: '#/components/responses/PullUnprocessable' }
         '500': { $ref: '#/components/responses/InternalError' }
 
+  # ==================================================================== comparison
+
+  /mbom/branches/{branchId}/comparison:
+    get:
+      tags: [Comparison]
+      operationId: compareBranch
+      summary: Compare a branch against another configuration
+      description: |
+        The structural difference between two configurations: which members each holds, and where
+        the two disagree on quantity, find number or the child revision they resolve to.
+
+        The **left** side is the branch the path names. The **right** side is named by
+        `rightType` + `rightId`, and may be another branch, a baseline, a source, or a released
+        eBOM revision — so one endpoint answers eBOM-against-MBOM, MBOM-against-MBOM and
+        MBOM-against-its-own-baseline rather than three.
+
+        **This call is pure.** No DML anywhere behind it. Two calls with the same inputs against an
+        unchanged org return identical output, `entryId` values included.
+
+        ## The right-hand side
+
+        | `rightType` | `rightId` names | Resolves to | Its clock |
+        |---|---|---|---|
+        | `branch` | `Branch__c` | the branch's own effective structure, deltas overlaid | `rightAsOf`, defaulting to now |
+        | `baseline` | `Baseline__c` | the branch re-resolved at the boundary the cut recorded | the baseline's frozen `Resolution_TimePoint__c`; `rightAsOf` is **refused** |
+        | `source` | `Branch_Source_CI__c` | what that source *supplies*, with no branch deltas folded in | the acceptance in effect at `rightAsOf` |
+        | `ebom` | `Item_Revision__c` | a raw eBOM walk beneath that revision, no branch in the picture | `rightAsOf`, defaulting to **that revision's release date** |
+
+        `rightType` is matched **case-insensitively** — `rightType=Branch` is a 200. The values
+        are published lower-case and that is the spelling to send; normalising a published wire
+        value is a courtesy the HTTP surface affords, and the service behind it stays
+        case-sensitive.
+
+        A `source` with nothing accepted yet resolves to no root and no members. That is a `200`,
+        not an error: every member of the other side lands as added or removed.
+
+        ## Entry kinds
+
+        | kind | Meaning |
+        |---|---|
+        | `root-version-differs` | The two sides resolve **different root revisions**. One entry per comparison, never one per edge. |
+        | `member-added` | The correlation key is present on the **right** and absent on the left. |
+        | `member-removed` | The correlation key is present on the **left** and absent on the right. |
+        | `member-differs` | Present on both, content disagrees. `differingFields[]` names which of `quantity` / `findNumber` / `childRevision`. |
+        | `member-unchanged` | Present on both and identical. **Emitted only when `includeUnchanged=true`.** |
+
+        One entry per correlation key, always — which is why `member-differs` carries a list rather
+        than splitting into three kinds. `entryId` hashes `(kind, parent item, child item,
+        secondary unique key)`, so two entries on one key would collide.
+
+        `root-version-differs` fires whenever the two **resolved root revisions** differ, and that
+        includes the case where the two roots are different *items* — a different item's revision
+        is trivially a different revision. That is what stops `identical` reporting two unrelated
+        assemblies as the same configuration. The abnormal shape is named separately, by the
+        `COMPARE_ROOTS_DIFFER` warning.
+
+        ### The correlation key is the pull's key
+
+        `(Parent_Item__c, Item__c, Secondary_Unique_Key__c)` — the same join
+        [pull-preview](#operation/previewMbomPull) documents in full, for the same reason: the
+        parent *item* does not move when its revision does, so the key survives the BOM clone a
+        revision advance performs. Two edges on **one side** sharing a key is
+        `AMBIGUOUS_CORRELATION` (422) rather than a guess.
+
+        ### Exclusion tombstones are filtered out before the join
+
+        Both sides are reduced to what the configuration *contains* — the same
+        `isContainedMember` predicate a baseline read applies — so a tombstone never becomes a
+        member. A member excluded on the left therefore surfaces as **`member-added`** against a
+        right that still supplies it: the left does not contain it and the right does, which is the
+        honest answer for a symmetric compare and what keeps branch-against-baseline
+        self-consistent, since a baseline's rows were filtered by that same predicate when it was
+        cut.
+
+        ### Provenance is reported, never classified
+
+        Each entry's `left` / `right` state carries `provenance` and `governingClock`, so a
+        claimed-versus-inherited difference is visible without a kind of its own. A provenance-only
+        difference is **not** a content difference and produces no entry: the same part at the same
+        quantity in the same position is the same member however each side came to hold it. A
+        branch that claimed a member without changing it therefore reads as unchanged against its
+        own source.
+
+        ## What a comparison deliberately does not have
+
+        - **No decision tier and no actions.** A comparison initiates nothing, so `decision`,
+          `availableActions`, `retargeted` and `overrideKind` are **absent** from an entry rather
+          than defaulted — a consumer cannot read a default as an answer. That is also why
+          `CompareEntry` is not the pull's `DiffEntry`, whose `current` / `candidate` naming would
+          be a lie on a symmetric pair.
+        - **No `diffFingerprint`.** The pull carries one so a commit can fail fast on a stale
+          preview. There is no commit here, so a digest would be a field nobody could act on.
+
+        ## `summary`, and the one thing that is easy to get wrong
+
+        `total` and `byKind` count the entries **emitted**, so both move with `includeUnchanged`.
+        `added`, `removed`, `differing` and **`unchanged` do not** — `unchanged` is derived from the
+        matched correlation keys and is therefore **populated whether or not the unchanged rows were
+        asked for**. That is the point of it: the default response emits no row for an identical
+        member, and a caller still needs to know how much of the configuration matched without
+        paying for the rows. So `summary.unchanged` does **not** always equal
+        `byKind['member-unchanged']`; with `includeUnchanged=false` the latter is `0`.
+
+        `byKind` is **pre-seeded with all five kinds at zero**, unlike the pull's summary, which
+        carries only the kinds it observed. A comparison is read by a client rendering a fixed set
+        of counters, and an absent key would make every one of them a null check.
+
+        Counts are always over the **untruncated** comparison.
+
+        ## Ordering and truncation
+
+        Entries are ordered by **breadcrumb path, then find number, then child item id, then kind**,
+        with `entryId` last purely as a total-order guarantee. A deliberate divergence from the
+        pull's `entryId`-hash order: a pull preview is read as a flat decision list, while a
+        comparison is read against a tree, and hash order scatters siblings.
+
+        `entriesLimit` caps `entries` as a **plain prefix** — unlike the pull, a comparison has no
+        `required` tier that trimming could silently hide. `summary` is left alone, which is what
+        makes `truncated: true` actionable rather than merely true; re-issue with a larger limit to
+        get a longer, stable prefix of the same comparison.
+
+        The default cap is **not** raised by `includeUnchanged=true`, deliberately: a 500-edge BOM
+        truncates at 200 and says so, rather than silently returning a response an order of
+        magnitude larger than the caller expected.
+
+        > Truncation is applied by the REST layer. The service beneath it always returns a complete
+        > comparison, so a Flow or an LWC controller calling it directly sees every entry with
+        > `truncated: false` and `entriesLimit: null`. Over HTTP both fields are always filled in.
+
+        ## Access
+
+        **Gated on read, not write** — deliberately unlike
+        [pull-preview](#operation/previewMbomPull), which requires the same write grant the commit
+        does because previewing a pull is initiating one. A comparison initiates nothing, and
+        refusing a read-only user the ability to *look* at a difference has no justification.
+        Confirmed with the PM: read-only users may compare. This is not a copied-and-forgotten gate.
+
+        Each side is gated on the object it is addressed by: `Branch__c` for a branch,
+        `Baseline__c` **and** `Branch__c` for a baseline, `Branch_Source_CI__c` for a source,
+        `Item_Revision__c` for an eBOM revision.
+      parameters:
+        - $ref: '#/components/parameters/BranchId'
+        - $ref: '#/components/parameters/RightType'
+        - $ref: '#/components/parameters/RightId'
+        - $ref: '#/components/parameters/AsOf'
+        - $ref: '#/components/parameters/RightAsOf'
+        - $ref: '#/components/parameters/IncludeUnchanged'
+        - $ref: '#/components/parameters/EntriesLimit'
+      responses:
+        '200':
+          description: 'The comparison. An identical pair is a `200` with `identical: true`, not an empty response and not an error.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Comparison' }
+              examples:
+                identical:
+                  summary: A branch against its own source — no differences
+                  $ref: '#/components/examples/ComparisonIdentical'
+                differences:
+                  summary: A branch against a newer released eBOM revision
+                  $ref: '#/components/examples/ComparisonWithDifferences'
+                includingUnchanged:
+                  summary: The same comparison with `includeUnchanged=true`
+                  $ref: '#/components/examples/ComparisonIncludingUnchanged'
+                truncated:
+                  summary: The same comparison at `entriesLimit=2`
+                  $ref: '#/components/examples/ComparisonTruncated'
+        '400':
+          description: |
+            `INVALID_REQUEST` — `rightType` is missing or is not one of the four values;
+            `rightId` was not supplied; `entriesLimit` is not a positive integer (`entriesLimit=0`
+            is refused, **not** silently defaulted); or `rightAsOf` was supplied for a baseline
+            right side, which resolves at its own recorded timepoint and could not honour a
+            different one.
+
+            `ASOF_INVALID` / `ASOF_IN_FUTURE` — either clock could not be parsed, or names a moment
+            that has not happened.
+
+            An unrecognised `includeUnchanged` is **not** an error — see that parameter.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RestError' }
+              examples:
+                unknownRightType:
+                  value:
+                    code: INVALID_REQUEST
+                    message: 'That request could not be read. Check that the body is valid JSON and that every required value is supplied. (rightType must be one of {baseline, branch, ebom, source}, not revision)'
+                zeroLimit:
+                  value:
+                    code: INVALID_REQUEST
+                    message: 'That request could not be read. Check that the body is valid JSON and that every required value is supplied. (entriesLimit 0)'
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404':
+          description: |
+            `NOT_FOUND` — the path id names no branch or names another object; `rightId` names
+            nothing, or names an object other than the one `rightType` implies; or the path
+            carries an unrecognised trailing segment (`.../comparison/junk`).
+
+            A **missing** `rightId` is a 400 and a **present but unusable** one is a 404: the
+            first is half a request, the second names a resource that is not there.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RestError' }
+              examples:
+                rightIdWrongObject:
+                  value:
+                    code: NOT_FOUND
+                    message: 'That record does not exist, or you do not have access to it. (a1Cg8000000AbCeEAK is not a Branch__c)'
+        '409': { $ref: '#/components/responses/ComparisonConflict' }
+        '422': { $ref: '#/components/responses/ComparisonUnprocessable' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /mbom/baselines/{baselineId}/comparison:
+    get:
+      tags: [Comparison]
+      operationId: compareBaseline
+      summary: Compare a baseline against another configuration
+      description: |
+        The same comparison as [`compareBranch`](#operation/compareBranch) — same right-hand types,
+        same kinds, same summary, same truncation — with a **baseline** on the left instead of a
+        branch.
+
+        It exists because a baseline has to be able to sit on the left as well as the right: "what
+        has this branch done since we froze it?" and "what changed between these two builds?" are
+        both baseline-rooted questions, and neither can be asked by naming the baseline on the right
+        alone.
+
+        ## `asOf` is refused here, not ignored
+
+        The left side is a baseline, so it resolves at the boundary its cut recorded. A second
+        clock has nothing to answer, and accepting one would let a caller believe they had asked a
+        temporal question and been given a temporal answer. Sending `asOf` is a
+        `400 INVALID_REQUEST` — the same reading
+        [`getBaselineTree`](#operation/getBaselineTree) takes. `rightAsOf` is still accepted,
+        unless the *right* side is a baseline too.
+
+        There is deliberately **no** `sources/{id}/comparison` and no eBOM-rooted left side. Both
+        can still be compared — as the right-hand side of a branch or baseline — and eBOM against
+        eBOM is already served by Propel's existing BOM Compare, which a third surface would
+        duplicate.
+
+        ## Access
+
+        Read, not write, exactly as the branch-rooted endpoint. A baseline side is gated on
+        `Baseline__c` **and** `Branch__c`, because reading one resolves the branch behind it.
+      parameters:
+        - $ref: '#/components/parameters/BaselineId'
+        - $ref: '#/components/parameters/RightType'
+        - $ref: '#/components/parameters/RightId'
+        - $ref: '#/components/parameters/RightAsOf'
+        - $ref: '#/components/parameters/IncludeUnchanged'
+        - $ref: '#/components/parameters/EntriesLimit'
+      responses:
+        '200':
+          description: The comparison, in the shape `compareBranch` returns — `left.type` is `baseline`.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Comparison' }
+        '400':
+          description: |
+            `INVALID_REQUEST` — everything `compareBranch` refuses, **plus `asOf`**, which a
+            baseline left side cannot honour.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RestError' }
+              examples:
+                asOfRefused:
+                  value:
+                    code: INVALID_REQUEST
+                    message: 'That request could not be read. Check that the body is valid JSON and that every required value is supplied. (asOf cannot be supplied for a baseline: a baseline resolves at its own recorded timepoint, and honouring a different one would not be that baseline)'
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404':
+          description: '`NOT_FOUND` — the path id names no baseline, `rightId` names nothing or the wrong object, or the path carries a trailing segment.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RestError' }
+        '409': { $ref: '#/components/responses/ComparisonConflict' }
+        '422': { $ref: '#/components/responses/ComparisonUnprocessable' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
 # ======================================================================== components
 
 components:
@@ -1298,6 +1583,82 @@ components:
         type: integer
         minimum: 1
         default: 200
+
+    RightType:
+      name: rightType
+      in: query
+      required: true
+      description: |
+        What the **right-hand** side of the comparison is. Required — a comparison against nothing
+        in particular is half a request, so a missing or unrecognised value is
+        `400 INVALID_REQUEST`.
+
+        - `branch` — another `Branch__c`, resolved with its own deltas overlaid.
+        - `baseline` — a `Baseline__c`, replayed at the boundary its cut recorded.
+        - `source` — a `Branch_Source_CI__c`: what that source *supplies*, with no branch deltas
+          folded in. This is the "what have I changed relative to upstream?" comparison.
+        - `ebom` — a released `Item_Revision__c`, walked raw, with no branch in the picture.
+
+        **Matched case-insensitively**, so `Branch` and `BRANCH` are both accepted. Send the
+        lower-case spelling: that is the published value, and it is what comes back in
+        `right.type`.
+      schema:
+        $ref: '#/components/schemas/CompareSideType'
+
+    RightId:
+      name: rightId
+      in: query
+      required: true
+      description: |
+        The record the right-hand side is. Its object must match `rightType` —
+        `Branch__c`, `Baseline__c`, `Branch_Source_CI__c` or `Item_Revision__c` respectively.
+
+        **Absent is a 400** (the caller described half a comparison); **present but naming nothing,
+        or naming another object, is a 404** (the caller named a resource that is not there). The
+        same split the path ids make.
+      schema: { $ref: '#/components/schemas/SalesforceId' }
+
+    RightAsOf:
+      name: rightAsOf
+      in: query
+      required: false
+      description: |
+        The **right** side's read clock. `asOf` governs the left side; each side keeps its own pair
+        of clocks and never borrows the other's, which is why there are two parameters rather than
+        one. A branch read at now against a baseline frozen in March is two configurations at two
+        instants, and both are published on the response.
+
+        Defaults differ by side type — now for `branch` and `source`, and for `ebom` **that
+        revision's own release date**, since a raw eBOM walk has no acceptance to pin it and "the
+        eBOM of revision X" honestly means the eBOM as it stood when X was released.
+
+        **Refused for a `baseline` right side** (`400 INVALID_REQUEST`), which resolves at the
+        timepoint its cut recorded. Parsing and the future-value rule are `asOf`'s, unchanged.
+      schema:
+        type: string
+        format: date-time
+      examples:
+        iso: { value: '2026-04-02T00:00:00Z' }
+
+    IncludeUnchanged:
+      name: includeUnchanged
+      in: query
+      required: false
+      description: |
+        Emit a `member-unchanged` entry for every correlation key present and identical on both
+        sides, turning the response into the **complete merged BOM** — one entry per key across
+        both sides, which is what a side-by-side tree renders from a single call.
+
+        Defaults to `false`. **Only an explicit `true` (any case) turns it on**; anything else —
+        `includeUnchanged=1`, `=yes` — falls back to the default rather than raising, because the
+        fallback is the smaller response and loses no information: `summary.unchanged` carries the
+        count either way.
+
+        It costs no extra query. It does **not** raise `entriesLimit`, and it moves `summary.total`
+        and `summary.byKind`, which count entries emitted — see the endpoint description.
+      schema:
+        type: boolean
+        default: false
 
   # ---------------------------------------------------------------- schemas
 
@@ -1502,7 +1863,7 @@ components:
       properties:
         warningCode:
           type: string
-          enum: [MIXED_REVISION, BASELINE_COUNT_DRIFT, BASELINE_PROVENANCE_DRIFT, NESTED_CYCLE_PRUNED, MEMBER_ADD_COLLISION]
+          enum: [MIXED_REVISION, BASELINE_COUNT_DRIFT, BASELINE_PROVENANCE_DRIFT, NESTED_CYCLE_PRUNED, MEMBER_ADD_COLLISION, COMPARE_ROOTS_DIFFER]
           description: |
             The complete vocabulary.
 
@@ -1521,6 +1882,14 @@ components:
               source, and the branch's content won. The two rows render as one, carrying
               `isCollapsedCollision: true`. Not raised once a pull has retired a *converged* local
               add, because only the source asserts the position from then on.
+            - `COMPARE_ROOTS_DIFFER` — a comparison's two sides are rooted at different **items**,
+              so they have no members in common and every entry is an addition or a removal for
+              that reason alone. The comparison still answers; refusing would be the wrong call for
+              a read. Comparison responses only, where it is reported on **`leftWarnings`** — it is
+              about the pair rather than either side, the response has two warning lists and no
+              third, and the left is the side the caller addressed by path. It carries no `itemId`
+              and no revisions: there is no single item it is about, and `left` / `right` already
+              publish both roots.
         message:
           type: string
           description: Human-readable, from a Custom Label. Translated; never parse it.
@@ -2110,6 +2479,251 @@ components:
           oneOf: [{ $ref: '#/components/schemas/SalesforceId' }, { type: 'null' }]
           description: The branch-owned `Assembly_CI__c` this entry's target names, if any.
 
+    # -------------------------------------------------- comparison
+
+    CompareSideType:
+      type: string
+      description: |
+        Which resolution produced a side of a comparison. The right-hand side may be any of the
+        four; the **left** may only be `branch` or `baseline`, because those are the two objects a
+        comparison path is rooted at.
+
+        Sent as `rightType` — where it is matched case-insensitively — and returned as
+        `left.type` / `right.type`, always in this lower-case spelling.
+      enum: [branch, baseline, source, ebom]
+
+    CompareKind:
+      type: string
+      description: |
+        What a comparison entry reports. The counterpart to `EntryKind`, which is the **pull's**
+        vocabulary, and deliberately a separate set: a pull is asymmetric and its kinds name what a
+        pull would *do*, while a comparison is symmetric and does nothing. `member-added` and
+        `member-removed` are the two wire values the two vocabularies share, and they mean the same
+        thing in both.
+
+        See the endpoint description for what each one means and when it is emitted.
+      enum:
+        - root-version-differs
+        - member-added
+        - member-removed
+        - member-differs
+        - member-unchanged
+
+    Comparison:
+      type: object
+      description: |
+        The whole answer to "how do these two configurations differ": what each side was, one entry
+        per differing correlation key, counts over the complete set, and each side's own warnings.
+
+        No envelope, nulls not suppressed, and every collection always `[]` rather than absent —
+        the same conventions as the rest of this API.
+      required: [left, right, identical, summary, entries, leftWarnings, rightWarnings, truncated, entriesLimit, generatedAt]
+      properties:
+        left:
+          allOf: [{ $ref: '#/components/schemas/ComparisonSide' }]
+          description: The side the path named — a branch or a baseline.
+        right:
+          allOf: [{ $ref: '#/components/schemas/ComparisonSide' }]
+          description: The side `rightType` / `rightId` named.
+        identical:
+          type: boolean
+          description: |
+            True when the two configurations contain the same members with the same content.
+
+            Derived from the entry list rather than from the summary: true exactly when no entry of
+            any kind other than `member-unchanged` is present. So it reads the same whether or not
+            the unchanged rows were asked for, and a `root-version-differs` entry is enough on its
+            own to make it false.
+        summary: { $ref: '#/components/schemas/CompareSummary' }
+        entries:
+          type: array
+          description: |
+            One entry per differing correlation key — plus every matching one when
+            `includeUnchanged=true` — ordered by breadcrumb path, then find number, then child item
+            id, then kind. Always present; empty rather than absent, and empty is the ordinary
+            shape of an identical comparison.
+          items: { $ref: '#/components/schemas/CompareEntry' }
+        leftWarnings:
+          type: array
+          description: |
+            Warnings about the **left** side's own resolution — typically `MIXED_REVISION` — plus
+            `COMPARE_ROOTS_DIFFER`, which is about the pair and is reported here, first, because it
+            reframes everything below it.
+
+            Split per side rather than by adding a `side` field to `TreeWarning`, which would put a
+            new null key on every existing tree endpoint's warnings.
+          items: { $ref: '#/components/schemas/TreeWarning' }
+        rightWarnings:
+          type: array
+          description: Warnings about the **right** side's own resolution. Always present; empty rather than absent.
+          items: { $ref: '#/components/schemas/TreeWarning' }
+        truncated:
+          type: boolean
+          description: |
+            True when `entries` was capped at `entriesLimit`. The cap is a plain prefix and
+            `summary` still reports untruncated totals, which is what makes this actionable.
+        entriesLimit:
+          type: integer
+          description: The effective cap applied this call — the query parameter, or the server default of 200.
+          examples: [200]
+        generatedAt:
+          type: string
+          format: date-time
+          description: |
+            Server clock at computation time, read **once** for the whole call so the two sides are
+            never resolved microseconds apart. Not a resolution input — each side publishes its own
+            clocks.
+
+    ComparisonSide:
+      type: object
+      description: |
+        One of the two configurations that were compared: what it was, how it resolved, and on
+        which clock.
+
+        Published for **both** sides rather than echoed only for the one the path named, because a
+        comparison's answer is unreadable without knowing what was compared — `member-added` means
+        nothing until the reader knows the right side is a baseline from March rather than the
+        branch's own source.
+      required: [type, id]
+      properties:
+        type: { $ref: '#/components/schemas/CompareSideType' }
+        id:
+          allOf: [{ $ref: '#/components/schemas/SalesforceId' }]
+          description: The record this side was addressed by — a `Branch__c`, `Baseline__c`, `Branch_Source_CI__c` or `Item_Revision__c`.
+        label:
+          oneOf: [{ type: string }, { type: 'null' }]
+          description: |
+            The side's own display name where the addressed record has one — `Branch__c.Label__c`
+            for a branch, `Baseline__c.Name` for a baseline — and the **root item number** otherwise,
+            so a UI always has something to render beside the column. A `source` and an `ebom` side
+            are named by what they supply rather than by a record a user would recognise.
+          examples: ['MBOM-GDL']
+        rootItemId:
+          oneOf: [{ $ref: '#/components/schemas/SalesforceId' }, { type: 'null' }]
+        rootItemNumber:
+          oneOf: [{ type: string }, { type: 'null' }]
+          examples: ['Assy-100']
+        rootRevisionId:
+          oneOf: [{ $ref: '#/components/schemas/SalesforceId' }, { type: 'null' }]
+          description: The root `Item_Revision__c` this side resolved to. **Null** when a source has nothing accepted yet.
+        rootRevisionLabel:
+          oneOf: [{ type: string }, { type: 'null' }]
+          examples: ['rev-1']
+        asOf:
+          type: string
+          format: date-time
+          description: |
+            The read clock this side was resolved at — the caller's `asOf` / `rightAsOf`, the
+            server clock when none was supplied, an eBOM revision's release date, or a baseline's
+            frozen `Resolution_TimePoint__c`. A baseline echoes the timepoint its **cut** recorded,
+            which makes it obvious the caller could not have chosen it.
+        sourceTimePoint:
+          oneOf: [{ type: string, format: date-time }, { type: 'null' }]
+          description: |
+            **T_R** — the timepoint this side's *inherited* content is pinned at. Separate from
+            `asOf` because that is the whole model: a side reporting one number could not explain
+            its own rows.
+
+            An `ebom` side publishes the same value in both, honestly rather than leaving this null:
+            a raw walk has no acceptance pinning it and no branch content floating above it, so its
+            traversal clock **is** its T_R. Null only where a source has accepted nothing.
+
+    CompareEntry:
+      type: object
+      description: |
+        One difference between the two configurations, keyed by correlation key.
+
+        **Not the pull's `DiffEntry`.** That contract names its two states `current` and
+        `candidate`, which is a lie on a symmetric pair — a baseline compared against a raw eBOM has
+        no "current" side — and it carries four fields a comparison has no use for. The **leaf**
+        types are shared deliberately: `MemberTarget`, `MemberState`, `PathSegment` and
+        `AssemblyEdgeDetail` describe where a member sits and how one side renders it, which is
+        identical work in both features. Only the envelope differs.
+      required: [entryId, kind, differingFields, message, target]
+      properties:
+        entryId:
+          type: string
+          description: |
+            Stable, opaque handle: a deterministic hash of the kind plus the correlation key,
+            truncated to 16 hex characters. Never a database id, never positional, never generated —
+            so a repeated comparison returns the same handles. There is nothing to pass it back to;
+            it exists so a client can key a row. Do not parse it.
+
+            **One entry per correlation key, always** — two entries on one key would collide, which
+            is why `member-differs` carries `differingFields` rather than splitting into one kind
+            per field.
+          examples: ['7b31c0d5e9a24f18']
+        kind: { $ref: '#/components/schemas/CompareKind' }
+        differingFields:
+          type: array
+          description: |
+            Which of the three assertable values disagree, in a fixed order so two calls produce
+            byte-identical lists. Populated on `member-differs`; **empty on every other kind** —
+            empty rather than null, so a client can iterate unconditionally.
+
+            Provenance is deliberately not among them: each side's state already publishes it, and
+            a provenance-only difference is not a content difference.
+          items:
+            type: string
+            enum: [quantity, findNumber, childRevision]
+        message:
+          type: string
+          description: Human-readable, from a Custom Label, with the member's own item number appended. Translated; switch on `kind`, never on text.
+        target: { $ref: '#/components/schemas/MemberTarget' }
+        left:
+          oneOf: [{ $ref: '#/components/schemas/MemberState' }, { type: 'null' }]
+          description: How the **left** side renders this member. **Null on `member-added`.**
+        right:
+          oneOf: [{ $ref: '#/components/schemas/MemberState' }, { type: 'null' }]
+          description: How the **right** side renders this member. **Null on `member-removed`.**
+
+    CompareSummary:
+      type: object
+      description: |
+        Counts over the **whole** comparison, never over a truncated entry list.
+
+        Read the two groups differently. `total` and `byKind` count entries **emitted**, so both
+        move with `includeUnchanged`. `added`, `removed`, `differing` and `unchanged` count
+        correlation keys and do not.
+      required: [total, added, removed, differing, unchanged, byKind]
+      properties:
+        total:
+          type: integer
+          minimum: 0
+          description: Entries produced — `root-version-differs` and any `member-unchanged` included. Moves with `includeUnchanged`.
+        added:
+          type: integer
+          minimum: 0
+          description: Correlation keys present on the **right** side only.
+        removed:
+          type: integer
+          minimum: 0
+          description: Correlation keys present on the **left** side only.
+        differing:
+          type: integer
+          minimum: 0
+          description: Correlation keys present on both sides whose content disagrees.
+        unchanged:
+          type: integer
+          minimum: 0
+          description: |
+            Correlation keys present on both sides and identical.
+
+            **Populated whether or not `includeUnchanged` was set**, which is the point of it: the
+            default comparison emits no row for an identical member, and a caller still needs to
+            know how much of the configuration matched without paying for the rows. It therefore
+            does **not** always equal `byKind['member-unchanged']`, which counts emitted entries and
+            is `0` by default.
+        byKind:
+          type: object
+          description: |
+            Count per `CompareKind`, keyed by its wire value, over emitted entries.
+
+            **Pre-seeded with all five kinds at zero**, unlike the pull's `DiffSummary`, which
+            carries only the kinds it observed: a comparison is read by a client rendering a fixed
+            set of counters, and an absent key would make each one a null check.
+          additionalProperties: { type: integer, minimum: 0 }
+
     # -------------------------------------------------- errors
 
     RestError:
@@ -2246,6 +2860,60 @@ components:
               value:
                 code: CANDIDATE_ROOT_MISMATCH
                 message: "That revision belongs to a different item than this branch's source. Choose a revision of the same root item. (a0Ag8000000Ab77EAC)"
+            cycle:
+              value:
+                code: CYCLE_DETECTED
+                message: 'This change would make the child an ancestor of its own parent, which no BOM can represent. (beneath Assy-100 rev-2 at edge Harness-011)'
+
+    ComparisonConflict:
+      description: |
+        409 — well formed, and retryable once state changes.
+
+        | code | Cause |
+        |---|---|
+        | `NOT_RELEASED` | `rightType=ebom` names a revision that is not Released, or is Cancelled, Expired, or carries no release date |
+
+        The same four-part test an MBOM's creation and a pull both apply, and a 409 for the same
+        reason: releasing the revision makes the identical request succeed. A Draft revision never
+        appears at any timepoint and has no release date to pin a walk to, so there is nothing to
+        compare against.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/RestError' }
+          examples:
+            notReleased:
+              value:
+                code: NOT_RELEASED
+                message: 'An mBOM can only be created from a released item revision. (a0Ag8000000Ab99EAC)'
+
+    ComparisonUnprocessable:
+      description: |
+        422 — well formed, but impossible against the model. Retrying the identical request will
+        never succeed.
+
+        | code | Cause |
+        |---|---|
+        | `AMBIGUOUS_CORRELATION` | two edges on the **same side** share a correlation key, so which member on one side matches which on the other cannot be determined. No state the caller can reach will fix it — the same known gap the pull has |
+        | `CYCLE_DETECTED` | a cycle in the eBOM beneath either side's root, so that side cannot be resolved at all |
+
+        Both sides are resolved, so either can raise either code. `AMBIGUOUS_CORRELATION`'s message
+        names the offending side in the **join's** vocabulary rather than the comparison's:
+        `current side` is the **left** side and `candidate side` is the **right** one. The message
+        is shared with pull-preview, which is the surface that vocabulary was written for; switch on
+        `code`, and read the ids rather than the nouns.
+
+        A comparison always reports a cycle as **`CYCLE_DETECTED`**, never as the traversal's own
+        `EBOM_CYCLE`: the two mean the same thing to a caller and are both 422, and carrying the
+        inner code out would make this contract depend on which internal walk happened to find it.
+        A tree read, which has one walk and no such choice, still answers `EBOM_CYCLE`.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/RestError' }
+          examples:
+            ambiguous:
+              value:
+                code: AMBIGUOUS_CORRELATION
+                message: 'Two BOM lines share the same parent, child and secondary unique key, so this pull cannot tell which line corresponds to which. If these are genuinely duplicate lines, give one its own secondary unique key. If the parent item legitimately renders at two revisions in this tree, this is a known limitation (MVP-30214), not a data error -- contact support rather than editing BOM data that looks correct. (current side: parent item a02g8000000Ab01EAC, child item a02g8000000Ab20EAC, secondary unique key (none); edges a0Bg8000000Ab10EAC and a0Bg8000000Ab19EAC)'
             cycle:
               value:
                 code: CYCLE_DETECTED
@@ -2915,3 +3583,582 @@ components:
         acceptedRootRevisionId: a0Ag8000000Ab02EAC
         acceptedAt: '2026-04-06T16:11:09.882Z'
         applied: []
+
+    # The four comparison examples below are ONE fixture read four ways, so they can be read
+    # against each other. `ComparisonWithDifferences`, `ComparisonIncludingUnchanged` and
+    # `ComparisonTruncated` are the same branch against the same eBOM revision, differing only in
+    # `includeUnchanged` and `entriesLimit` — which is what makes the summary's behaviour legible:
+    # `unchanged` is 1 in all three, `total` and `byKind['member-unchanged']` move only with the
+    # flag, and truncation moves neither.
+
+    ComparisonIdentical:
+      value:
+        left:
+          type: branch
+          id: a1Bg8000000AbCdEAK
+          label: MBOM-GDL
+          rootItemId: a02g8000000Ab01EAC
+          rootItemNumber: Assy-100
+          rootRevisionId: a0Ag8000000Ab01EAC
+          rootRevisionLabel: rev-1
+          asOf: '2026-04-05T17:22:03.518Z'
+          sourceTimePoint: '2026-01-15T00:00:00.000Z'
+        right:
+          type: source
+          id: a1Cg8000000AbCeEAK
+          label: Assy-100
+          rootItemId: a02g8000000Ab01EAC
+          rootItemNumber: Assy-100
+          rootRevisionId: a0Ag8000000Ab01EAC
+          rootRevisionLabel: rev-1
+          asOf: '2026-04-05T17:22:03.518Z'
+          sourceTimePoint: '2026-01-15T00:00:00.000Z'
+        identical: true
+        summary:
+          total: 0
+          added: 0
+          removed: 0
+          differing: 0
+          # Four members matched and agreed. One of them is a member the branch CLAIMED without
+          # changing: provenance is reported, never classified, so it is unchanged content.
+          unchanged: 4
+          byKind:
+            root-version-differs: 0
+            member-added: 0
+            member-removed: 0
+            member-differs: 0
+            member-unchanged: 0
+        entries: []
+        leftWarnings: []
+        rightWarnings: []
+        truncated: false
+        entriesLimit: 200
+        generatedAt: '2026-04-05T17:22:03.518Z'
+
+    ComparisonWithDifferences:
+      value:
+        left:
+          type: branch
+          id: a1Bg8000000AbCdEAK
+          label: MBOM-GDL
+          rootItemId: a02g8000000Ab01EAC
+          rootItemNumber: Assy-100
+          rootRevisionId: a0Ag8000000Ab01EAC
+          rootRevisionLabel: rev-1
+          asOf: '2026-04-05T17:22:03.518Z'
+          sourceTimePoint: '2026-01-15T00:00:00.000Z'
+        right:
+          type: ebom
+          id: a0Ag8000000Ab02EAC
+          label: Assy-100
+          rootItemId: a02g8000000Ab01EAC
+          rootItemNumber: Assy-100
+          rootRevisionId: a0Ag8000000Ab02EAC
+          rootRevisionLabel: rev-2
+          # One clock, twice: a raw eBOM walk has no acceptance pinning it, so its traversal clock
+          # IS its T_R — here the release date of rev-2, since no rightAsOf was sent.
+          asOf: '2026-04-02T00:00:00.000Z'
+          sourceTimePoint: '2026-04-02T00:00:00.000Z'
+        identical: false
+        summary:
+          total: 4
+          added: 1
+          removed: 1
+          differing: 1
+          # Bracket-005 matched and agreed. Counted here with `includeUnchanged` off, where no
+          # `member-unchanged` entry was emitted for it — which is why `byKind` below reads 0.
+          unchanged: 1
+          byKind:
+            root-version-differs: 1
+            member-added: 1
+            member-removed: 1
+            member-differs: 1
+            member-unchanged: 0
+        entries:
+          - entryId: '0c7e5a3419f8b2d6'
+            kind: root-version-differs
+            differingFields: []
+            message: 'The two sides resolve the top-level assembly at different revisions. (Assy-100)'
+            target:
+              ciType: source
+              edgeId: null
+              edgeKey: null
+              label: Assy-100
+              path:
+                - { ciType: source, label: Assy-100, edgeId: null, edgeKey: null }
+            left:
+              provenance: inherited
+              governingClock: source
+              governingTimestamp: '2026-01-15T00:00:00.000Z'
+              detail:
+                ciType: assembly-edge
+                parentItemId: null
+                parentItemNumber: null
+                childItemId: a02g8000000Ab01EAC
+                childItemNumber: Assy-100
+                childItemRevisionId: a0Ag8000000Ab01EAC
+                childRevisionLabel: rev-1
+                quantity: null
+                findNumber: null
+            right:
+              provenance: inherited
+              governingClock: source
+              governingTimestamp: '2026-04-02T00:00:00.000Z'
+              detail:
+                ciType: assembly-edge
+                parentItemId: null
+                parentItemNumber: null
+                childItemId: a02g8000000Ab01EAC
+                childItemNumber: Assy-100
+                childItemRevisionId: a0Ag8000000Ab02EAC
+                childRevisionLabel: rev-2
+                quantity: null
+                findNumber: null
+
+          - entryId: '7b31c0d5e9a24f18'
+            kind: member-differs
+            differingFields: [quantity, childRevision]
+            message: 'This member is on both sides, and its content differs. The listed fields are the ones that disagree. (Motor-002)'
+            target:
+              ciType: assembly-edge
+              edgeId: a1Eg8000000AbD1EAK
+              edgeKey: a0Bg8000000Ab10EAC
+              label: Motor-002
+              path:
+                - { ciType: source, label: Assy-100, edgeId: null, edgeKey: null }
+            left:
+              # Claimed, so the branch has spoken about this edge and it answers to the BRANCH
+              # clock from then on — which is what `governingClock: branch` states here.
+              provenance: claimed
+              governingClock: branch
+              governingTimestamp: '2026-04-05T17:22:03.518Z'
+              detail:
+                ciType: assembly-edge
+                parentItemId: a02g8000000Ab01EAC
+                parentItemNumber: Assy-100
+                childItemId: a02g8000000Ab20EAC
+                childItemNumber: Motor-002
+                childItemRevisionId: a0Ag8000000Ab41EAC
+                childRevisionLabel: rev-1
+                quantity: 4
+                findNumber: 10
+            right:
+              provenance: inherited
+              governingClock: source
+              governingTimestamp: '2026-04-02T00:00:00.000Z'
+              detail:
+                ciType: assembly-edge
+                parentItemId: a02g8000000Ab01EAC
+                parentItemNumber: Assy-100
+                childItemId: a02g8000000Ab20EAC
+                childItemNumber: Motor-002
+                childItemRevisionId: a0Ag8000000Ab42EAC
+                childRevisionLabel: rev-2
+                quantity: 1
+                findNumber: 10
+
+          - entryId: 'c48d90f2a6e17b53'
+            kind: member-removed
+            differingFields: []
+            message: 'This member is present on the left side only. (Harness-011)'
+            target:
+              ciType: assembly-edge
+              edgeId: null
+              edgeKey: a0Bg8000000Ab12EAC
+              label: Harness-011
+              path:
+                - { ciType: source, label: Assy-100, edgeId: null, edgeKey: null }
+            left:
+              provenance: inherited
+              governingClock: source
+              governingTimestamp: '2026-01-15T00:00:00.000Z'
+              detail:
+                ciType: assembly-edge
+                parentItemId: a02g8000000Ab01EAC
+                parentItemNumber: Assy-100
+                childItemId: a02g8000000Ab22EAC
+                childItemNumber: Harness-011
+                childItemRevisionId: a0Ag8000000Ab61EAC
+                childRevisionLabel: rev-1
+                quantity: 3
+                findNumber: 30
+            right: null
+
+          - entryId: 'af62b1085d3ce974'
+            kind: member-added
+            differingFields: []
+            message: 'This member is present on the right side only. (Panel-300)'
+            target:
+              ciType: assembly-edge
+              edgeId: null
+              edgeKey: a0Bg8000000Ab13EAC
+              label: Panel-300
+              path:
+                - { ciType: source, label: Assy-100, edgeId: null, edgeKey: null }
+            left: null
+            right:
+              provenance: inherited
+              governingClock: source
+              governingTimestamp: '2026-04-02T00:00:00.000Z'
+              detail:
+                ciType: assembly-edge
+                parentItemId: a02g8000000Ab01EAC
+                parentItemNumber: Assy-100
+                childItemId: a02g8000000Ab23EAC
+                childItemNumber: Panel-300
+                childItemRevisionId: a0Ag8000000Ab52EAC
+                childRevisionLabel: rev-2
+                quantity: 1
+                findNumber: 40
+        leftWarnings: []
+        rightWarnings: []
+        truncated: false
+        entriesLimit: 200
+        generatedAt: '2026-04-05T17:22:03.518Z'
+
+    ComparisonIncludingUnchanged:
+      value:
+        left:
+          type: branch
+          id: a1Bg8000000AbCdEAK
+          label: MBOM-GDL
+          rootItemId: a02g8000000Ab01EAC
+          rootItemNumber: Assy-100
+          rootRevisionId: a0Ag8000000Ab01EAC
+          rootRevisionLabel: rev-1
+          asOf: '2026-04-05T17:22:03.518Z'
+          sourceTimePoint: '2026-01-15T00:00:00.000Z'
+        right:
+          type: ebom
+          id: a0Ag8000000Ab02EAC
+          label: Assy-100
+          rootItemId: a02g8000000Ab01EAC
+          rootItemNumber: Assy-100
+          rootRevisionId: a0Ag8000000Ab02EAC
+          rootRevisionLabel: rev-2
+          asOf: '2026-04-02T00:00:00.000Z'
+          sourceTimePoint: '2026-04-02T00:00:00.000Z'
+        identical: false
+        summary:
+          # The same comparison as `ComparisonWithDifferences`, with `includeUnchanged=true`.
+          # `total` moves 4 → 5 and `byKind['member-unchanged']` moves 0 → 1, because both count
+          # entries EMITTED. `added`, `removed`, `differing` and `unchanged` are unmoved, because
+          # they count correlation keys — `unchanged` is 1 in both responses, which is the whole
+          # point of it.
+          total: 5
+          added: 1
+          removed: 1
+          differing: 1
+          unchanged: 1
+          byKind:
+            root-version-differs: 1
+            member-added: 1
+            member-removed: 1
+            member-differs: 1
+            member-unchanged: 1
+        entries:
+          - entryId: '0c7e5a3419f8b2d6'
+            kind: root-version-differs
+            differingFields: []
+            message: 'The two sides resolve the top-level assembly at different revisions. (Assy-100)'
+            target:
+              ciType: source
+              edgeId: null
+              edgeKey: null
+              label: Assy-100
+              path:
+                - { ciType: source, label: Assy-100, edgeId: null, edgeKey: null }
+            left:
+              provenance: inherited
+              governingClock: source
+              governingTimestamp: '2026-01-15T00:00:00.000Z'
+              detail:
+                ciType: assembly-edge
+                parentItemId: null
+                parentItemNumber: null
+                childItemId: a02g8000000Ab01EAC
+                childItemNumber: Assy-100
+                childItemRevisionId: a0Ag8000000Ab01EAC
+                childRevisionLabel: rev-1
+                quantity: null
+                findNumber: null
+            right:
+              provenance: inherited
+              governingClock: source
+              governingTimestamp: '2026-04-02T00:00:00.000Z'
+              detail:
+                ciType: assembly-edge
+                parentItemId: null
+                parentItemNumber: null
+                childItemId: a02g8000000Ab01EAC
+                childItemNumber: Assy-100
+                childItemRevisionId: a0Ag8000000Ab02EAC
+                childRevisionLabel: rev-2
+                quantity: null
+                findNumber: null
+
+          - entryId: '7b31c0d5e9a24f18'
+            kind: member-differs
+            differingFields: [quantity, childRevision]
+            message: 'This member is on both sides, and its content differs. The listed fields are the ones that disagree. (Motor-002)'
+            target:
+              ciType: assembly-edge
+              edgeId: a1Eg8000000AbD1EAK
+              edgeKey: a0Bg8000000Ab10EAC
+              label: Motor-002
+              path:
+                - { ciType: source, label: Assy-100, edgeId: null, edgeKey: null }
+            left:
+              provenance: claimed
+              governingClock: branch
+              governingTimestamp: '2026-04-05T17:22:03.518Z'
+              detail:
+                ciType: assembly-edge
+                parentItemId: a02g8000000Ab01EAC
+                parentItemNumber: Assy-100
+                childItemId: a02g8000000Ab20EAC
+                childItemNumber: Motor-002
+                childItemRevisionId: a0Ag8000000Ab41EAC
+                childRevisionLabel: rev-1
+                quantity: 4
+                findNumber: 10
+            right:
+              provenance: inherited
+              governingClock: source
+              governingTimestamp: '2026-04-02T00:00:00.000Z'
+              detail:
+                ciType: assembly-edge
+                parentItemId: a02g8000000Ab01EAC
+                parentItemNumber: Assy-100
+                childItemId: a02g8000000Ab20EAC
+                childItemNumber: Motor-002
+                childItemRevisionId: a0Ag8000000Ab42EAC
+                childRevisionLabel: rev-2
+                quantity: 1
+                findNumber: 10
+
+          # The one entry `includeUnchanged` adds. It sorts here, between find number 10 and find
+          # number 30, because the order is the tree's — breadcrumb path, then find number — not
+          # the order the classifier happened to produce.
+          - entryId: '1e9f4a7c2b80d635'
+            kind: member-unchanged
+            differingFields: []
+            message: 'This member is on both sides and is identical. (Bracket-005)'
+            target:
+              ciType: assembly-edge
+              edgeId: null
+              edgeKey: a0Bg8000000Ab11EAC
+              label: Bracket-005
+              path:
+                - { ciType: source, label: Assy-100, edgeId: null, edgeKey: null }
+            left:
+              provenance: inherited
+              governingClock: source
+              governingTimestamp: '2026-01-15T00:00:00.000Z'
+              detail:
+                ciType: assembly-edge
+                parentItemId: a02g8000000Ab01EAC
+                parentItemNumber: Assy-100
+                childItemId: a02g8000000Ab21EAC
+                childItemNumber: Bracket-005
+                childItemRevisionId: a0Ag8000000Ab31EAC
+                childRevisionLabel: rev-3
+                quantity: 2
+                findNumber: 20
+            right:
+              provenance: inherited
+              governingClock: source
+              governingTimestamp: '2026-04-02T00:00:00.000Z'
+              detail:
+                ciType: assembly-edge
+                parentItemId: a02g8000000Ab01EAC
+                parentItemNumber: Assy-100
+                childItemId: a02g8000000Ab21EAC
+                childItemNumber: Bracket-005
+                childItemRevisionId: a0Ag8000000Ab31EAC
+                childRevisionLabel: rev-3
+                quantity: 2
+                findNumber: 20
+
+          - entryId: 'c48d90f2a6e17b53'
+            kind: member-removed
+            differingFields: []
+            message: 'This member is present on the left side only. (Harness-011)'
+            target:
+              ciType: assembly-edge
+              edgeId: null
+              edgeKey: a0Bg8000000Ab12EAC
+              label: Harness-011
+              path:
+                - { ciType: source, label: Assy-100, edgeId: null, edgeKey: null }
+            left:
+              provenance: inherited
+              governingClock: source
+              governingTimestamp: '2026-01-15T00:00:00.000Z'
+              detail:
+                ciType: assembly-edge
+                parentItemId: a02g8000000Ab01EAC
+                parentItemNumber: Assy-100
+                childItemId: a02g8000000Ab22EAC
+                childItemNumber: Harness-011
+                childItemRevisionId: a0Ag8000000Ab61EAC
+                childRevisionLabel: rev-1
+                quantity: 3
+                findNumber: 30
+            right: null
+
+          - entryId: 'af62b1085d3ce974'
+            kind: member-added
+            differingFields: []
+            message: 'This member is present on the right side only. (Panel-300)'
+            target:
+              ciType: assembly-edge
+              edgeId: null
+              edgeKey: a0Bg8000000Ab13EAC
+              label: Panel-300
+              path:
+                - { ciType: source, label: Assy-100, edgeId: null, edgeKey: null }
+            left: null
+            right:
+              provenance: inherited
+              governingClock: source
+              governingTimestamp: '2026-04-02T00:00:00.000Z'
+              detail:
+                ciType: assembly-edge
+                parentItemId: a02g8000000Ab01EAC
+                parentItemNumber: Assy-100
+                childItemId: a02g8000000Ab23EAC
+                childItemNumber: Panel-300
+                childItemRevisionId: a0Ag8000000Ab52EAC
+                childRevisionLabel: rev-2
+                quantity: 1
+                findNumber: 40
+        leftWarnings: []
+        rightWarnings: []
+        truncated: false
+        entriesLimit: 200
+        generatedAt: '2026-04-05T17:22:03.518Z'
+
+    ComparisonTruncated:
+      value:
+        left:
+          type: branch
+          id: a1Bg8000000AbCdEAK
+          label: MBOM-GDL
+          rootItemId: a02g8000000Ab01EAC
+          rootItemNumber: Assy-100
+          rootRevisionId: a0Ag8000000Ab01EAC
+          rootRevisionLabel: rev-1
+          asOf: '2026-04-05T17:22:03.518Z'
+          sourceTimePoint: '2026-01-15T00:00:00.000Z'
+        right:
+          type: ebom
+          id: a0Ag8000000Ab02EAC
+          label: Assy-100
+          rootItemId: a02g8000000Ab01EAC
+          rootItemNumber: Assy-100
+          rootRevisionId: a0Ag8000000Ab02EAC
+          rootRevisionLabel: rev-2
+          asOf: '2026-04-02T00:00:00.000Z'
+          sourceTimePoint: '2026-04-02T00:00:00.000Z'
+        identical: false
+        summary:
+          # `ComparisonWithDifferences` at `entriesLimit=2`. The summary is BYTE-IDENTICAL to the
+          # untruncated response — truncation trims the rows and touches nothing else, which is
+          # what makes `truncated: true` actionable: 4 entries exist, 2 came back.
+          total: 4
+          added: 1
+          removed: 1
+          differing: 1
+          unchanged: 1
+          byKind:
+            root-version-differs: 1
+            member-added: 1
+            member-removed: 1
+            member-differs: 1
+            member-unchanged: 0
+        entries:
+          - entryId: '0c7e5a3419f8b2d6'
+            kind: root-version-differs
+            differingFields: []
+            message: 'The two sides resolve the top-level assembly at different revisions. (Assy-100)'
+            target:
+              ciType: source
+              edgeId: null
+              edgeKey: null
+              label: Assy-100
+              path:
+                - { ciType: source, label: Assy-100, edgeId: null, edgeKey: null }
+            left:
+              provenance: inherited
+              governingClock: source
+              governingTimestamp: '2026-01-15T00:00:00.000Z'
+              detail:
+                ciType: assembly-edge
+                parentItemId: null
+                parentItemNumber: null
+                childItemId: a02g8000000Ab01EAC
+                childItemNumber: Assy-100
+                childItemRevisionId: a0Ag8000000Ab01EAC
+                childRevisionLabel: rev-1
+                quantity: null
+                findNumber: null
+            right:
+              provenance: inherited
+              governingClock: source
+              governingTimestamp: '2026-04-02T00:00:00.000Z'
+              detail:
+                ciType: assembly-edge
+                parentItemId: null
+                parentItemNumber: null
+                childItemId: a02g8000000Ab01EAC
+                childItemNumber: Assy-100
+                childItemRevisionId: a0Ag8000000Ab02EAC
+                childRevisionLabel: rev-2
+                quantity: null
+                findNumber: null
+
+          - entryId: '7b31c0d5e9a24f18'
+            kind: member-differs
+            differingFields: [quantity, childRevision]
+            message: 'This member is on both sides, and its content differs. The listed fields are the ones that disagree. (Motor-002)'
+            target:
+              ciType: assembly-edge
+              edgeId: a1Eg8000000AbD1EAK
+              edgeKey: a0Bg8000000Ab10EAC
+              label: Motor-002
+              path:
+                - { ciType: source, label: Assy-100, edgeId: null, edgeKey: null }
+            left:
+              provenance: claimed
+              governingClock: branch
+              governingTimestamp: '2026-04-05T17:22:03.518Z'
+              detail:
+                ciType: assembly-edge
+                parentItemId: a02g8000000Ab01EAC
+                parentItemNumber: Assy-100
+                childItemId: a02g8000000Ab20EAC
+                childItemNumber: Motor-002
+                childItemRevisionId: a0Ag8000000Ab41EAC
+                childRevisionLabel: rev-1
+                quantity: 4
+                findNumber: 10
+            right:
+              provenance: inherited
+              governingClock: source
+              governingTimestamp: '2026-04-02T00:00:00.000Z'
+              detail:
+                ciType: assembly-edge
+                parentItemId: a02g8000000Ab01EAC
+                parentItemNumber: Assy-100
+                childItemId: a02g8000000Ab20EAC
+                childItemNumber: Motor-002
+                childItemRevisionId: a0Ag8000000Ab42EAC
+                childRevisionLabel: rev-2
+                quantity: 1
+                findNumber: 10
+        leftWarnings: []
+        rightWarnings: []
+        truncated: true
+        entriesLimit: 2
+        generatedAt: '2026-04-05T17:22:03.518Z'
