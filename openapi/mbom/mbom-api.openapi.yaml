@@ -1214,7 +1214,7 @@ paths:
         the two disagree on quantity, find number or the child revision they resolve to.
 
         The **left** side is the branch the path names. The **right** side is named by
-        `againstType` + `againstId`, and may be another branch, a baseline, a source, or a released
+        `rightType` + `rightId`, and may be another branch, a baseline, a source, or a released
         eBOM revision — so one endpoint answers eBOM-against-MBOM, MBOM-against-MBOM and
         MBOM-against-its-own-baseline rather than three.
 
@@ -1223,14 +1223,14 @@ paths:
 
         ## The right-hand side
 
-        | `againstType` | `againstId` names | Resolves to | Its clock |
+        | `rightType` | `rightId` names | Resolves to | Its clock |
         |---|---|---|---|
-        | `branch` | `Branch__c` | the branch's own effective structure, deltas overlaid | `againstAsOf`, defaulting to now |
-        | `baseline` | `Baseline__c` | the branch re-resolved at the boundary the cut recorded | the baseline's frozen `Resolution_TimePoint__c`; `againstAsOf` is **refused** |
-        | `source` | `Branch_Source_CI__c` | what that source *supplies*, with no branch deltas folded in | the acceptance in effect at `againstAsOf` |
-        | `ebom` | `Item_Revision__c` | a raw eBOM walk beneath that revision, no branch in the picture | `againstAsOf`, defaulting to **that revision's release date** |
+        | `branch` | `Branch__c` | the branch's own effective structure, deltas overlaid | `rightAsOf`, defaulting to now |
+        | `baseline` | `Baseline__c` | the branch re-resolved at the boundary the cut recorded | the baseline's frozen `Resolution_TimePoint__c`; `rightAsOf` is **refused** |
+        | `source` | `Branch_Source_CI__c` | what that source *supplies*, with no branch deltas folded in | the acceptance in effect at `rightAsOf` |
+        | `ebom` | `Item_Revision__c` | a raw eBOM walk beneath that revision, no branch in the picture | `rightAsOf`, defaulting to **that revision's release date** |
 
-        `againstType` is matched **case-insensitively** — `againstType=Branch` is a 200. The values
+        `rightType` is matched **case-insensitively** — `rightType=Branch` is a 200. The values
         are published lower-case and that is the spelling to send; normalising a published wire
         value is a courtesy the HTTP surface affords, and the service behind it stays
         case-sensitive.
@@ -1344,10 +1344,10 @@ paths:
         `Item_Revision__c` for an eBOM revision.
       parameters:
         - $ref: '#/components/parameters/BranchId'
-        - $ref: '#/components/parameters/AgainstType'
-        - $ref: '#/components/parameters/AgainstId'
+        - $ref: '#/components/parameters/RightType'
+        - $ref: '#/components/parameters/RightId'
         - $ref: '#/components/parameters/AsOf'
-        - $ref: '#/components/parameters/AgainstAsOf'
+        - $ref: '#/components/parameters/RightAsOf'
         - $ref: '#/components/parameters/IncludeUnchanged'
         - $ref: '#/components/parameters/EntriesLimit'
       responses:
@@ -1371,9 +1371,9 @@ paths:
                   $ref: '#/components/examples/ComparisonTruncated'
         '400':
           description: |
-            `INVALID_REQUEST` — `againstType` is missing or is not one of the four values;
-            `againstId` was not supplied; `entriesLimit` is not a positive integer (`entriesLimit=0`
-            is refused, **not** silently defaulted); or `againstAsOf` was supplied for a baseline
+            `INVALID_REQUEST` — `rightType` is missing or is not one of the four values;
+            `rightId` was not supplied; `entriesLimit` is not a positive integer (`entriesLimit=0`
+            is refused, **not** silently defaulted); or `rightAsOf` was supplied for a baseline
             right side, which resolves at its own recorded timepoint and could not honour a
             different one.
 
@@ -1385,10 +1385,10 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/RestError' }
               examples:
-                unknownAgainstType:
+                unknownRightType:
                   value:
                     code: INVALID_REQUEST
-                    message: 'That request could not be read. Check that the body is valid JSON and that every required value is supplied. (againstType must be one of {baseline, branch, ebom, source}, not revision)'
+                    message: 'That request could not be read. Check that the body is valid JSON and that every required value is supplied. (rightType must be one of {baseline, branch, ebom, source}, not revision)'
                 zeroLimit:
                   value:
                     code: INVALID_REQUEST
@@ -1396,17 +1396,17 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404':
           description: |
-            `NOT_FOUND` — the path id names no branch or names another object; `againstId` names
-            nothing, or names an object other than the one `againstType` implies; or the path
+            `NOT_FOUND` — the path id names no branch or names another object; `rightId` names
+            nothing, or names an object other than the one `rightType` implies; or the path
             carries an unrecognised trailing segment (`.../comparison/junk`).
 
-            A **missing** `againstId` is a 400 and a **present but unusable** one is a 404: the
+            A **missing** `rightId` is a 400 and a **present but unusable** one is a 404: the
             first is half a request, the second names a resource that is not there.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/RestError' }
               examples:
-                againstIdWrongObject:
+                rightIdWrongObject:
                   value:
                     code: NOT_FOUND
                     message: 'That record does not exist, or you do not have access to it. (a1Cg8000000AbCeEAK is not a Branch__c)'
@@ -1435,7 +1435,7 @@ paths:
         clock has nothing to answer, and accepting one would let a caller believe they had asked a
         temporal question and been given a temporal answer. Sending `asOf` is a
         `400 INVALID_REQUEST` — the same reading
-        [`getBaselineTree`](#operation/getBaselineTree) takes. `againstAsOf` is still accepted,
+        [`getBaselineTree`](#operation/getBaselineTree) takes. `rightAsOf` is still accepted,
         unless the *right* side is a baseline too.
 
         There is deliberately **no** `sources/{id}/comparison` and no eBOM-rooted left side. Both
@@ -1449,9 +1449,9 @@ paths:
         `Baseline__c` **and** `Branch__c`, because reading one resolves the branch behind it.
       parameters:
         - $ref: '#/components/parameters/BaselineId'
-        - $ref: '#/components/parameters/AgainstType'
-        - $ref: '#/components/parameters/AgainstId'
-        - $ref: '#/components/parameters/AgainstAsOf'
+        - $ref: '#/components/parameters/RightType'
+        - $ref: '#/components/parameters/RightId'
+        - $ref: '#/components/parameters/RightAsOf'
         - $ref: '#/components/parameters/IncludeUnchanged'
         - $ref: '#/components/parameters/EntriesLimit'
       responses:
@@ -1474,7 +1474,7 @@ paths:
                     message: 'That request could not be read. Check that the body is valid JSON and that every required value is supplied. (asOf cannot be supplied for a baseline: a baseline resolves at its own recorded timepoint, and honouring a different one would not be that baseline)'
         '403': { $ref: '#/components/responses/Forbidden' }
         '404':
-          description: '`NOT_FOUND` — the path id names no baseline, `againstId` names nothing or the wrong object, or the path carries a trailing segment.'
+          description: '`NOT_FOUND` — the path id names no baseline, `rightId` names nothing or the wrong object, or the path carries a trailing segment.'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/RestError' }
@@ -1584,8 +1584,8 @@ components:
         minimum: 1
         default: 200
 
-    AgainstType:
-      name: againstType
+    RightType:
+      name: rightType
       in: query
       required: true
       description: |
@@ -1605,12 +1605,12 @@ components:
       schema:
         $ref: '#/components/schemas/CompareSideType'
 
-    AgainstId:
-      name: againstId
+    RightId:
+      name: rightId
       in: query
       required: true
       description: |
-        The record the right-hand side is. Its object must match `againstType` —
+        The record the right-hand side is. Its object must match `rightType` —
         `Branch__c`, `Baseline__c`, `Branch_Source_CI__c` or `Item_Revision__c` respectively.
 
         **Absent is a 400** (the caller described half a comparison); **present but naming nothing,
@@ -1618,8 +1618,8 @@ components:
         same split the path ids make.
       schema: { $ref: '#/components/schemas/SalesforceId' }
 
-    AgainstAsOf:
-      name: againstAsOf
+    RightAsOf:
+      name: rightAsOf
       in: query
       required: false
       description: |
@@ -2488,7 +2488,7 @@ components:
         four; the **left** may only be `branch` or `baseline`, because those are the two objects a
         comparison path is rooted at.
 
-        Sent as `againstType` — where it is matched case-insensitively — and returned as
+        Sent as `rightType` — where it is matched case-insensitively — and returned as
         `left.type` / `right.type`, always in this lower-case spelling.
       enum: [branch, baseline, source, ebom]
 
@@ -2524,7 +2524,7 @@ components:
           description: The side the path named — a branch or a baseline.
         right:
           allOf: [{ $ref: '#/components/schemas/ComparisonSide' }]
-          description: The side `againstType` / `againstId` named.
+          description: The side `rightType` / `rightId` named.
         identical:
           type: boolean
           description: |
@@ -2613,7 +2613,7 @@ components:
           type: string
           format: date-time
           description: |
-            The read clock this side was resolved at — the caller's `asOf` / `againstAsOf`, the
+            The read clock this side was resolved at — the caller's `asOf` / `rightAsOf`, the
             server clock when none was supplied, an eBOM revision's release date, or a baseline's
             frozen `Resolution_TimePoint__c`. A baseline echoes the timepoint its **cut** recorded,
             which makes it obvious the caller could not have chosen it.
@@ -2871,7 +2871,7 @@ components:
 
         | code | Cause |
         |---|---|
-        | `NOT_RELEASED` | `againstType=ebom` names a revision that is not Released, or is Cancelled, Expired, or carries no release date |
+        | `NOT_RELEASED` | `rightType=ebom` names a revision that is not Released, or is Cancelled, Expired, or carries no release date |
 
         The same four-part test an MBOM's creation and a pull both apply, and a 409 for the same
         reason: releasing the revision makes the identical request succeed. A Draft revision never
@@ -3656,7 +3656,7 @@ components:
           rootRevisionId: a0Ag8000000Ab02EAC
           rootRevisionLabel: rev-2
           # One clock, twice: a raw eBOM walk has no acceptance pinning it, so its traversal clock
-          # IS its T_R — here the release date of rev-2, since no againstAsOf was sent.
+          # IS its T_R — here the release date of rev-2, since no rightAsOf was sent.
           asOf: '2026-04-02T00:00:00.000Z'
           sourceTimePoint: '2026-04-02T00:00:00.000Z'
         identical: false

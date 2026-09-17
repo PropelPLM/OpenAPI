@@ -965,22 +965,22 @@
         ],
         "operationId": "compareBranch",
         "summary": "Compare a branch against another configuration",
-        "description": "The structural difference between two configurations: which members each holds, and where\nthe two disagree on quantity, find number or the child revision they resolve to.\n\nThe **left** side is the branch the path names. The **right** side is named by\n`againstType` + `againstId`, and may be another branch, a baseline, a source, or a released\neBOM revision — so one endpoint answers eBOM-against-MBOM, MBOM-against-MBOM and\nMBOM-against-its-own-baseline rather than three.\n\n**This call is pure.** No DML anywhere behind it. Two calls with the same inputs against an\nunchanged org return identical output, `entryId` values included.\n\n## The right-hand side\n\n| `againstType` | `againstId` names | Resolves to | Its clock |\n|---|---|---|---|\n| `branch` | `Branch__c` | the branch's own effective structure, deltas overlaid | `againstAsOf`, defaulting to now |\n| `baseline` | `Baseline__c` | the branch re-resolved at the boundary the cut recorded | the baseline's frozen `Resolution_TimePoint__c`; `againstAsOf` is **refused** |\n| `source` | `Branch_Source_CI__c` | what that source *supplies*, with no branch deltas folded in | the acceptance in effect at `againstAsOf` |\n| `ebom` | `Item_Revision__c` | a raw eBOM walk beneath that revision, no branch in the picture | `againstAsOf`, defaulting to **that revision's release date** |\n\n`againstType` is matched **case-insensitively** — `againstType=Branch` is a 200. The values\nare published lower-case and that is the spelling to send; normalising a published wire\nvalue is a courtesy the HTTP surface affords, and the service behind it stays\ncase-sensitive.\n\nA `source` with nothing accepted yet resolves to no root and no members. That is a `200`,\nnot an error: every member of the other side lands as added or removed.\n\n## Entry kinds\n\n| kind | Meaning |\n|---|---|\n| `root-version-differs` | The two sides resolve **different root revisions**. One entry per comparison, never one per edge. |\n| `member-added` | The correlation key is present on the **right** and absent on the left. |\n| `member-removed` | The correlation key is present on the **left** and absent on the right. |\n| `member-differs` | Present on both, content disagrees. `differingFields[]` names which of `quantity` / `findNumber` / `childRevision`. |\n| `member-unchanged` | Present on both and identical. **Emitted only when `includeUnchanged=true`.** |\n\nOne entry per correlation key, always — which is why `member-differs` carries a list rather\nthan splitting into three kinds. `entryId` hashes `(kind, parent item, child item,\nsecondary unique key)`, so two entries on one key would collide.\n\n`root-version-differs` fires whenever the two **resolved root revisions** differ, and that\nincludes the case where the two roots are different *items* — a different item's revision\nis trivially a different revision. That is what stops `identical` reporting two unrelated\nassemblies as the same configuration. The abnormal shape is named separately, by the\n`COMPARE_ROOTS_DIFFER` warning.\n\n### The correlation key is the pull's key\n\n`(Parent_Item__c, Item__c, Secondary_Unique_Key__c)` — the same join\n[pull-preview](#operation/previewMbomPull) documents in full, for the same reason: the\nparent *item* does not move when its revision does, so the key survives the BOM clone a\nrevision advance performs. Two edges on **one side** sharing a key is\n`AMBIGUOUS_CORRELATION` (422) rather than a guess.\n\n### Exclusion tombstones are filtered out before the join\n\nBoth sides are reduced to what the configuration *contains* — the same\n`isContainedMember` predicate a baseline read applies — so a tombstone never becomes a\nmember. A member excluded on the left therefore surfaces as **`member-added`** against a\nright that still supplies it: the left does not contain it and the right does, which is the\nhonest answer for a symmetric compare and what keeps branch-against-baseline\nself-consistent, since a baseline's rows were filtered by that same predicate when it was\ncut.\n\n### Provenance is reported, never classified\n\nEach entry's `left` / `right` state carries `provenance` and `governingClock`, so a\nclaimed-versus-inherited difference is visible without a kind of its own. A provenance-only\ndifference is **not** a content difference and produces no entry: the same part at the same\nquantity in the same position is the same member however each side came to hold it. A\nbranch that claimed a member without changing it therefore reads as unchanged against its\nown source.\n\n## What a comparison deliberately does not have\n\n- **No decision tier and no actions.** A comparison initiates nothing, so `decision`,\n  `availableActions`, `retargeted` and `overrideKind` are **absent** from an entry rather\n  than defaulted — a consumer cannot read a default as an answer. That is also why\n  `CompareEntry` is not the pull's `DiffEntry`, whose `current` / `candidate` naming would\n  be a lie on a symmetric pair.\n- **No `diffFingerprint`.** The pull carries one so a commit can fail fast on a stale\n  preview. There is no commit here, so a digest would be a field nobody could act on.\n\n## `summary`, and the one thing that is easy to get wrong\n\n`total` and `byKind` count the entries **emitted**, so both move with `includeUnchanged`.\n`added`, `removed`, `differing` and **`unchanged` do not** — `unchanged` is derived from the\nmatched correlation keys and is therefore **populated whether or not the unchanged rows were\nasked for**. That is the point of it: the default response emits no row for an identical\nmember, and a caller still needs to know how much of the configuration matched without\npaying for the rows. So `summary.unchanged` does **not** always equal\n`byKind['member-unchanged']`; with `includeUnchanged=false` the latter is `0`.\n\n`byKind` is **pre-seeded with all five kinds at zero**, unlike the pull's summary, which\ncarries only the kinds it observed. A comparison is read by a client rendering a fixed set\nof counters, and an absent key would make every one of them a null check.\n\nCounts are always over the **untruncated** comparison.\n\n## Ordering and truncation\n\nEntries are ordered by **breadcrumb path, then find number, then child item id, then kind**,\nwith `entryId` last purely as a total-order guarantee. A deliberate divergence from the\npull's `entryId`-hash order: a pull preview is read as a flat decision list, while a\ncomparison is read against a tree, and hash order scatters siblings.\n\n`entriesLimit` caps `entries` as a **plain prefix** — unlike the pull, a comparison has no\n`required` tier that trimming could silently hide. `summary` is left alone, which is what\nmakes `truncated: true` actionable rather than merely true; re-issue with a larger limit to\nget a longer, stable prefix of the same comparison.\n\nThe default cap is **not** raised by `includeUnchanged=true`, deliberately: a 500-edge BOM\ntruncates at 200 and says so, rather than silently returning a response an order of\nmagnitude larger than the caller expected.\n\n> Truncation is applied by the REST layer. The service beneath it always returns a complete\n> comparison, so a Flow or an LWC controller calling it directly sees every entry with\n> `truncated: false` and `entriesLimit: null`. Over HTTP both fields are always filled in.\n\n## Access\n\n**Gated on read, not write** — deliberately unlike\n[pull-preview](#operation/previewMbomPull), which requires the same write grant the commit\ndoes because previewing a pull is initiating one. A comparison initiates nothing, and\nrefusing a read-only user the ability to *look* at a difference has no justification.\nConfirmed with the PM: read-only users may compare. This is not a copied-and-forgotten gate.\n\nEach side is gated on the object it is addressed by: `Branch__c` for a branch,\n`Baseline__c` **and** `Branch__c` for a baseline, `Branch_Source_CI__c` for a source,\n`Item_Revision__c` for an eBOM revision.\n",
+        "description": "The structural difference between two configurations: which members each holds, and where\nthe two disagree on quantity, find number or the child revision they resolve to.\n\nThe **left** side is the branch the path names. The **right** side is named by\n`rightType` + `rightId`, and may be another branch, a baseline, a source, or a released\neBOM revision — so one endpoint answers eBOM-against-MBOM, MBOM-against-MBOM and\nMBOM-against-its-own-baseline rather than three.\n\n**This call is pure.** No DML anywhere behind it. Two calls with the same inputs against an\nunchanged org return identical output, `entryId` values included.\n\n## The right-hand side\n\n| `rightType` | `rightId` names | Resolves to | Its clock |\n|---|---|---|---|\n| `branch` | `Branch__c` | the branch's own effective structure, deltas overlaid | `rightAsOf`, defaulting to now |\n| `baseline` | `Baseline__c` | the branch re-resolved at the boundary the cut recorded | the baseline's frozen `Resolution_TimePoint__c`; `rightAsOf` is **refused** |\n| `source` | `Branch_Source_CI__c` | what that source *supplies*, with no branch deltas folded in | the acceptance in effect at `rightAsOf` |\n| `ebom` | `Item_Revision__c` | a raw eBOM walk beneath that revision, no branch in the picture | `rightAsOf`, defaulting to **that revision's release date** |\n\n`rightType` is matched **case-insensitively** — `rightType=Branch` is a 200. The values\nare published lower-case and that is the spelling to send; normalising a published wire\nvalue is a courtesy the HTTP surface affords, and the service behind it stays\ncase-sensitive.\n\nA `source` with nothing accepted yet resolves to no root and no members. That is a `200`,\nnot an error: every member of the other side lands as added or removed.\n\n## Entry kinds\n\n| kind | Meaning |\n|---|---|\n| `root-version-differs` | The two sides resolve **different root revisions**. One entry per comparison, never one per edge. |\n| `member-added` | The correlation key is present on the **right** and absent on the left. |\n| `member-removed` | The correlation key is present on the **left** and absent on the right. |\n| `member-differs` | Present on both, content disagrees. `differingFields[]` names which of `quantity` / `findNumber` / `childRevision`. |\n| `member-unchanged` | Present on both and identical. **Emitted only when `includeUnchanged=true`.** |\n\nOne entry per correlation key, always — which is why `member-differs` carries a list rather\nthan splitting into three kinds. `entryId` hashes `(kind, parent item, child item,\nsecondary unique key)`, so two entries on one key would collide.\n\n`root-version-differs` fires whenever the two **resolved root revisions** differ, and that\nincludes the case where the two roots are different *items* — a different item's revision\nis trivially a different revision. That is what stops `identical` reporting two unrelated\nassemblies as the same configuration. The abnormal shape is named separately, by the\n`COMPARE_ROOTS_DIFFER` warning.\n\n### The correlation key is the pull's key\n\n`(Parent_Item__c, Item__c, Secondary_Unique_Key__c)` — the same join\n[pull-preview](#operation/previewMbomPull) documents in full, for the same reason: the\nparent *item* does not move when its revision does, so the key survives the BOM clone a\nrevision advance performs. Two edges on **one side** sharing a key is\n`AMBIGUOUS_CORRELATION` (422) rather than a guess.\n\n### Exclusion tombstones are filtered out before the join\n\nBoth sides are reduced to what the configuration *contains* — the same\n`isContainedMember` predicate a baseline read applies — so a tombstone never becomes a\nmember. A member excluded on the left therefore surfaces as **`member-added`** against a\nright that still supplies it: the left does not contain it and the right does, which is the\nhonest answer for a symmetric compare and what keeps branch-against-baseline\nself-consistent, since a baseline's rows were filtered by that same predicate when it was\ncut.\n\n### Provenance is reported, never classified\n\nEach entry's `left` / `right` state carries `provenance` and `governingClock`, so a\nclaimed-versus-inherited difference is visible without a kind of its own. A provenance-only\ndifference is **not** a content difference and produces no entry: the same part at the same\nquantity in the same position is the same member however each side came to hold it. A\nbranch that claimed a member without changing it therefore reads as unchanged against its\nown source.\n\n## What a comparison deliberately does not have\n\n- **No decision tier and no actions.** A comparison initiates nothing, so `decision`,\n  `availableActions`, `retargeted` and `overrideKind` are **absent** from an entry rather\n  than defaulted — a consumer cannot read a default as an answer. That is also why\n  `CompareEntry` is not the pull's `DiffEntry`, whose `current` / `candidate` naming would\n  be a lie on a symmetric pair.\n- **No `diffFingerprint`.** The pull carries one so a commit can fail fast on a stale\n  preview. There is no commit here, so a digest would be a field nobody could act on.\n\n## `summary`, and the one thing that is easy to get wrong\n\n`total` and `byKind` count the entries **emitted**, so both move with `includeUnchanged`.\n`added`, `removed`, `differing` and **`unchanged` do not** — `unchanged` is derived from the\nmatched correlation keys and is therefore **populated whether or not the unchanged rows were\nasked for**. That is the point of it: the default response emits no row for an identical\nmember, and a caller still needs to know how much of the configuration matched without\npaying for the rows. So `summary.unchanged` does **not** always equal\n`byKind['member-unchanged']`; with `includeUnchanged=false` the latter is `0`.\n\n`byKind` is **pre-seeded with all five kinds at zero**, unlike the pull's summary, which\ncarries only the kinds it observed. A comparison is read by a client rendering a fixed set\nof counters, and an absent key would make every one of them a null check.\n\nCounts are always over the **untruncated** comparison.\n\n## Ordering and truncation\n\nEntries are ordered by **breadcrumb path, then find number, then child item id, then kind**,\nwith `entryId` last purely as a total-order guarantee. A deliberate divergence from the\npull's `entryId`-hash order: a pull preview is read as a flat decision list, while a\ncomparison is read against a tree, and hash order scatters siblings.\n\n`entriesLimit` caps `entries` as a **plain prefix** — unlike the pull, a comparison has no\n`required` tier that trimming could silently hide. `summary` is left alone, which is what\nmakes `truncated: true` actionable rather than merely true; re-issue with a larger limit to\nget a longer, stable prefix of the same comparison.\n\nThe default cap is **not** raised by `includeUnchanged=true`, deliberately: a 500-edge BOM\ntruncates at 200 and says so, rather than silently returning a response an order of\nmagnitude larger than the caller expected.\n\n> Truncation is applied by the REST layer. The service beneath it always returns a complete\n> comparison, so a Flow or an LWC controller calling it directly sees every entry with\n> `truncated: false` and `entriesLimit: null`. Over HTTP both fields are always filled in.\n\n## Access\n\n**Gated on read, not write** — deliberately unlike\n[pull-preview](#operation/previewMbomPull), which requires the same write grant the commit\ndoes because previewing a pull is initiating one. A comparison initiates nothing, and\nrefusing a read-only user the ability to *look* at a difference has no justification.\nConfirmed with the PM: read-only users may compare. This is not a copied-and-forgotten gate.\n\nEach side is gated on the object it is addressed by: `Branch__c` for a branch,\n`Baseline__c` **and** `Branch__c` for a baseline, `Branch_Source_CI__c` for a source,\n`Item_Revision__c` for an eBOM revision.\n",
         "parameters": [
           {
             "$ref": "#/components/parameters/BranchId"
           },
           {
-            "$ref": "#/components/parameters/AgainstType"
+            "$ref": "#/components/parameters/RightType"
           },
           {
-            "$ref": "#/components/parameters/AgainstId"
+            "$ref": "#/components/parameters/RightId"
           },
           {
             "$ref": "#/components/parameters/AsOf"
           },
           {
-            "$ref": "#/components/parameters/AgainstAsOf"
+            "$ref": "#/components/parameters/RightAsOf"
           },
           {
             "$ref": "#/components/parameters/IncludeUnchanged"
@@ -1019,17 +1019,17 @@
             }
           },
           "400": {
-            "description": "`INVALID_REQUEST` — `againstType` is missing or is not one of the four values;\n`againstId` was not supplied; `entriesLimit` is not a positive integer (`entriesLimit=0`\nis refused, **not** silently defaulted); or `againstAsOf` was supplied for a baseline\nright side, which resolves at its own recorded timepoint and could not honour a\ndifferent one.\n\n`ASOF_INVALID` / `ASOF_IN_FUTURE` — either clock could not be parsed, or names a moment\nthat has not happened.\n\nAn unrecognised `includeUnchanged` is **not** an error — see that parameter.\n",
+            "description": "`INVALID_REQUEST` — `rightType` is missing or is not one of the four values;\n`rightId` was not supplied; `entriesLimit` is not a positive integer (`entriesLimit=0`\nis refused, **not** silently defaulted); or `rightAsOf` was supplied for a baseline\nright side, which resolves at its own recorded timepoint and could not honour a\ndifferent one.\n\n`ASOF_INVALID` / `ASOF_IN_FUTURE` — either clock could not be parsed, or names a moment\nthat has not happened.\n\nAn unrecognised `includeUnchanged` is **not** an error — see that parameter.\n",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/RestError"
                 },
                 "examples": {
-                  "unknownAgainstType": {
+                  "unknownRightType": {
                     "value": {
                       "code": "INVALID_REQUEST",
-                      "message": "That request could not be read. Check that the body is valid JSON and that every required value is supplied. (againstType must be one of {baseline, branch, ebom, source}, not revision)"
+                      "message": "That request could not be read. Check that the body is valid JSON and that every required value is supplied. (rightType must be one of {baseline, branch, ebom, source}, not revision)"
                     }
                   },
                   "zeroLimit": {
@@ -1046,14 +1046,14 @@
             "$ref": "#/components/responses/Forbidden"
           },
           "404": {
-            "description": "`NOT_FOUND` — the path id names no branch or names another object; `againstId` names\nnothing, or names an object other than the one `againstType` implies; or the path\ncarries an unrecognised trailing segment (`.../comparison/junk`).\n\nA **missing** `againstId` is a 400 and a **present but unusable** one is a 404: the\nfirst is half a request, the second names a resource that is not there.\n",
+            "description": "`NOT_FOUND` — the path id names no branch or names another object; `rightId` names\nnothing, or names an object other than the one `rightType` implies; or the path\ncarries an unrecognised trailing segment (`.../comparison/junk`).\n\nA **missing** `rightId` is a 400 and a **present but unusable** one is a 404: the\nfirst is half a request, the second names a resource that is not there.\n",
             "content": {
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/RestError"
                 },
                 "examples": {
-                  "againstIdWrongObject": {
+                  "rightIdWrongObject": {
                     "value": {
                       "code": "NOT_FOUND",
                       "message": "That record does not exist, or you do not have access to it. (a1Cg8000000AbCeEAK is not a Branch__c)"
@@ -1082,19 +1082,19 @@
         ],
         "operationId": "compareBaseline",
         "summary": "Compare a baseline against another configuration",
-        "description": "The same comparison as [`compareBranch`](#operation/compareBranch) — same right-hand types,\nsame kinds, same summary, same truncation — with a **baseline** on the left instead of a\nbranch.\n\nIt exists because a baseline has to be able to sit on the left as well as the right: \"what\nhas this branch done since we froze it?\" and \"what changed between these two builds?\" are\nboth baseline-rooted questions, and neither can be asked by naming the baseline on the right\nalone.\n\n## `asOf` is refused here, not ignored\n\nThe left side is a baseline, so it resolves at the boundary its cut recorded. A second\nclock has nothing to answer, and accepting one would let a caller believe they had asked a\ntemporal question and been given a temporal answer. Sending `asOf` is a\n`400 INVALID_REQUEST` — the same reading\n[`getBaselineTree`](#operation/getBaselineTree) takes. `againstAsOf` is still accepted,\nunless the *right* side is a baseline too.\n\nThere is deliberately **no** `sources/{id}/comparison` and no eBOM-rooted left side. Both\ncan still be compared — as the right-hand side of a branch or baseline — and eBOM against\neBOM is already served by Propel's existing BOM Compare, which a third surface would\nduplicate.\n\n## Access\n\nRead, not write, exactly as the branch-rooted endpoint. A baseline side is gated on\n`Baseline__c` **and** `Branch__c`, because reading one resolves the branch behind it.\n",
+        "description": "The same comparison as [`compareBranch`](#operation/compareBranch) — same right-hand types,\nsame kinds, same summary, same truncation — with a **baseline** on the left instead of a\nbranch.\n\nIt exists because a baseline has to be able to sit on the left as well as the right: \"what\nhas this branch done since we froze it?\" and \"what changed between these two builds?\" are\nboth baseline-rooted questions, and neither can be asked by naming the baseline on the right\nalone.\n\n## `asOf` is refused here, not ignored\n\nThe left side is a baseline, so it resolves at the boundary its cut recorded. A second\nclock has nothing to answer, and accepting one would let a caller believe they had asked a\ntemporal question and been given a temporal answer. Sending `asOf` is a\n`400 INVALID_REQUEST` — the same reading\n[`getBaselineTree`](#operation/getBaselineTree) takes. `rightAsOf` is still accepted,\nunless the *right* side is a baseline too.\n\nThere is deliberately **no** `sources/{id}/comparison` and no eBOM-rooted left side. Both\ncan still be compared — as the right-hand side of a branch or baseline — and eBOM against\neBOM is already served by Propel's existing BOM Compare, which a third surface would\nduplicate.\n\n## Access\n\nRead, not write, exactly as the branch-rooted endpoint. A baseline side is gated on\n`Baseline__c` **and** `Branch__c`, because reading one resolves the branch behind it.\n",
         "parameters": [
           {
             "$ref": "#/components/parameters/BaselineId"
           },
           {
-            "$ref": "#/components/parameters/AgainstType"
+            "$ref": "#/components/parameters/RightType"
           },
           {
-            "$ref": "#/components/parameters/AgainstId"
+            "$ref": "#/components/parameters/RightId"
           },
           {
-            "$ref": "#/components/parameters/AgainstAsOf"
+            "$ref": "#/components/parameters/RightAsOf"
           },
           {
             "$ref": "#/components/parameters/IncludeUnchanged"
@@ -1136,7 +1136,7 @@
             "$ref": "#/components/responses/Forbidden"
           },
           "404": {
-            "description": "`NOT_FOUND` — the path id names no baseline, `againstId` names nothing or the wrong object, or the path carries a trailing segment.",
+            "description": "`NOT_FOUND` — the path id names no baseline, `rightId` names nothing or the wrong object, or the path carries a trailing segment.",
             "content": {
               "application/json": {
                 "schema": {
@@ -1230,8 +1230,8 @@
           "default": 200
         }
       },
-      "AgainstType": {
-        "name": "againstType",
+      "RightType": {
+        "name": "rightType",
         "in": "query",
         "required": true,
         "description": "What the **right-hand** side of the comparison is. Required — a comparison against nothing\nin particular is half a request, so a missing or unrecognised value is\n`400 INVALID_REQUEST`.\n\n- `branch` — another `Branch__c`, resolved with its own deltas overlaid.\n- `baseline` — a `Baseline__c`, replayed at the boundary its cut recorded.\n- `source` — a `Branch_Source_CI__c`: what that source *supplies*, with no branch deltas\n  folded in. This is the \"what have I changed relative to upstream?\" comparison.\n- `ebom` — a released `Item_Revision__c`, walked raw, with no branch in the picture.\n\n**Matched case-insensitively**, so `Branch` and `BRANCH` are both accepted. Send the\nlower-case spelling: that is the published value, and it is what comes back in\n`right.type`.\n",
@@ -1239,17 +1239,17 @@
           "$ref": "#/components/schemas/CompareSideType"
         }
       },
-      "AgainstId": {
-        "name": "againstId",
+      "RightId": {
+        "name": "rightId",
         "in": "query",
         "required": true,
-        "description": "The record the right-hand side is. Its object must match `againstType` —\n`Branch__c`, `Baseline__c`, `Branch_Source_CI__c` or `Item_Revision__c` respectively.\n\n**Absent is a 400** (the caller described half a comparison); **present but naming nothing,\nor naming another object, is a 404** (the caller named a resource that is not there). The\nsame split the path ids make.\n",
+        "description": "The record the right-hand side is. Its object must match `rightType` —\n`Branch__c`, `Baseline__c`, `Branch_Source_CI__c` or `Item_Revision__c` respectively.\n\n**Absent is a 400** (the caller described half a comparison); **present but naming nothing,\nor naming another object, is a 404** (the caller named a resource that is not there). The\nsame split the path ids make.\n",
         "schema": {
           "$ref": "#/components/schemas/SalesforceId"
         }
       },
-      "AgainstAsOf": {
-        "name": "againstAsOf",
+      "RightAsOf": {
+        "name": "rightAsOf",
         "in": "query",
         "required": false,
         "description": "The **right** side's read clock. `asOf` governs the left side; each side keeps its own pair\nof clocks and never borrows the other's, which is why there are two parameters rather than\none. A branch read at now against a baseline frozen in March is two configurations at two\ninstants, and both are published on the response.\n\nDefaults differ by side type — now for `branch` and `source`, and for `ebom` **that\nrevision's own release date**, since a raw eBOM walk has no acceptance to pin it and \"the\neBOM of revision X\" honestly means the eBOM as it stood when X was released.\n\n**Refused for a `baseline` right side** (`400 INVALID_REQUEST`), which resolves at the\ntimepoint its cut recorded. Parsing and the future-value rule are `asOf`'s, unchanged.\n",
@@ -2557,7 +2557,7 @@
       },
       "CompareSideType": {
         "type": "string",
-        "description": "Which resolution produced a side of a comparison. The right-hand side may be any of the\nfour; the **left** may only be `branch` or `baseline`, because those are the two objects a\ncomparison path is rooted at.\n\nSent as `againstType` — where it is matched case-insensitively — and returned as\n`left.type` / `right.type`, always in this lower-case spelling.\n",
+        "description": "Which resolution produced a side of a comparison. The right-hand side may be any of the\nfour; the **left** may only be `branch` or `baseline`, because those are the two objects a\ncomparison path is rooted at.\n\nSent as `rightType` — where it is matched case-insensitively — and returned as\n`left.type` / `right.type`, always in this lower-case spelling.\n",
         "enum": [
           "branch",
           "baseline",
@@ -2606,7 +2606,7 @@
                 "$ref": "#/components/schemas/ComparisonSide"
               }
             ],
-            "description": "The side `againstType` / `againstId` named."
+            "description": "The side `rightType` / `rightId` named."
           },
           "identical": {
             "type": "boolean",
@@ -2737,7 +2737,7 @@
           "asOf": {
             "type": "string",
             "format": "date-time",
-            "description": "The read clock this side was resolved at — the caller's `asOf` / `againstAsOf`, the\nserver clock when none was supplied, an eBOM revision's release date, or a baseline's\nfrozen `Resolution_TimePoint__c`. A baseline echoes the timepoint its **cut** recorded,\nwhich makes it obvious the caller could not have chosen it.\n"
+            "description": "The read clock this side was resolved at — the caller's `asOf` / `rightAsOf`, the\nserver clock when none was supplied, an eBOM revision's release date, or a baseline's\nfrozen `Resolution_TimePoint__c`. A baseline echoes the timepoint its **cut** recorded,\nwhich makes it obvious the caller could not have chosen it.\n"
           },
           "sourceTimePoint": {
             "oneOf": [
@@ -3028,7 +3028,7 @@
         }
       },
       "ComparisonConflict": {
-        "description": "409 — well formed, and retryable once state changes.\n\n| code | Cause |\n|---|---|\n| `NOT_RELEASED` | `againstType=ebom` names a revision that is not Released, or is Cancelled, Expired, or carries no release date |\n\nThe same four-part test an MBOM's creation and a pull both apply, and a 409 for the same\nreason: releasing the revision makes the identical request succeed. A Draft revision never\nappears at any timepoint and has no release date to pin a walk to, so there is nothing to\ncompare against.\n",
+        "description": "409 — well formed, and retryable once state changes.\n\n| code | Cause |\n|---|---|\n| `NOT_RELEASED` | `rightType=ebom` names a revision that is not Released, or is Cancelled, Expired, or carries no release date |\n\nThe same four-part test an MBOM's creation and a pull both apply, and a 409 for the same\nreason: releasing the revision makes the identical request succeed. A Draft revision never\nappears at any timepoint and has no release date to pin a walk to, so there is nothing to\ncompare against.\n",
         "content": {
           "application/json": {
             "schema": {
