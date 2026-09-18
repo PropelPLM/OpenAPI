@@ -1214,7 +1214,7 @@ paths:
         the two disagree on quantity, find number or the child revision they resolve to.
 
         The **left** side is the branch the path names. The **right** side is named by
-        `rightType` + `rightId`, and may be another branch, a baseline, a source, or a released
+        `rightKind` + `rightId`, and may be another branch, a baseline, a source, or a released
         eBOM revision — so one endpoint answers eBOM-against-MBOM, MBOM-against-MBOM and
         MBOM-against-its-own-baseline rather than three.
 
@@ -1223,14 +1223,14 @@ paths:
 
         ## The right-hand side
 
-        | `rightType` | `rightId` names | Resolves to | Its clock |
+        | `rightKind` | `rightId` names | Resolves to | Its clock |
         |---|---|---|---|
         | `branch` | `Branch__c` | the branch's own effective structure, deltas overlaid | `rightAsOf`, defaulting to now |
         | `baseline` | `Baseline__c` | the branch re-resolved at the boundary the cut recorded | the baseline's frozen `Resolution_TimePoint__c`; `rightAsOf` is **refused** |
         | `source` | `Branch_Source__c` | what that source *supplies*, with no branch deltas folded in | the acceptance in effect at `rightAsOf` |
         | `ebom` | `Item_Revision__c` | a raw eBOM walk beneath that revision, no branch in the picture | `rightAsOf`, defaulting to **that revision's release date** |
 
-        `rightType` is matched **case-insensitively** — `rightType=Branch` is a 200. The values
+        `rightKind` is matched **case-insensitively** — `rightKind=Branch` is a 200. The values
         are published lower-case and that is the spelling to send; normalising a published wire
         value is a courtesy the HTTP surface affords, and the service behind it stays
         case-sensitive.
@@ -1344,7 +1344,7 @@ paths:
         `Item_Revision__c` for an eBOM revision.
       parameters:
         - $ref: '#/components/parameters/BranchId'
-        - $ref: '#/components/parameters/RightType'
+        - $ref: '#/components/parameters/RightKind'
         - $ref: '#/components/parameters/RightId'
         - $ref: '#/components/parameters/AsOf'
         - $ref: '#/components/parameters/RightAsOf'
@@ -1371,7 +1371,7 @@ paths:
                   $ref: '#/components/examples/ComparisonTruncated'
         '400':
           description: |
-            `INVALID_REQUEST` — `rightType` is missing or is not one of the four values;
+            `INVALID_REQUEST` — `rightKind` is missing or is not one of the four values;
             `rightId` was not supplied; `entriesLimit` is not a positive integer (`entriesLimit=0`
             is refused, **not** silently defaulted); or `rightAsOf` was supplied for a baseline
             right side, which resolves at its own recorded timepoint and could not honour a
@@ -1385,10 +1385,10 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/RestError' }
               examples:
-                unknownRightType:
+                unknownRightKind:
                   value:
                     code: INVALID_REQUEST
-                    message: 'That request could not be read. Check that the body is valid JSON and that every required value is supplied. (rightType must be one of {baseline, branch, ebom, source}, not revision)'
+                    message: 'That request could not be read. Check that the body is valid JSON and that every required value is supplied. (rightKind must be one of {baseline, branch, ebom, source}, not revision)'
                 zeroLimit:
                   value:
                     code: INVALID_REQUEST
@@ -1397,7 +1397,7 @@ paths:
         '404':
           description: |
             `NOT_FOUND` — the path id names no branch or names another object; `rightId` names
-            nothing, or names an object other than the one `rightType` implies; or the path
+            nothing, or names an object other than the one `rightKind` implies; or the path
             carries an unrecognised trailing segment (`.../comparison/junk`).
 
             A **missing** `rightId` is a 400 and a **present but unusable** one is a 404: the
@@ -1449,14 +1449,14 @@ paths:
         `Baseline__c` **and** `Branch__c`, because reading one resolves the branch behind it.
       parameters:
         - $ref: '#/components/parameters/BaselineId'
-        - $ref: '#/components/parameters/RightType'
+        - $ref: '#/components/parameters/RightKind'
         - $ref: '#/components/parameters/RightId'
         - $ref: '#/components/parameters/RightAsOf'
         - $ref: '#/components/parameters/IncludeUnchanged'
         - $ref: '#/components/parameters/EntriesLimit'
       responses:
         '200':
-          description: The comparison, in the shape `compareBranch` returns — `left.type` is `baseline`.
+          description: The comparison, in the shape `compareBranch` returns — `left.kind` is `baseline`.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Comparison' }
@@ -1584,8 +1584,8 @@ components:
         minimum: 1
         default: 200
 
-    RightType:
-      name: rightType
+    RightKind:
+      name: rightKind
       in: query
       required: true
       description: |
@@ -1601,16 +1601,16 @@ components:
 
         **Matched case-insensitively**, so `Branch` and `BRANCH` are both accepted. Send the
         lower-case spelling: that is the published value, and it is what comes back in
-        `right.type`.
+        `right.kind`.
       schema:
-        $ref: '#/components/schemas/CompareSideType'
+        $ref: '#/components/schemas/CompareSideKind'
 
     RightId:
       name: rightId
       in: query
       required: true
       description: |
-        The record the right-hand side is. Its object must match `rightType` —
+        The record the right-hand side is. Its object must match `rightKind` —
         `Branch__c`, `Baseline__c`, `Branch_Source__c` or `Item_Revision__c` respectively.
 
         **Absent is a 400** (the caller described half a comparison); **present but naming nothing,
@@ -1962,7 +1962,13 @@ components:
           description: 'The legacy `Assembly__c` line. Used by: `claim`, `exclude`, `update` (the `CLAIM_REQUIRED` path), `revert` (the second-revert path).'
         assemblyCiId:
           allOf: [{ $ref: '#/components/schemas/SalesforceId' }]
-          description: An existing `Assembly_CI__c` edge to `update`. The ordinary form.
+          description: |
+            An existing `Assembly_CI__c` edge to `update`. The ordinary form.
+
+            The **request** keeps this name while the result publishes the same id as `edgeId`.
+            Not an oversight: a request is deserialized into a flat Apex type whose field names
+            are the wire names, and the operation an id belongs to is known only after `op` is
+            read — so a request field cannot be enveloped per CI type the way a response can.
         ciId:
           allOf: [{ $ref: '#/components/schemas/SalesforceId' }]
           description: 'A `CI__c` to `exclude`, `restore`, `revert` or `convert-to-native`.'
@@ -2034,9 +2040,13 @@ components:
         ciId:
           oneOf: [{ $ref: '#/components/schemas/SalesforceId' }, { type: 'null' }]
           description: The `CI__c` this operation created or acted on.
-        assemblyCiId:
+        edgeId:
           oneOf: [{ $ref: '#/components/schemas/SalesforceId' }, { type: 'null' }]
-          description: The `Assembly_CI__c` edge this operation created or acted on.
+          description: |
+            The edge this operation created or acted on, in its CI type's own vocabulary — an
+            `Assembly_CI__c` for the assembly type. The same value, under the same name, that
+            `TreeRow.edgeId` publishes. The REQUEST field `assemblyCiId` is a different field
+            and keeps its name.
         forked:
           oneOf: [{ type: boolean }, { type: 'null' }]
           description: |
@@ -2504,15 +2514,15 @@ components:
 
     # -------------------------------------------------- comparison
 
-    CompareSideType:
+    CompareSideKind:
       type: string
       description: |
         Which resolution produced a side of a comparison. The right-hand side may be any of the
         four; the **left** may only be `branch` or `baseline`, because those are the two objects a
         comparison path is rooted at.
 
-        Sent as `rightType` — where it is matched case-insensitively — and returned as
-        `left.type` / `right.type`, always in this lower-case spelling.
+        Sent as `rightKind` — where it is matched case-insensitively — and returned as
+        `left.kind` / `right.kind`, always in this lower-case spelling.
       enum: [branch, baseline, source, ebom]
 
     CompareKind:
@@ -2547,7 +2557,7 @@ components:
           description: The side the path named — a branch or a baseline.
         right:
           allOf: [{ $ref: '#/components/schemas/ComparisonSide' }]
-          description: The side `rightType` / `rightId` named.
+          description: The side `rightKind` / `rightId` named.
         identical:
           type: boolean
           description: |
@@ -2607,9 +2617,9 @@ components:
         comparison's answer is unreadable without knowing what was compared — `member-added` means
         nothing until the reader knows the right side is a baseline from March rather than the
         branch's own source.
-      required: [type, id]
+      required: [kind, id]
       properties:
-        type: { $ref: '#/components/schemas/CompareSideType' }
+        kind: { $ref: '#/components/schemas/CompareSideKind' }
         id:
           allOf: [{ $ref: '#/components/schemas/SalesforceId' }]
           description: The record this side was addressed by — a `Branch__c`, `Baseline__c`, `Branch_Source__c` or `Item_Revision__c`.
@@ -2894,7 +2904,7 @@ components:
 
         | code | Cause |
         |---|---|
-        | `NOT_RELEASED` | `rightType=ebom` names a revision that is not Released, or is Cancelled, Expired, or carries no release date |
+        | `NOT_RELEASED` | `rightKind=ebom` names a revision that is not Released, or is Cancelled, Expired, or carries no release date |
 
         The same four-part test an MBOM's creation and a pull both apply, and a 409 for the same
         reason: releasing the revision makes the identical request succeed. A Draft revision never
@@ -3123,7 +3133,7 @@ components:
             errorCode: null
             message: null
             ciId: a1Gg8000000AbF1EAK
-            assemblyCiId: a1Eg8000000AbD1EAK
+            edgeId: a1Eg8000000AbD1EAK
             forked: null
           - index: 1
             clientRef: row-bracket
@@ -3132,7 +3142,7 @@ components:
             errorCode: null
             message: null
             ciId: a1Gg8000000AbF2EAK
-            assemblyCiId: a1Eg8000000AbD2EAK
+            edgeId: a1Eg8000000AbD2EAK
             forked: null
 
     DeltaBatchPartial:
@@ -3150,7 +3160,7 @@ components:
             errorCode: null
             message: null
             ciId: a1Gg8000000AbF2EAK
-            assemblyCiId: a1Eg8000000AbD2EAK
+            edgeId: a1Eg8000000AbD2EAK
             forked: null
           - index: 1
             clientRef: will-fail
@@ -3159,7 +3169,7 @@ components:
             errorCode: CLAIM_REQUIRED
             message: 'This row is inherited and read-only. Claim it before editing. (edge a0Bg8000000Ab12EAC)'
             ciId: null
-            assemblyCiId: null
+            edgeId: null
             forked: null
 
     DeltaBatchForked:
@@ -3177,7 +3187,7 @@ components:
             errorCode: null
             message: null
             ciId: a1Gg8000000AbF1EAK
-            assemblyCiId: a1Eg8000000AbD1EAK
+            edgeId: a1Eg8000000AbD1EAK
             forked: true
 
     DeltaBatchAtomicFailure:
@@ -3192,7 +3202,7 @@ components:
             errorCode: CLAIM_REQUIRED
             message: 'This row is inherited and read-only. Claim it before editing. (edge a0Bg8000000Ab12EAC)'
             ciId: null
-            assemblyCiId: null
+            edgeId: null
             forked: null
           - index: 2
             clientRef: also-fails
@@ -3201,7 +3211,7 @@ components:
             errorCode: ALREADY_EXCLUDED
             message: 'This row is already excluded from this configuration. Restore it first if you want to change it. (edge a0Bg8000000Ab13EAC is already excluded)'
             ciId: null
-            assemblyCiId: null
+            edgeId: null
             forked: null
 
     DeltaBatchUnknownOp:
@@ -3216,7 +3226,7 @@ components:
             errorCode: INVALID_REQUEST
             message: 'That request could not be read. Check that the body is valid JSON and that every required value is supplied. (unknown op claimm)'
             ciId: null
-            assemblyCiId: null
+            edgeId: null
             forked: null
 
     BaselineTreeClean:
@@ -3626,7 +3636,7 @@ components:
     ComparisonIdentical:
       value:
         left:
-          type: branch
+          kind: branch
           id: a1Bg8000000AbCdEAK
           label: MBOM-GDL
           rootItemId: a02g8000000Ab01EAC
@@ -3636,7 +3646,7 @@ components:
           asOf: '2026-04-05T17:22:03.518Z'
           sourceTimePoint: '2026-01-15T00:00:00.000Z'
         right:
-          type: source
+          kind: source
           id: a1Cg8000000AbCeEAK
           label: Assy-100
           rootItemId: a02g8000000Ab01EAC
@@ -3670,7 +3680,7 @@ components:
     ComparisonWithDifferences:
       value:
         left:
-          type: branch
+          kind: branch
           id: a1Bg8000000AbCdEAK
           label: MBOM-GDL
           rootItemId: a02g8000000Ab01EAC
@@ -3680,7 +3690,7 @@ components:
           asOf: '2026-04-05T17:22:03.518Z'
           sourceTimePoint: '2026-01-15T00:00:00.000Z'
         right:
-          type: ebom
+          kind: ebom
           id: a0Ag8000000Ab02EAC
           label: Assy-100
           rootItemId: a02g8000000Ab01EAC
@@ -3851,7 +3861,7 @@ components:
     ComparisonIncludingUnchanged:
       value:
         left:
-          type: branch
+          kind: branch
           id: a1Bg8000000AbCdEAK
           label: MBOM-GDL
           rootItemId: a02g8000000Ab01EAC
@@ -3861,7 +3871,7 @@ components:
           asOf: '2026-04-05T17:22:03.518Z'
           sourceTimePoint: '2026-01-15T00:00:00.000Z'
         right:
-          type: ebom
+          kind: ebom
           id: a0Ag8000000Ab02EAC
           label: Assy-100
           rootItemId: a02g8000000Ab01EAC
@@ -4074,7 +4084,7 @@ components:
     ComparisonTruncated:
       value:
         left:
-          type: branch
+          kind: branch
           id: a1Bg8000000AbCdEAK
           label: MBOM-GDL
           rootItemId: a02g8000000Ab01EAC
@@ -4084,7 +4094,7 @@ components:
           asOf: '2026-04-05T17:22:03.518Z'
           sourceTimePoint: '2026-01-15T00:00:00.000Z'
         right:
-          type: ebom
+          kind: ebom
           id: a0Ag8000000Ab02EAC
           label: Assy-100
           rootItemId: a02g8000000Ab01EAC
