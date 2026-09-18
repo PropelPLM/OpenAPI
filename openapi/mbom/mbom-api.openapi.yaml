@@ -78,7 +78,7 @@ info:
     ### 8. "Pull", not "merge"
 
     A pull is the **downstream-initiated acceptance of a newer upstream source version**, matching
-    `Branch_Source_CI__c.Source_Type__c`. The word *merge* is deliberately reserved for the Phase 2
+    `Branch_Source__c.Source_Type__c`. The word *merge* is deliberately reserved for the Phase 2
     branch-to-branch operation, which is bidirectional and common-ancestor-based — genuinely
     different.
 
@@ -120,7 +120,7 @@ info:
     path is namespaced under `/mbom` so MBOM-only rules have somewhere to live, but the nouns below
     that segment — **branch**, **source**, **member**, **override**, **baseline** — are framework
     concepts, not MBOM concepts. Everything MBOM-specific is confined to a single discriminated
-    schema, `AssemblyEdgeDetail`, reached through `MemberState.detail` and keyed by `ciType`. A
+    schema, `AssemblyEdgeDetail`, reached through `MemberState.detail` and keyed by `ciKind`. A
     second configuration-item type adds a sibling schema there and touches nothing else.
 
     ## Paths
@@ -208,7 +208,7 @@ paths:
 
         The response returns all four ids rather than just `mbomId`, because a caller that had to go
         looking for the other three would be querying schema this API exists to hide. The one you
-        will use most is `branchSourceCiId` — it is the `sourceId` every `/sources/...` endpoint
+        will use most is `sourceId` — it is the `sourceId` every `/sources/...` endpoint
         takes.
 
         ## The root revision must be Released
@@ -235,8 +235,8 @@ paths:
         ## Access
 
         Gated **before the body is read**: a caller with no create grant gets 403 whatever they sent.
-        Requires create on `MBOM__c`, `Branch__c`, `Branch_Source_CI__c` and
-        `Branch_Source_CI_Rev__c`, plus read on `Item_Revision__c`. All five are named so a partial
+        Requires create on `MBOM__c`, `Branch__c`, `Branch_Source__c` and
+        `Branch_Source_Rev__c`, plus read on `Item_Revision__c`. All five are named so a partial
         grant is a clean 403 rather than a 500 out of the middle of the DML.
       requestBody:
         required: true
@@ -266,8 +266,8 @@ paths:
                   value:
                     mbomId: a1Ag8000000AbCcEAK
                     branchId: a1Bg8000000AbCdEAK
-                    branchSourceCiId: a1Cg8000000AbCeEAK
-                    branchSourceCiRevId: a1Dg8000000AbCfEAK
+                    sourceId: a1Cg8000000AbCeEAK
+                    sourceRevisionId: a1Dg8000000AbCfEAK
         '400':
           description: |
             `INVALID_REQUEST` — the body was empty or unreadable; `mbomName` or `branchLabel` was
@@ -347,7 +347,7 @@ paths:
 
         ## Flat vs. nested, and a real trap
 
-        `flat=true` (the **default**) returns one row per edge, each carrying `parentItemId` and an
+        `flat=true` (the **default**) returns one row per edge, each carrying `detail.parentItemId` and an
         empty `childRows` — losslessly re-nestable by the client. `flat=false` nests via `childRows`.
 
         **The nested shape duplicates a shared subassembly; the flat shape does not.** The traversal
@@ -370,7 +370,7 @@ paths:
           description: The resolved tree.
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/MbomTree' }
+              schema: { $ref: '#/components/schemas/StructureTree' }
               examples:
                 flat:
                   summary: Flat (default) — inherited, claimed, local and excluded rows
@@ -429,7 +429,7 @@ paths:
           description: The source's own structure.
           content:
             application/json:
-              schema: { $ref: '#/components/schemas/MbomTree' }
+              schema: { $ref: '#/components/schemas/StructureTree' }
               examples:
                 source:
                   $ref: '#/components/examples/SourceTree'
@@ -989,7 +989,7 @@ paths:
         ## Access
 
         **Gated on write, not read.** A read-only user is rejected before a pull is even previewed —
-        the same `Branch_Source_CI__c` update grant `pull` itself requires.
+        the same `Branch_Source__c` update grant `pull` itself requires.
       parameters:
         - $ref: '#/components/parameters/SourceId'
         - name: candidateRootRevisionId
@@ -1045,7 +1045,7 @@ paths:
                 notASource:
                   value:
                     code: NOT_FOUND
-                    message: 'That record does not exist, or you do not have access to it. (a1Bg8000000AbCdEAK is not a Branch_Source_CI__c)'
+                    message: 'That record does not exist, or you do not have access to it. (a1Bg8000000AbCdEAK is not a Branch_Source__c)'
         '409': { $ref: '#/components/responses/PullConflictPreview' }
         '422': { $ref: '#/components/responses/PullUnprocessable' }
         '500': { $ref: '#/components/responses/InternalError' }
@@ -1056,7 +1056,7 @@ paths:
       operationId: commitMbomPull
       summary: Commit a previewed pull, advancing T_R
       description: |
-        Accepts a newer eBOM root revision into the branch: appends a new `Branch_Source_CI_Rev__c`
+        Accepts a newer eBOM root revision into the branch: appends a new `Branch_Source_Rev__c`
         advancing T_R, advances the source's root pointer, applies the caller's `override-orphaned`
         dispositions, and retires any `member-add-converged` local edge — **all under one savepoint**.
 
@@ -1134,8 +1134,8 @@ paths:
 
         ## Access
 
-        Requires **create** on `Branch_Source_CI_Rev__c`, `Branch_Member__c`, `CI__c`, `CI_Rev__c`,
-        `Assembly_CI__c` and `Assembly_CI_Rev__c`, **and edit** on `Branch_Source_CI__c`,
+        Requires **create** on `Branch_Source_Rev__c`, `Branch_Member__c`, `CI__c`, `CI_Rev__c`,
+        `Assembly_CI__c` and `Assembly_CI_Rev__c`, **and edit** on `Branch_Source__c`,
         `Assembly_CI__c` and `CI_Rev__c`. Both gates run **before the body is read**.
       parameters:
         - $ref: '#/components/parameters/SourceId'
@@ -1170,7 +1170,7 @@ paths:
                   decisions: []
       responses:
         '201':
-          description: The pull was committed. A new `Branch_Source_CI_Rev__c` now exists.
+          description: The pull was committed. A new `Branch_Source_Rev__c` now exists.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/PullCommitResult' }
@@ -1214,7 +1214,7 @@ paths:
         the two disagree on quantity, find number or the child revision they resolve to.
 
         The **left** side is the branch the path names. The **right** side is named by
-        `rightType` + `rightId`, and may be another branch, a baseline, a source, or a released
+        `rightKind` + `rightId`, and may be another branch, a baseline, a source, or a released
         eBOM revision — so one endpoint answers eBOM-against-MBOM, MBOM-against-MBOM and
         MBOM-against-its-own-baseline rather than three.
 
@@ -1223,14 +1223,14 @@ paths:
 
         ## The right-hand side
 
-        | `rightType` | `rightId` names | Resolves to | Its clock |
+        | `rightKind` | `rightId` names | Resolves to | Its clock |
         |---|---|---|---|
         | `branch` | `Branch__c` | the branch's own effective structure, deltas overlaid | `rightAsOf`, defaulting to now |
         | `baseline` | `Baseline__c` | the branch re-resolved at the boundary the cut recorded | the baseline's frozen `Resolution_TimePoint__c`; `rightAsOf` is **refused** |
-        | `source` | `Branch_Source_CI__c` | what that source *supplies*, with no branch deltas folded in | the acceptance in effect at `rightAsOf` |
+        | `source` | `Branch_Source__c` | what that source *supplies*, with no branch deltas folded in | the acceptance in effect at `rightAsOf` |
         | `ebom` | `Item_Revision__c` | a raw eBOM walk beneath that revision, no branch in the picture | `rightAsOf`, defaulting to **that revision's release date** |
 
-        `rightType` is matched **case-insensitively** — `rightType=Branch` is a 200. The values
+        `rightKind` is matched **case-insensitively** — `rightKind=Branch` is a 200. The values
         are published lower-case and that is the spelling to send; normalising a published wire
         value is a courtesy the HTTP surface affords, and the service behind it stays
         case-sensitive.
@@ -1340,11 +1340,11 @@ paths:
         Confirmed with the PM: read-only users may compare. This is not a copied-and-forgotten gate.
 
         Each side is gated on the object it is addressed by: `Branch__c` for a branch,
-        `Baseline__c` **and** `Branch__c` for a baseline, `Branch_Source_CI__c` for a source,
+        `Baseline__c` **and** `Branch__c` for a baseline, `Branch_Source__c` for a source,
         `Item_Revision__c` for an eBOM revision.
       parameters:
         - $ref: '#/components/parameters/BranchId'
-        - $ref: '#/components/parameters/RightType'
+        - $ref: '#/components/parameters/RightKind'
         - $ref: '#/components/parameters/RightId'
         - $ref: '#/components/parameters/AsOf'
         - $ref: '#/components/parameters/RightAsOf'
@@ -1371,7 +1371,7 @@ paths:
                   $ref: '#/components/examples/ComparisonTruncated'
         '400':
           description: |
-            `INVALID_REQUEST` — `rightType` is missing or is not one of the four values;
+            `INVALID_REQUEST` — `rightKind` is missing or is not one of the four values;
             `rightId` was not supplied; `entriesLimit` is not a positive integer (`entriesLimit=0`
             is refused, **not** silently defaulted); or `rightAsOf` was supplied for a baseline
             right side, which resolves at its own recorded timepoint and could not honour a
@@ -1385,10 +1385,10 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/RestError' }
               examples:
-                unknownRightType:
+                unknownRightKind:
                   value:
                     code: INVALID_REQUEST
-                    message: 'That request could not be read. Check that the body is valid JSON and that every required value is supplied. (rightType must be one of {baseline, branch, ebom, source}, not revision)'
+                    message: 'That request could not be read. Check that the body is valid JSON and that every required value is supplied. (rightKind must be one of {baseline, branch, ebom, source}, not revision)'
                 zeroLimit:
                   value:
                     code: INVALID_REQUEST
@@ -1397,7 +1397,7 @@ paths:
         '404':
           description: |
             `NOT_FOUND` — the path id names no branch or names another object; `rightId` names
-            nothing, or names an object other than the one `rightType` implies; or the path
+            nothing, or names an object other than the one `rightKind` implies; or the path
             carries an unrecognised trailing segment (`.../comparison/junk`).
 
             A **missing** `rightId` is a 400 and a **present but unusable** one is a 404: the
@@ -1449,14 +1449,14 @@ paths:
         `Baseline__c` **and** `Branch__c`, because reading one resolves the branch behind it.
       parameters:
         - $ref: '#/components/parameters/BaselineId'
-        - $ref: '#/components/parameters/RightType'
+        - $ref: '#/components/parameters/RightKind'
         - $ref: '#/components/parameters/RightId'
         - $ref: '#/components/parameters/RightAsOf'
         - $ref: '#/components/parameters/IncludeUnchanged'
         - $ref: '#/components/parameters/EntriesLimit'
       responses:
         '200':
-          description: The comparison, in the shape `compareBranch` returns — `left.type` is `baseline`.
+          description: The comparison, in the shape `compareBranch` returns — `left.kind` is `baseline`.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Comparison' }
@@ -1514,10 +1514,10 @@ components:
       in: path
       required: true
       description: |
-        Id of the `Branch_Source_CI__c`. Returned as **`branchSourceCiId`** from `POST /mbom/mboms`.
+        Id of the `Branch_Source__c`. Returned as **`sourceId`** from `POST /mbom/mboms`.
 
         In Phase 1 a branch has exactly one source, of `Source_Type__c = 'Ebom'`. The owning branch is
-        reached through `Branch_Source_CI__c.Downstream_Branch__c`, which is why there is no separate
+        reached through `Branch_Source__c.Downstream_Branch__c`, which is why there is no separate
         `branchId` segment on these paths.
       schema: { $ref: '#/components/schemas/SalesforceId' }
 
@@ -1584,8 +1584,8 @@ components:
         minimum: 1
         default: 200
 
-    RightType:
-      name: rightType
+    RightKind:
+      name: rightKind
       in: query
       required: true
       description: |
@@ -1595,23 +1595,23 @@ components:
 
         - `branch` — another `Branch__c`, resolved with its own deltas overlaid.
         - `baseline` — a `Baseline__c`, replayed at the boundary its cut recorded.
-        - `source` — a `Branch_Source_CI__c`: what that source *supplies*, with no branch deltas
+        - `source` — a `Branch_Source__c`: what that source *supplies*, with no branch deltas
           folded in. This is the "what have I changed relative to upstream?" comparison.
         - `ebom` — a released `Item_Revision__c`, walked raw, with no branch in the picture.
 
         **Matched case-insensitively**, so `Branch` and `BRANCH` are both accepted. Send the
         lower-case spelling: that is the published value, and it is what comes back in
-        `right.type`.
+        `right.kind`.
       schema:
-        $ref: '#/components/schemas/CompareSideType'
+        $ref: '#/components/schemas/CompareSideKind'
 
     RightId:
       name: rightId
       in: query
       required: true
       description: |
-        The record the right-hand side is. Its object must match `rightType` —
-        `Branch__c`, `Baseline__c`, `Branch_Source_CI__c` or `Item_Revision__c` respectively.
+        The record the right-hand side is. Its object must match `rightKind` —
+        `Branch__c`, `Baseline__c`, `Branch_Source__c` or `Item_Revision__c` respectively.
 
         **Absent is a 400** (the caller described half a comparison); **present but naming nothing,
         or naming another object, is a 404** (the caller named a resource that is not there). The
@@ -1698,7 +1698,7 @@ components:
         what makes mixed revisions of one item possible.
       enum: [source, branch]
 
-    CiType:
+    CiKind:
       type: string
       description: |
         Discriminator for the configuration-item type, and therefore for the shape of
@@ -1740,7 +1740,7 @@ components:
 
     MbomCreateResult:
       type: object
-      required: [mbomId, branchId, branchSourceCiId, branchSourceCiRevId]
+      required: [mbomId, branchId, sourceId, sourceRevisionId]
       properties:
         mbomId:
           allOf: [{ $ref: '#/components/schemas/SalesforceId' }]
@@ -1748,18 +1748,18 @@ components:
         branchId:
           allOf: [{ $ref: '#/components/schemas/SalesforceId' }]
           description: The initial `Branch__c`. Use it on every `/branches/...` endpoint.
-        branchSourceCiId:
+        sourceId:
           allOf: [{ $ref: '#/components/schemas/SalesforceId' }]
           description: |
-            The `Branch_Source_CI__c` linking the branch to its eBOM. **This is the `sourceId`** on
+            The `Branch_Source__c` linking the branch to its eBOM. **This is the `sourceId`** on
             every `/sources/...` endpoint.
-        branchSourceCiRevId:
+        sourceRevisionId:
           allOf: [{ $ref: '#/components/schemas/SalesforceId' }]
           description: The first acceptance, carrying T_R in `Source_TimePoint__c`.
 
     # -------------------------------------------------- trees
 
-    MbomTree:
+    StructureTree:
       type: object
       description: The response body of **both** tree reads — a branch's effective structure, and a source's structure on its own.
       required: [rootRevisionId, rows, warnings]
@@ -1803,20 +1803,21 @@ components:
             `local-{branchId}-{parentItemId}-{childItemId}` for an `add`, or
             `replaces-{branchId}-{supersededEdgeKey}` for a substitute. Suppressed on baseline rows.
           examples: ['a0Bg8000000Ab10EAC']
-        parentItemId:
-          allOf: [{ $ref: '#/components/schemas/SalesforceId' }]
-          description: The owning **item**, not its revision. Populated in both shapes.
-        childItemId: { $ref: '#/components/schemas/SalesforceId' }
-        childItemRevisionId:
-          oneOf: [{ $ref: '#/components/schemas/SalesforceId' }, { type: 'null' }]
-          description: The revision this row resolves to at `governingTimestamp`.
+        detail:
+          $ref: '#/components/schemas/AssemblyEdgeDetail'
         provenance: { $ref: '#/components/schemas/Provenance' }
         governingTimestamp:
           oneOf: [{ type: string, format: date-time }, { type: 'null' }]
-          description: T_R for an inherited row, `asOf` for a local or substituted one. **Null on baseline rows**, where it is suppressed.
+          description: |
+            T_R for an inherited row, `asOf` for a local or substituted one.
+
+            **On a baseline row it is collapsed, not suppressed:** every row carries the baseline's
+            own `resolutionTimePoint`. A frozen record honours exactly one timepoint, so a per-row
+            clock there would imply the reader could re-resolve at it — but the value is stated
+            rather than nulled, so one client code path renders baseline and tree rows alike.
         sourceId:
           oneOf: [{ $ref: '#/components/schemas/SalesforceId' }, { type: 'null' }]
-          description: The `Branch_Source_CI__c` this row came from. Null for a branch-local row.
+          description: The `Branch_Source__c` this row came from. Null for a branch-local row.
         isClaimed: { type: boolean }
         isExcluded:
           type: boolean
@@ -1841,11 +1842,6 @@ components:
 
             Defaults to `false`. Populated on baseline rows too, where — because a baseline
             forwards drift warnings only — it is the sole signal of the collapse.
-        quantity: { type: number, examples: [2] }
-        findNumber:
-          type: number
-          description: A Salesforce `Number` field, never a string.
-          examples: [20]
         childRows:
           type: array
           description: Populated in the nested shape only; **empty, never null**, in the flat shape.
@@ -1966,7 +1962,13 @@ components:
           description: 'The legacy `Assembly__c` line. Used by: `claim`, `exclude`, `update` (the `CLAIM_REQUIRED` path), `revert` (the second-revert path).'
         assemblyCiId:
           allOf: [{ $ref: '#/components/schemas/SalesforceId' }]
-          description: An existing `Assembly_CI__c` edge to `update`. The ordinary form.
+          description: |
+            An existing `Assembly_CI__c` edge to `update`. The ordinary form.
+
+            The **request** keeps this name while the result publishes the same id as `edgeId`.
+            Not an oversight: a request is deserialized into a flat Apex type whose field names
+            are the wire names, and the operation an id belongs to is known only after `op` is
+            read — so a request field cannot be enveloped per CI type the way a response can.
         ciId:
           allOf: [{ $ref: '#/components/schemas/SalesforceId' }]
           description: 'A `CI__c` to `exclude`, `restore`, `revert` or `convert-to-native`.'
@@ -2038,9 +2040,13 @@ components:
         ciId:
           oneOf: [{ $ref: '#/components/schemas/SalesforceId' }, { type: 'null' }]
           description: The `CI__c` this operation created or acted on.
-        assemblyCiId:
+        edgeId:
           oneOf: [{ $ref: '#/components/schemas/SalesforceId' }, { type: 'null' }]
-          description: The `Assembly_CI__c` edge this operation created or acted on.
+          description: |
+            The edge this operation created or acted on, in its CI type's own vocabulary — an
+            `Assembly_CI__c` for the assembly type. The same value, under the same name, that
+            `TreeRow.edgeId` publishes. The REQUEST field `assemblyCiId` is a different field
+            and keeps its name.
         forked:
           oneOf: [{ type: boolean }, { type: 'null' }]
           description: |
@@ -2111,7 +2117,8 @@ components:
           type: array
           description: |
             The re-resolved rows, reusing the tree shape so clients render both the same way — with
-            `edgeId`, `edgeKey` and `governingTimestamp` suppressed, and excluded rows filtered out.
+            `edgeId` and `edgeKey` nulled, `governingTimestamp` collapsed onto this baseline's own
+            `resolutionTimePoint`, and excluded rows filtered out.
           items: { $ref: '#/components/schemas/TreeRow' }
         warnings:
           type: array
@@ -2236,7 +2243,7 @@ components:
       properties:
         sourceRevisionId:
           oneOf: [{ $ref: '#/components/schemas/SalesforceId' }, { type: 'null' }]
-          description: The `Branch_Source_CI_Rev__c` recording this acceptance. **Null on `candidateSourceVersion`**, which does not exist until a commit creates it.
+          description: The `Branch_Source_Rev__c` recording this acceptance. **Null on `candidateSourceVersion`**, which does not exist until a commit creates it.
         rootItemRevisionId: { $ref: '#/components/schemas/SalesforceId' }
         rootItemNumber: { type: string, examples: ['Assy-100'] }
         rootRevisionLabel: { type: string, examples: ['rev-1'] }
@@ -2319,9 +2326,9 @@ components:
     MemberTarget:
       type: object
       description: Identifies what the entry is about, independent of before/after state.
-      required: [ciType, label]
+      required: [ciKind, label]
       properties:
-        ciType: { $ref: '#/components/schemas/CiType' }
+        ciKind: { $ref: '#/components/schemas/CiKind' }
         edgeId:
           oneOf: [{ $ref: '#/components/schemas/SalesforceId' }, { type: 'null' }]
           description: The `Assembly_CI__c` for this member. Null for purely inherited content, which has no branch-owned record until something claims it.
@@ -2346,9 +2353,9 @@ components:
     PathSegment:
       type: object
       description: One ancestor in a breadcrumb. Same shape as `MemberTarget` minus the path — a segment never nests its own breadcrumb.
-      required: [ciType, label]
+      required: [ciKind, label]
       properties:
-        ciType: { $ref: '#/components/schemas/CiType' }
+        ciKind: { $ref: '#/components/schemas/CiKind' }
         label: { type: string, examples: ['Assy-100'] }
         edgeId:
           oneOf: [{ $ref: '#/components/schemas/SalesforceId' }, { type: 'null' }]
@@ -2369,7 +2376,7 @@ components:
         detail:
           oneOf: [{ $ref: '#/components/schemas/AssemblyEdgeDetail' }]
           discriminator:
-            propertyName: ciType
+            propertyName: ciKind
             mapping:
               assembly-edge: '#/components/schemas/AssemblyEdgeDetail'
 
@@ -2380,27 +2387,53 @@ components:
         vocabulary; this is the single place assembly/BOM concepts appear. A second
         configuration-item type becomes a sibling schema in `MemberState.detail`'s `oneOf` and
         changes nothing else.
-      required: [ciType]
+
+        ## The three name fields are null on a tree read
+
+        `parentItemNumber`, `childItemNumber` and `childRevisionLabel` are populated **only on the
+        diff paths** — the pull preview and the comparisons. Those build a name cache with a
+        repository read of their own; the tree reads deliberately do not pay for one, so they return
+        all three as `null`. Treat them as optional display sugar, never as evidence that an item has
+        no number. The identity and content fields beside them are populated everywhere.
+      required: [ciKind]
       properties:
-        ciType: { type: string, const: assembly-edge }
+        ciKind: { type: string, const: assembly-edge }
         parentItemId:
-          allOf: [{ $ref: '#/components/schemas/SalesforceId' }]
+          oneOf: [{ $ref: '#/components/schemas/SalesforceId' }, { type: 'null' }]
           description: |
             The owning **item**, not its revision. `Assembly_CI__c` carries no parent-revision lookup
             at all: a local edge's parent item is stable across revision advances while its parent
             revision is not — and `Edge_Key__c` is unique org-wide, so two branches claiming the same
             eBOM line share one row, meaning every field on it must be branch-invariant.
-        parentItemNumber: { type: string, examples: ['Assy-100'] }
+
+            **Null on a root entry** — see `quantity` for why.
+        parentItemNumber:
+          oneOf: [{ type: string }, { type: 'null' }]
+          description: 'Null on tree reads — see the schema description.'
+          examples: ['Assy-100']
         childItemId: { $ref: '#/components/schemas/SalesforceId' }
-        childItemNumber: { type: string, examples: ['Motor-002'] }
+        childItemNumber:
+          oneOf: [{ type: string }, { type: 'null' }]
+          description: 'Null on tree reads — see the schema description.'
+          examples: ['Motor-002']
         childItemRevisionId:
           oneOf: [{ $ref: '#/components/schemas/SalesforceId' }, { type: 'null' }]
           description: The child revision this edge resolves to at `governingTimestamp`. Null on a tombstone.
-        childRevisionLabel: { type: string, examples: ['rev-1'] }
-        quantity: { type: number, examples: [4] }
+        childRevisionLabel:
+          oneOf: [{ type: string }, { type: 'null' }]
+          description: 'Null on tree reads — see the schema description.'
+          examples: ['rev-1']
+        quantity:
+          oneOf: [{ type: number }, { type: 'null' }]
+          description: |
+            **Null on a root entry.** The `source-version-advance` / `root-version-differs` entry at
+            the top of a pull diff or comparison is about the root *item*, which has no parent, no
+            quantity and no find number — its `target.ciKind` is `source`, not `assembly-edge`. Every
+            edge entry populates all three.
+          examples: [4]
         findNumber:
-          type: number
-          description: A Salesforce `Number` field, never a string.
+          oneOf: [{ type: number }, { type: 'null' }]
+          description: A Salesforce `Number` field, never a string. **Null on a root entry** — see `quantity`.
           examples: [10]
 
     PullCommitRequest:
@@ -2436,7 +2469,7 @@ components:
         sourceId: { $ref: '#/components/schemas/SalesforceId' }
         newSourceRevisionId:
           allOf: [{ $ref: '#/components/schemas/SalesforceId' }]
-          description: The `Branch_Source_CI_Rev__c` this commit created — an **insert**, never an update.
+          description: The `Branch_Source_Rev__c` this commit created — an **insert**, never an update.
         acceptedRootRevisionId: { $ref: '#/components/schemas/SalesforceId' }
         acceptedAt: { type: string, format: date-time }
         applied:
@@ -2481,15 +2514,15 @@ components:
 
     # -------------------------------------------------- comparison
 
-    CompareSideType:
+    CompareSideKind:
       type: string
       description: |
         Which resolution produced a side of a comparison. The right-hand side may be any of the
         four; the **left** may only be `branch` or `baseline`, because those are the two objects a
         comparison path is rooted at.
 
-        Sent as `rightType` — where it is matched case-insensitively — and returned as
-        `left.type` / `right.type`, always in this lower-case spelling.
+        Sent as `rightKind` — where it is matched case-insensitively — and returned as
+        `left.kind` / `right.kind`, always in this lower-case spelling.
       enum: [branch, baseline, source, ebom]
 
     CompareKind:
@@ -2524,7 +2557,7 @@ components:
           description: The side the path named — a branch or a baseline.
         right:
           allOf: [{ $ref: '#/components/schemas/ComparisonSide' }]
-          description: The side `rightType` / `rightId` named.
+          description: The side `rightKind` / `rightId` named.
         identical:
           type: boolean
           description: |
@@ -2584,12 +2617,12 @@ components:
         comparison's answer is unreadable without knowing what was compared — `member-added` means
         nothing until the reader knows the right side is a baseline from March rather than the
         branch's own source.
-      required: [type, id]
+      required: [kind, id]
       properties:
-        type: { $ref: '#/components/schemas/CompareSideType' }
+        kind: { $ref: '#/components/schemas/CompareSideKind' }
         id:
           allOf: [{ $ref: '#/components/schemas/SalesforceId' }]
-          description: The record this side was addressed by — a `Branch__c`, `Baseline__c`, `Branch_Source_CI__c` or `Item_Revision__c`.
+          description: The record this side was addressed by — a `Branch__c`, `Baseline__c`, `Branch_Source__c` or `Item_Revision__c`.
         label:
           oneOf: [{ type: string }, { type: 'null' }]
           description: |
@@ -2871,7 +2904,7 @@ components:
 
         | code | Cause |
         |---|---|
-        | `NOT_RELEASED` | `rightType=ebom` names a revision that is not Released, or is Cancelled, Expired, or carries no release date |
+        | `NOT_RELEASED` | `rightKind=ebom` names a revision that is not Released, or is Cancelled, Expired, or carries no release date |
 
         The same four-part test an MBOM's creation and a pull both apply, and a 409 for the same
         reason: releasing the revision makes the identical request succeed. A Draft revision never
@@ -2944,9 +2977,13 @@ components:
         rows:
           - edgeId: a1Eg8000000AbD1EAK
             edgeKey: a0Bg8000000Ab10EAC
-            parentItemId: a02g8000000Ab01EAC
-            childItemId: a02g8000000Ab20EAC
-            childItemRevisionId: a0Ag8000000Ab41EAC
+            detail:
+              ciKind: assembly-edge
+              parentItemId: a02g8000000Ab01EAC
+              childItemId: a02g8000000Ab20EAC
+              childItemRevisionId: a0Ag8000000Ab41EAC
+              quantity: 4
+              findNumber: 10
             provenance: claimed
             governingTimestamp: '2026-01-15T00:00:00.000Z'
             sourceId: a1Cg8000000AbCeEAK
@@ -2954,14 +2991,16 @@ components:
             isExcluded: false
             isReplaced: false
             isEditable: true
-            quantity: 4
-            findNumber: 10
             childRows: []
           - edgeId: null
             edgeKey: a0Bg8000000Ab11EAC
-            parentItemId: a02g8000000Ab01EAC
-            childItemId: a02g8000000Ab21EAC
-            childItemRevisionId: a0Ag8000000Ab31EAC
+            detail:
+              ciKind: assembly-edge
+              parentItemId: a02g8000000Ab01EAC
+              childItemId: a02g8000000Ab21EAC
+              childItemRevisionId: a0Ag8000000Ab31EAC
+              quantity: 2
+              findNumber: 20
             provenance: inherited
             governingTimestamp: '2026-01-15T00:00:00.000Z'
             sourceId: a1Cg8000000AbCeEAK
@@ -2969,14 +3008,16 @@ components:
             isExcluded: false
             isReplaced: false
             isEditable: true
-            quantity: 2
-            findNumber: 20
             childRows: []
           - edgeId: a1Eg8000000AbD3EAK
             edgeKey: a0Bg8000000Ab12EAC
-            parentItemId: a02g8000000Ab01EAC
-            childItemId: a02g8000000Ab22EAC
-            childItemRevisionId: a0Ag8000000Ab61EAC
+            detail:
+              ciKind: assembly-edge
+              parentItemId: a02g8000000Ab01EAC
+              childItemId: a02g8000000Ab22EAC
+              childItemRevisionId: a0Ag8000000Ab61EAC
+              quantity: 3
+              findNumber: 30
             provenance: claimed
             governingTimestamp: '2026-01-15T00:00:00.000Z'
             sourceId: a1Cg8000000AbCeEAK
@@ -2984,14 +3025,16 @@ components:
             isExcluded: true
             isReplaced: false
             isEditable: true
-            quantity: 3
-            findNumber: 30
             childRows: []
           - edgeId: a1Eg8000000AbD9EAK
             edgeKey: 'local-a1Bg8000000AbCdEAK-a02g8000000Ab01EAC-a02g8000000Ab90EAC'
-            parentItemId: a02g8000000Ab01EAC
-            childItemId: a02g8000000Ab90EAC
-            childItemRevisionId: a0Ag8000000Ab95EAC
+            detail:
+              ciKind: assembly-edge
+              parentItemId: a02g8000000Ab01EAC
+              childItemId: a02g8000000Ab90EAC
+              childItemRevisionId: a0Ag8000000Ab95EAC
+              quantity: 1
+              findNumber: 90
             provenance: local
             governingTimestamp: '2026-04-05T17:22:03.518Z'
             sourceId: null
@@ -2999,8 +3042,6 @@ components:
             isExcluded: false
             isReplaced: false
             isEditable: true
-            quantity: 1
-            findNumber: 90
             childRows: []
         warnings: []
 
@@ -3012,9 +3053,13 @@ components:
         rows:
           - edgeId: null
             edgeKey: a0Bg8000000Ab14EAC
-            parentItemId: a02g8000000Ab01EAC
-            childItemId: a02g8000000Ab30EAC
-            childItemRevisionId: a0Ag8000000Ab71EAC
+            detail:
+              ciKind: assembly-edge
+              parentItemId: a02g8000000Ab30EAC
+              childItemId: a02g8000000Ab31EAC
+              childItemRevisionId: a0Ag8000000Ab72EAC
+              quantity: 4
+              findNumber: 10
             provenance: inherited
             governingTimestamp: '2026-01-15T00:00:00.000Z'
             sourceId: a1Cg8000000AbCeEAK
@@ -3022,14 +3067,9 @@ components:
             isExcluded: false
             isReplaced: false
             isEditable: true
-            quantity: 1
-            findNumber: 50
             childRows:
               - edgeId: null
                 edgeKey: a0Bg8000000Ab15EAC
-                parentItemId: a02g8000000Ab30EAC
-                childItemId: a02g8000000Ab31EAC
-                childItemRevisionId: a0Ag8000000Ab72EAC
                 provenance: inherited
                 governingTimestamp: '2026-01-15T00:00:00.000Z'
                 sourceId: a1Cg8000000AbCeEAK
@@ -3037,8 +3077,6 @@ components:
                 isExcluded: false
                 isReplaced: false
                 isEditable: true
-                quantity: 4
-                findNumber: 10
                 childRows: []
         warnings: []
 
@@ -3063,9 +3101,13 @@ components:
         rows:
           - edgeId: null
             edgeKey: a0Bg8000000Ab10EAC
-            parentItemId: a02g8000000Ab01EAC
-            childItemId: a02g8000000Ab20EAC
-            childItemRevisionId: a0Ag8000000Ab41EAC
+            detail:
+              ciKind: assembly-edge
+              parentItemId: a02g8000000Ab01EAC
+              childItemId: a02g8000000Ab20EAC
+              childItemRevisionId: a0Ag8000000Ab41EAC
+              quantity: 1
+              findNumber: 10
             provenance: inherited
             governingTimestamp: '2026-01-15T00:00:00.000Z'
             sourceId: a1Cg8000000AbCeEAK
@@ -3073,8 +3115,6 @@ components:
             isExcluded: false
             isReplaced: false
             isEditable: true
-            quantity: 1
-            findNumber: 10
             childRows: []
         warnings: []
 
@@ -3093,7 +3133,7 @@ components:
             errorCode: null
             message: null
             ciId: a1Gg8000000AbF1EAK
-            assemblyCiId: a1Eg8000000AbD1EAK
+            edgeId: a1Eg8000000AbD1EAK
             forked: null
           - index: 1
             clientRef: row-bracket
@@ -3102,7 +3142,7 @@ components:
             errorCode: null
             message: null
             ciId: a1Gg8000000AbF2EAK
-            assemblyCiId: a1Eg8000000AbD2EAK
+            edgeId: a1Eg8000000AbD2EAK
             forked: null
 
     DeltaBatchPartial:
@@ -3120,7 +3160,7 @@ components:
             errorCode: null
             message: null
             ciId: a1Gg8000000AbF2EAK
-            assemblyCiId: a1Eg8000000AbD2EAK
+            edgeId: a1Eg8000000AbD2EAK
             forked: null
           - index: 1
             clientRef: will-fail
@@ -3129,7 +3169,7 @@ components:
             errorCode: CLAIM_REQUIRED
             message: 'This row is inherited and read-only. Claim it before editing. (edge a0Bg8000000Ab12EAC)'
             ciId: null
-            assemblyCiId: null
+            edgeId: null
             forked: null
 
     DeltaBatchForked:
@@ -3147,7 +3187,7 @@ components:
             errorCode: null
             message: null
             ciId: a1Gg8000000AbF1EAK
-            assemblyCiId: a1Eg8000000AbD1EAK
+            edgeId: a1Eg8000000AbD1EAK
             forked: true
 
     DeltaBatchAtomicFailure:
@@ -3162,7 +3202,7 @@ components:
             errorCode: CLAIM_REQUIRED
             message: 'This row is inherited and read-only. Claim it before editing. (edge a0Bg8000000Ab12EAC)'
             ciId: null
-            assemblyCiId: null
+            edgeId: null
             forked: null
           - index: 2
             clientRef: also-fails
@@ -3171,7 +3211,7 @@ components:
             errorCode: ALREADY_EXCLUDED
             message: 'This row is already excluded from this configuration. Restore it first if you want to change it. (edge a0Bg8000000Ab13EAC is already excluded)'
             ciId: null
-            assemblyCiId: null
+            edgeId: null
             forked: null
 
     DeltaBatchUnknownOp:
@@ -3186,7 +3226,7 @@ components:
             errorCode: INVALID_REQUEST
             message: 'That request could not be read. Check that the body is valid JSON and that every required value is supplied. (unknown op claimm)'
             ciId: null
-            assemblyCiId: null
+            edgeId: null
             forked: null
 
     BaselineTreeClean:
@@ -3197,18 +3237,20 @@ components:
         rows:
           - edgeId: null
             edgeKey: null
-            parentItemId: a02g8000000Ab01EAC
-            childItemId: a02g8000000Ab20EAC
-            childItemRevisionId: a0Ag8000000Ab41EAC
+            detail:
+              ciKind: assembly-edge
+              parentItemId: a02g8000000Ab01EAC
+              childItemId: a02g8000000Ab20EAC
+              childItemRevisionId: a0Ag8000000Ab41EAC
+              quantity: 4
+              findNumber: 10
             provenance: claimed
-            governingTimestamp: null
+            governingTimestamp: '2026-04-06T14:31:02.000Z'
             sourceId: a1Cg8000000AbCeEAK
             isClaimed: true
             isExcluded: false
             isReplaced: false
             isEditable: true
-            quantity: 4
-            findNumber: 10
             childRows: []
         warnings: []
 
@@ -3266,12 +3308,12 @@ components:
             overrideKind: null
             message: 'The source assembly moves to a newer released revision.'
             target:
-              ciType: source
+              ciKind: source
               edgeId: null
               edgeKey: null
               label: Assy-100
               path:
-                - { ciType: source, label: Assy-100, edgeId: null, edgeKey: null }
+                - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
             current: null
             candidate: null
 
@@ -3283,18 +3325,18 @@ components:
             overrideKind: null
             message: 'This member resolves differently at the newer source timepoint. Nothing to decide: a revision is an outcome of the timepoint, not a value you can set.'
             target:
-              ciType: assembly-edge
+              ciKind: assembly-edge
               edgeId: null
               edgeKey: a0Bg8000000Ab11EAC
               label: Bracket-005
               path:
-                - { ciType: source, label: Assy-100, edgeId: null, edgeKey: null }
+                - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
             current:
               provenance: inherited
               governingClock: source
               governingTimestamp: '2026-01-15T00:00:00.000Z'
               detail:
-                ciType: assembly-edge
+                ciKind: assembly-edge
                 parentItemId: a02g8000000Ab01EAC
                 parentItemNumber: Assy-100
                 childItemId: a02g8000000Ab21EAC
@@ -3308,7 +3350,7 @@ components:
               governingClock: source
               governingTimestamp: '2026-04-02T00:00:00.000Z'
               detail:
-                ciType: assembly-edge
+                ciKind: assembly-edge
                 parentItemId: a02g8000000Ab01EAC
                 parentItemNumber: Assy-100
                 childItemId: a02g8000000Ab21EAC
@@ -3326,18 +3368,18 @@ components:
             overrideKind: claim
             message: "Your change to this member is kept, and the newer revision's version of it is suppressed."
             target:
-              ciType: assembly-edge
+              ciKind: assembly-edge
               edgeId: a1Eg8000000AbD1EAK
               edgeKey: a0Bg8000000Ab10EAC
               label: Motor-002
               path:
-                - { ciType: source, label: Assy-100, edgeId: null, edgeKey: null }
+                - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
             current:
               provenance: claimed
               governingClock: source
               governingTimestamp: '2026-01-15T00:00:00.000Z'
               detail:
-                ciType: assembly-edge
+                ciKind: assembly-edge
                 parentItemId: a02g8000000Ab01EAC
                 parentItemNumber: Assy-100
                 childItemId: a02g8000000Ab20EAC
@@ -3351,7 +3393,7 @@ components:
               governingClock: source
               governingTimestamp: '2026-04-02T00:00:00.000Z'
               detail:
-                ciType: assembly-edge
+                ciKind: assembly-edge
                 parentItemId: a02g8000000Ab01EAC
                 parentItemNumber: Assy-100
                 childItemId: a02g8000000Ab20EAC
@@ -3369,19 +3411,19 @@ components:
             overrideKind: null
             message: 'The newer revision adds this member. It comes in automatically.'
             target:
-              ciType: assembly-edge
+              ciKind: assembly-edge
               edgeId: null
               edgeKey: a0Bg8000000Ab13EAC
               label: Panel-300
               path:
-                - { ciType: source, label: Assy-100, edgeId: null, edgeKey: null }
+                - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
             current: null
             candidate:
               provenance: inherited
               governingClock: source
               governingTimestamp: '2026-04-02T00:00:00.000Z'
               detail:
-                ciType: assembly-edge
+                ciKind: assembly-edge
                 parentItemId: a02g8000000Ab01EAC
                 parentItemNumber: Assy-100
                 childItemId: a02g8000000Ab23EAC
@@ -3399,18 +3441,18 @@ components:
             overrideKind: claim
             message: 'The newer revision removes a member you changed. Choose whether to keep it as your own content or remove it.'
             target:
-              ciType: assembly-edge
+              ciKind: assembly-edge
               edgeId: a1Eg8000000AbD3EAK
               edgeKey: a0Bg8000000Ab12EAC
               label: Harness-011
               path:
-                - { ciType: source, label: Assy-100, edgeId: null, edgeKey: null }
+                - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
             current:
               provenance: claimed
               governingClock: source
               governingTimestamp: '2026-01-15T00:00:00.000Z'
               detail:
-                ciType: assembly-edge
+                ciKind: assembly-edge
                 parentItemId: a02g8000000Ab01EAC
                 parentItemNumber: Assy-100
                 childItemId: a02g8000000Ab22EAC
@@ -3429,18 +3471,18 @@ components:
             overrideKind: null
             message: 'The newer revision now supplies this member exactly as you added it. Your local copy is retired and the position becomes inherited content.'
             target:
-              ciType: assembly-edge
+              ciKind: assembly-edge
               edgeId: a1Eg8000000AbD5EAK
               edgeKey: 'local-a1Bg8000000AbCdEAK-a02g8000000Ab01EAC-a02g8000000Ab24EAC'
               label: Label-400
               path:
-                - { ciType: source, label: Assy-100, edgeId: null, edgeKey: null }
+                - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
             current:
               provenance: local
               governingClock: branch
               governingTimestamp: '2026-04-05T17:22:03.518Z'
               detail:
-                ciType: assembly-edge
+                ciKind: assembly-edge
                 parentItemId: a02g8000000Ab01EAC
                 parentItemNumber: Assy-100
                 childItemId: a02g8000000Ab24EAC
@@ -3454,7 +3496,7 @@ components:
               governingClock: source
               governingTimestamp: '2026-04-02T00:00:00.000Z'
               detail:
-                ciType: assembly-edge
+                ciKind: assembly-edge
                 parentItemId: a02g8000000Ab01EAC
                 parentItemNumber: Assy-100
                 childItemId: a02g8000000Ab24EAC
@@ -3535,9 +3577,9 @@ components:
             availableActions: []
             message: 'The source assembly moves to a newer released revision.'
             target:
-              ciType: source
+              ciKind: source
               label: Assy-100
-              path: [{ ciType: source, label: Assy-100, edgeId: null, edgeKey: null }]
+              path: [{ ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }]
           - entryId: 'f4880c6b3e1a9d75'
             kind: override-orphaned
             decision: required
@@ -3545,11 +3587,11 @@ components:
             overrideKind: claim
             message: 'The newer revision removes a member you changed. Choose whether to keep it as your own content or remove it.'
             target:
-              ciType: assembly-edge
+              ciKind: assembly-edge
               edgeId: a1Eg8000000AbD3EAK
               edgeKey: a0Bg8000000Ab12EAC
               label: Harness-011
-              path: [{ ciType: source, label: Assy-100, edgeId: null, edgeKey: null }]
+              path: [{ ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }]
         warnings: []
         truncated: true
         entriesLimit: 1
@@ -3594,7 +3636,7 @@ components:
     ComparisonIdentical:
       value:
         left:
-          type: branch
+          kind: branch
           id: a1Bg8000000AbCdEAK
           label: MBOM-GDL
           rootItemId: a02g8000000Ab01EAC
@@ -3604,7 +3646,7 @@ components:
           asOf: '2026-04-05T17:22:03.518Z'
           sourceTimePoint: '2026-01-15T00:00:00.000Z'
         right:
-          type: source
+          kind: source
           id: a1Cg8000000AbCeEAK
           label: Assy-100
           rootItemId: a02g8000000Ab01EAC
@@ -3638,7 +3680,7 @@ components:
     ComparisonWithDifferences:
       value:
         left:
-          type: branch
+          kind: branch
           id: a1Bg8000000AbCdEAK
           label: MBOM-GDL
           rootItemId: a02g8000000Ab01EAC
@@ -3648,7 +3690,7 @@ components:
           asOf: '2026-04-05T17:22:03.518Z'
           sourceTimePoint: '2026-01-15T00:00:00.000Z'
         right:
-          type: ebom
+          kind: ebom
           id: a0Ag8000000Ab02EAC
           label: Assy-100
           rootItemId: a02g8000000Ab01EAC
@@ -3680,18 +3722,18 @@ components:
             differingFields: []
             message: 'The two sides resolve the top-level assembly at different revisions. (Assy-100)'
             target:
-              ciType: source
+              ciKind: source
               edgeId: null
               edgeKey: null
               label: Assy-100
               path:
-                - { ciType: source, label: Assy-100, edgeId: null, edgeKey: null }
+                - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
             left:
               provenance: inherited
               governingClock: source
               governingTimestamp: '2026-01-15T00:00:00.000Z'
               detail:
-                ciType: assembly-edge
+                ciKind: assembly-edge
                 parentItemId: null
                 parentItemNumber: null
                 childItemId: a02g8000000Ab01EAC
@@ -3705,7 +3747,7 @@ components:
               governingClock: source
               governingTimestamp: '2026-04-02T00:00:00.000Z'
               detail:
-                ciType: assembly-edge
+                ciKind: assembly-edge
                 parentItemId: null
                 parentItemNumber: null
                 childItemId: a02g8000000Ab01EAC
@@ -3720,12 +3762,12 @@ components:
             differingFields: [quantity, childRevision]
             message: 'This member is on both sides, and its content differs. The listed fields are the ones that disagree. (Motor-002)'
             target:
-              ciType: assembly-edge
+              ciKind: assembly-edge
               edgeId: a1Eg8000000AbD1EAK
               edgeKey: a0Bg8000000Ab10EAC
               label: Motor-002
               path:
-                - { ciType: source, label: Assy-100, edgeId: null, edgeKey: null }
+                - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
             left:
               # Claimed, so the branch has spoken about this edge and it answers to the BRANCH
               # clock from then on — which is what `governingClock: branch` states here.
@@ -3733,7 +3775,7 @@ components:
               governingClock: branch
               governingTimestamp: '2026-04-05T17:22:03.518Z'
               detail:
-                ciType: assembly-edge
+                ciKind: assembly-edge
                 parentItemId: a02g8000000Ab01EAC
                 parentItemNumber: Assy-100
                 childItemId: a02g8000000Ab20EAC
@@ -3747,7 +3789,7 @@ components:
               governingClock: source
               governingTimestamp: '2026-04-02T00:00:00.000Z'
               detail:
-                ciType: assembly-edge
+                ciKind: assembly-edge
                 parentItemId: a02g8000000Ab01EAC
                 parentItemNumber: Assy-100
                 childItemId: a02g8000000Ab20EAC
@@ -3762,18 +3804,18 @@ components:
             differingFields: []
             message: 'This member is present on the left side only. (Harness-011)'
             target:
-              ciType: assembly-edge
+              ciKind: assembly-edge
               edgeId: null
               edgeKey: a0Bg8000000Ab12EAC
               label: Harness-011
               path:
-                - { ciType: source, label: Assy-100, edgeId: null, edgeKey: null }
+                - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
             left:
               provenance: inherited
               governingClock: source
               governingTimestamp: '2026-01-15T00:00:00.000Z'
               detail:
-                ciType: assembly-edge
+                ciKind: assembly-edge
                 parentItemId: a02g8000000Ab01EAC
                 parentItemNumber: Assy-100
                 childItemId: a02g8000000Ab22EAC
@@ -3789,19 +3831,19 @@ components:
             differingFields: []
             message: 'This member is present on the right side only. (Panel-300)'
             target:
-              ciType: assembly-edge
+              ciKind: assembly-edge
               edgeId: null
               edgeKey: a0Bg8000000Ab13EAC
               label: Panel-300
               path:
-                - { ciType: source, label: Assy-100, edgeId: null, edgeKey: null }
+                - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
             left: null
             right:
               provenance: inherited
               governingClock: source
               governingTimestamp: '2026-04-02T00:00:00.000Z'
               detail:
-                ciType: assembly-edge
+                ciKind: assembly-edge
                 parentItemId: a02g8000000Ab01EAC
                 parentItemNumber: Assy-100
                 childItemId: a02g8000000Ab23EAC
@@ -3819,7 +3861,7 @@ components:
     ComparisonIncludingUnchanged:
       value:
         left:
-          type: branch
+          kind: branch
           id: a1Bg8000000AbCdEAK
           label: MBOM-GDL
           rootItemId: a02g8000000Ab01EAC
@@ -3829,7 +3871,7 @@ components:
           asOf: '2026-04-05T17:22:03.518Z'
           sourceTimePoint: '2026-01-15T00:00:00.000Z'
         right:
-          type: ebom
+          kind: ebom
           id: a0Ag8000000Ab02EAC
           label: Assy-100
           rootItemId: a02g8000000Ab01EAC
@@ -3862,18 +3904,18 @@ components:
             differingFields: []
             message: 'The two sides resolve the top-level assembly at different revisions. (Assy-100)'
             target:
-              ciType: source
+              ciKind: source
               edgeId: null
               edgeKey: null
               label: Assy-100
               path:
-                - { ciType: source, label: Assy-100, edgeId: null, edgeKey: null }
+                - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
             left:
               provenance: inherited
               governingClock: source
               governingTimestamp: '2026-01-15T00:00:00.000Z'
               detail:
-                ciType: assembly-edge
+                ciKind: assembly-edge
                 parentItemId: null
                 parentItemNumber: null
                 childItemId: a02g8000000Ab01EAC
@@ -3887,7 +3929,7 @@ components:
               governingClock: source
               governingTimestamp: '2026-04-02T00:00:00.000Z'
               detail:
-                ciType: assembly-edge
+                ciKind: assembly-edge
                 parentItemId: null
                 parentItemNumber: null
                 childItemId: a02g8000000Ab01EAC
@@ -3902,18 +3944,18 @@ components:
             differingFields: [quantity, childRevision]
             message: 'This member is on both sides, and its content differs. The listed fields are the ones that disagree. (Motor-002)'
             target:
-              ciType: assembly-edge
+              ciKind: assembly-edge
               edgeId: a1Eg8000000AbD1EAK
               edgeKey: a0Bg8000000Ab10EAC
               label: Motor-002
               path:
-                - { ciType: source, label: Assy-100, edgeId: null, edgeKey: null }
+                - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
             left:
               provenance: claimed
               governingClock: branch
               governingTimestamp: '2026-04-05T17:22:03.518Z'
               detail:
-                ciType: assembly-edge
+                ciKind: assembly-edge
                 parentItemId: a02g8000000Ab01EAC
                 parentItemNumber: Assy-100
                 childItemId: a02g8000000Ab20EAC
@@ -3927,7 +3969,7 @@ components:
               governingClock: source
               governingTimestamp: '2026-04-02T00:00:00.000Z'
               detail:
-                ciType: assembly-edge
+                ciKind: assembly-edge
                 parentItemId: a02g8000000Ab01EAC
                 parentItemNumber: Assy-100
                 childItemId: a02g8000000Ab20EAC
@@ -3945,18 +3987,18 @@ components:
             differingFields: []
             message: 'This member is on both sides and is identical. (Bracket-005)'
             target:
-              ciType: assembly-edge
+              ciKind: assembly-edge
               edgeId: null
               edgeKey: a0Bg8000000Ab11EAC
               label: Bracket-005
               path:
-                - { ciType: source, label: Assy-100, edgeId: null, edgeKey: null }
+                - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
             left:
               provenance: inherited
               governingClock: source
               governingTimestamp: '2026-01-15T00:00:00.000Z'
               detail:
-                ciType: assembly-edge
+                ciKind: assembly-edge
                 parentItemId: a02g8000000Ab01EAC
                 parentItemNumber: Assy-100
                 childItemId: a02g8000000Ab21EAC
@@ -3970,7 +4012,7 @@ components:
               governingClock: source
               governingTimestamp: '2026-04-02T00:00:00.000Z'
               detail:
-                ciType: assembly-edge
+                ciKind: assembly-edge
                 parentItemId: a02g8000000Ab01EAC
                 parentItemNumber: Assy-100
                 childItemId: a02g8000000Ab21EAC
@@ -3985,18 +4027,18 @@ components:
             differingFields: []
             message: 'This member is present on the left side only. (Harness-011)'
             target:
-              ciType: assembly-edge
+              ciKind: assembly-edge
               edgeId: null
               edgeKey: a0Bg8000000Ab12EAC
               label: Harness-011
               path:
-                - { ciType: source, label: Assy-100, edgeId: null, edgeKey: null }
+                - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
             left:
               provenance: inherited
               governingClock: source
               governingTimestamp: '2026-01-15T00:00:00.000Z'
               detail:
-                ciType: assembly-edge
+                ciKind: assembly-edge
                 parentItemId: a02g8000000Ab01EAC
                 parentItemNumber: Assy-100
                 childItemId: a02g8000000Ab22EAC
@@ -4012,19 +4054,19 @@ components:
             differingFields: []
             message: 'This member is present on the right side only. (Panel-300)'
             target:
-              ciType: assembly-edge
+              ciKind: assembly-edge
               edgeId: null
               edgeKey: a0Bg8000000Ab13EAC
               label: Panel-300
               path:
-                - { ciType: source, label: Assy-100, edgeId: null, edgeKey: null }
+                - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
             left: null
             right:
               provenance: inherited
               governingClock: source
               governingTimestamp: '2026-04-02T00:00:00.000Z'
               detail:
-                ciType: assembly-edge
+                ciKind: assembly-edge
                 parentItemId: a02g8000000Ab01EAC
                 parentItemNumber: Assy-100
                 childItemId: a02g8000000Ab23EAC
@@ -4042,7 +4084,7 @@ components:
     ComparisonTruncated:
       value:
         left:
-          type: branch
+          kind: branch
           id: a1Bg8000000AbCdEAK
           label: MBOM-GDL
           rootItemId: a02g8000000Ab01EAC
@@ -4052,7 +4094,7 @@ components:
           asOf: '2026-04-05T17:22:03.518Z'
           sourceTimePoint: '2026-01-15T00:00:00.000Z'
         right:
-          type: ebom
+          kind: ebom
           id: a0Ag8000000Ab02EAC
           label: Assy-100
           rootItemId: a02g8000000Ab01EAC
@@ -4083,18 +4125,18 @@ components:
             differingFields: []
             message: 'The two sides resolve the top-level assembly at different revisions. (Assy-100)'
             target:
-              ciType: source
+              ciKind: source
               edgeId: null
               edgeKey: null
               label: Assy-100
               path:
-                - { ciType: source, label: Assy-100, edgeId: null, edgeKey: null }
+                - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
             left:
               provenance: inherited
               governingClock: source
               governingTimestamp: '2026-01-15T00:00:00.000Z'
               detail:
-                ciType: assembly-edge
+                ciKind: assembly-edge
                 parentItemId: null
                 parentItemNumber: null
                 childItemId: a02g8000000Ab01EAC
@@ -4108,7 +4150,7 @@ components:
               governingClock: source
               governingTimestamp: '2026-04-02T00:00:00.000Z'
               detail:
-                ciType: assembly-edge
+                ciKind: assembly-edge
                 parentItemId: null
                 parentItemNumber: null
                 childItemId: a02g8000000Ab01EAC
@@ -4123,18 +4165,18 @@ components:
             differingFields: [quantity, childRevision]
             message: 'This member is on both sides, and its content differs. The listed fields are the ones that disagree. (Motor-002)'
             target:
-              ciType: assembly-edge
+              ciKind: assembly-edge
               edgeId: a1Eg8000000AbD1EAK
               edgeKey: a0Bg8000000Ab10EAC
               label: Motor-002
               path:
-                - { ciType: source, label: Assy-100, edgeId: null, edgeKey: null }
+                - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
             left:
               provenance: claimed
               governingClock: branch
               governingTimestamp: '2026-04-05T17:22:03.518Z'
               detail:
-                ciType: assembly-edge
+                ciKind: assembly-edge
                 parentItemId: a02g8000000Ab01EAC
                 parentItemNumber: Assy-100
                 childItemId: a02g8000000Ab20EAC
@@ -4148,7 +4190,7 @@ components:
               governingClock: source
               governingTimestamp: '2026-04-02T00:00:00.000Z'
               detail:
-                ciType: assembly-edge
+                ciKind: assembly-edge
                 parentItemId: a02g8000000Ab01EAC
                 parentItemNumber: Assy-100
                 childItemId: a02g8000000Ab20EAC
