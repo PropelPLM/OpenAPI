@@ -182,6 +182,7 @@ info:
     | [MVP-30376](https://propelplm.atlassian.net/browse/MVP-30376) | A `STORED_REVISION_RETIRED` warning on the branch tree read, one per row whose chosen revision is now Cancelled or Expired. The revision still renders. |
     | [MVP-30377](https://propelplm.atlassian.net/browse/MVP-30377) | `DeltaOperation.autoClaim` on `update`, which claims and revises a `base` edge in one operation and carries the same revision choice as `claim`. `DeltaResult.claimed` reports it. |
     | [MVP-30378](https://propelplm.atlassian.net/browse/MVP-30378) | A `set-revision` delta op that sets, changes or clears a stored child revision, with clearing spelled `trackChildRevision: true`. An optional `accept-source-revision` pull action on a retargeted `claim-retained` entry. `DiffEntry.revisionAdvances`. `update` refuses a `childItemRevisionId`, and `update` / `set-revision` reach a row hidden behind a pin by `assemblyCiId`. |
+    | [MVP-30379](https://propelplm.atlassian.net/browse/MVP-30379) | Per-field pull decisions: `PullCommitRequest.decisions[].acceptedFields`, with `candidate` / `release` per field. Optional `accept-fields` on `claim-retained` and `member-add-collision`, and `release` on `claim-superseded`. `claim-orphaned` stays the only required decision. |
 
   contact:
     name: Propel PLM Engineering
@@ -206,6 +207,7 @@ info:
     retiredStoredRevision: MVP-30376
     autoClaim: MVP-30377
     setRevision: MVP-30378
+    perFieldDecisions: MVP-30379
   x-design-doc: docs/architecture/mbom/mbom-pull-api.md
   x-demo-plan: docs/architecture/mbom/mbom-demo-test-plan.md
 
@@ -662,6 +664,11 @@ paths:
         > Sending the revision the row already stores succeeds and writes nothing. `forked` is
         > always null. A past `asOf` is tolerated, as on `update`.
         > [assumes A-30378-1, A-30378-2, A-30378-8, A-30378-9]
+
+        > **🚧 Planned — MVP-30379, not yet implemented.** `set-revision` also takes an optional
+        > `quantity` and `findNumber`, applied partially as on `update`. One operation can then
+        > change a row's revision and its quantity together, which is what a pull's
+        > `accept-fields` compiles to when it accepts both. [assumes A-30379-5]
 
         > **🚧 Planned — MVP-30377, not yet implemented.** `update` gains an optional
         > `autoClaim: true`. With it, the operation also needs **exactly one of**
@@ -1331,6 +1338,20 @@ paths:
         >
         > [assumes A-30378-3, A-30378-4, A-30378-10]
 
+        > **🚧 Planned — MVP-30379, not yet implemented.** Per-field decisions on three kinds, all
+        > **optional**. `decision` stays `informational`, and a preview with hundreds of entries
+        > and no `claim-orphaned` still commits with zero decisions.
+        >
+        > | kind | availableActions |
+        > |---|---|
+        > | `claim-retained` | `accept-fields`, over the fields that actually diverge. The revision diverges only on a *pinned* claim, exactly when `retargeted`. `accept-source-revision` is also offered when retargeted. |
+        > | `member-add-collision` | `accept-fields`, over the differing quantity, find number or revision |
+        > | `claim-superseded` | `release` |
+        >
+        > A pull has exactly one **required** kind, `claim-orphaned`, permanently. The other five
+        > kinds are unchanged, and `diffFingerprint` works as before.
+        > [assumes A-30379-3, A-30379-7]
+
         ### Why a revision advance is never a decision
 
         A revision is not an independently assertable value. Once you accept that the *line* exists,
@@ -1424,6 +1445,9 @@ paths:
                 revisionMoves:
                   summary: '🚧 MVP-30378 (planned) — accept-source-revision offered; revisionAdvances flagged'
                   $ref: '#/components/examples/PullPreviewRevisionMoves'
+                perFieldDecisions:
+                  summary: '🚧 MVP-30379 (planned) — accept-fields and release offered'
+                  $ref: '#/components/examples/PullPreviewPerFieldDecisions'
         '400':
           description: |
             `INVALID_REQUEST` — `entriesLimit` was not a positive integer. Present-but-unusable is a
@@ -1504,6 +1528,23 @@ paths:
         >
         > The `convert-to-native` revision-choice check is unchanged.
         > [assumes A-30378-3, A-30378-10, A-30378-11]
+
+        > **🚧 Planned — MVP-30379, not yet implemented.** Two more optional actions:
+        >
+        > | action | On | Effect |
+        > |---|---|---|
+        > | `accept-fields` | `claim-retained`, `member-add-collision` | Takes the fields named in `acceptedFields` (`candidate` or `release` per field), and keeps every other field's branch value. It compiles to **one** delta operation for the row: `update` for quantity / find number alone, and `set-revision` whenever the revision is accepted, carrying any accepted quantity or find number with it. |
+        > | `release` | `claim-superseded` | On a pinned claim, clears the revision. On a tracking claim, `revert`s the claim so the row becomes `base`. |
+        >
+        > The commit refuses with `400 INVALID_REQUEST`, and writes nothing, when:
+        >
+        > - a field does not diverge, a field name is unknown, or `release` is sent on quantity or
+        >   find number
+        > - `acceptedFields` is sent on `claim-orphaned` or with any action but `accept-fields`
+        > - the decisions would compile to **more than 200 operations**. This is refused whole,
+        >   never chunked, because a pull commit is atomic.
+        >
+        > [assumes A-30379-1, A-30379-2, A-30379-3, A-30379-4, A-30379-5, A-30379-7]
 
         ## Claim reconciliation: reported, never persisted
 
@@ -1596,6 +1637,21 @@ paths:
                   decisions:
                     - entryId: '8a3e5f09c2d71b64'
                       action: accept-source-revision
+              acceptFields:
+                summary: '🚧 MVP-30379 (planned) — keep my quantity, take the revision; take a quantity; release a claim'
+                x-planned: { ticket: MVP-30379, assumptions: [A-30379-1, A-30379-3] }
+                value:
+                  candidateRootRevisionId: a0Ag8000000Ab02EAC
+                  diffFingerprint: 'sha256:b5e81c3a9f04d267'
+                  decisions:
+                    - entryId: '8a3e5f09c2d71b64'
+                      action: accept-fields
+                      acceptedFields: { childItemRevisionId: candidate }
+                    - entryId: 'c7d42a9e0b15f386'
+                      action: accept-fields
+                      acceptedFields: { quantity: candidate }
+                    - entryId: '3b91c7e0d5a2f846'
+                      action: release
               removeOrphan:
                 summary: Let the orphaned claim go
                 value:
@@ -1625,6 +1681,9 @@ paths:
                 acceptedSourceRevision:
                   summary: '🚧 MVP-30378 (planned) — an accept-source-revision decision applied'
                   $ref: '#/components/examples/PullCommitAcceptedSourceRevision'
+                acceptedFields:
+                  summary: '🚧 MVP-30379 (planned) — accept-fields and release applied'
+                  $ref: '#/components/examples/PullCommitAcceptedFields'
         '400':
           description: |
             `INVALID_REQUEST` — the body could not be read; a decision names an entry that is not
@@ -1633,6 +1692,12 @@ paths:
             > **🚧 Planned — MVP-30378, not yet implemented.** It becomes: a decision whose `action`
             > is not in its entry's `availableActions`, so `accept-source-revision` on a
             > `claim-retained` entry with `retargeted: false` is refused. [assumes A-30378-11]
+
+            > **🚧 Planned — MVP-30379, not yet implemented.** Also: an `acceptedFields` key that
+            > is unknown (`childItem`, `childItemRevision`), a field that does not diverge,
+            > `release` on quantity or find number, an empty `acceptedFields`, `acceptedFields`
+            > with any action but `accept-fields`, or decisions compiling to more than 200
+            > operations. [assumes A-30379-1, A-30379-2, A-30379-4, A-30379-7]
           content:
             application/json:
               schema: { $ref: '#/components/schemas/RestError' }
@@ -1641,6 +1706,12 @@ paths:
                   value:
                     code: INVALID_REQUEST
                     message: 'That request could not be read. Check that the body is valid JSON and that every required value is supplied. (entryId b7204de9a1c6f358 is member-added, which offers no accept/reject decision)'
+                fieldDoesNotDiverge:
+                  summary: '🚧 MVP-30379 (planned) — accepting a field that does not differ'
+                  x-planned: { ticket: MVP-30379, assumptions: [A-30379-7] }
+                  value:
+                    code: INVALID_REQUEST
+                    message: 'That request could not be read. Check that the body is valid JSON and that every required value is supplied. (entryId 8a3e5f09c2d71b64: findNumber does not differ from upstream, so there is nothing to accept)'
         '403': { $ref: '#/components/responses/Forbidden' }
         '404':
           description: '`NOT_FOUND` — the source, or the candidate revision, does not exist.'
@@ -2594,10 +2665,18 @@ components:
           description: '`replace` only — the substitute part. Its revision **floats** at the read clock unless `childItemRevisionId` pins it.'
         quantity:
           type: number
-          description: 'Used by `update`, `add`, `replace`.'
+          description: |
+            Used by `update`, `add`, `replace`.
+
+            **🚧 Planned — MVP-30379, not yet implemented:** also optional on `set-revision`.
+            [assumes A-30379-5]
         findNumber:
           type: number
-          description: 'Used by `update`, `add`, `replace`.'
+          description: |
+            Used by `update`, `add`, `replace`.
+
+            **🚧 Planned — MVP-30379, not yet implemented:** also optional on `set-revision`.
+            [assumes A-30379-5]
         childItemRevisionId:
           oneOf: [{ $ref: '#/components/schemas/SalesforceId' }, { type: 'null' }]
           description: |
@@ -2906,15 +2985,34 @@ components:
           claim keeps its quantity and find number, and stays pinned. The decision carries
           nothing but `entryId` and `action`. [assumes A-30378-3, A-30378-11]
 
+        - `accept-fields` — **🚧 Planned — MVP-30379, not yet implemented.** Optional, on
+          `claim-retained` and `member-add-collision`. It takes the fields named in
+          `acceptedFields`, and the rest keep the branch's values. On `claim-retained` it equals
+          `accept-source-revision` when the only accepted field is
+          `childItemRevisionId: candidate`, and both are accepted. It compiles to **one**
+          operation per row, never two on one edge:
+          - `update` for `quantity` / `findNumber` alone
+          - `set-revision` for the revision
+          - `set-revision` carrying the quantity or find number too, when both are accepted
+
+          [assumes A-30379-1, A-30379-5, A-30379-6]
+        - `release` — **🚧 Planned — MVP-30379, not yet implemented.** Optional, on
+          `claim-superseded` only, where the claim now matches upstream anyway. It is the conscious
+          way to stop holding a value. On a **pinned** claim it clears the revision, and the claim
+          stays, tracking. On a **tracking** claim it releases the claim itself, compiled as a
+          `revert`, and the row falls back to `base`. Takes no `acceptedFields`.
+          [assumes A-30379-3]
+
         | Value | Status |
         |---|---|
         | `convert-to-native`, `remove` | ✅ shipped — `claim-orphaned` only |
         | `accept-source-revision` | 🚧 MVP-30378 — today it answers `INVALID_REQUEST` |
+        | `accept-fields`, `release` | 🚧 MVP-30379 — today they answer `INVALID_REQUEST` |
 
         > **🚧 Planned — MVP-30378, not yet implemented.** A decision is valid when its entry
         > **offers** its action in `availableActions`, instead of only on `claim-orphaned`.
         > [assumes A-30378-11]
-      enum: [convert-to-native, remove, accept-source-revision]
+      enum: [convert-to-native, remove, accept-source-revision, accept-fields, release]
 
     PullPreview:
       type: object
@@ -3049,6 +3147,11 @@ components:
             **🚧 Planned — MVP-30378, not yet implemented:** also `[accept-source-revision]` on a
             `claim-retained` entry with `retargeted: true`. It is optional: the entry's `decision`
             stays `informational`. [assumes A-30378-3, A-30378-10]
+
+            **🚧 Planned — MVP-30379, not yet implemented:** optional per-field decisions on three
+            kinds. `claim-retained` gains `accept-fields`, beside `accept-source-revision` when
+            retargeted. `member-add-collision` gains `accept-fields`. `claim-superseded` gains
+            `release`. Every other kind is unchanged. [assumes A-30379-7]
           items: { $ref: '#/components/schemas/Action' }
         retargeted:
           oneOf: [{ type: boolean }, { type: 'null' }]
@@ -3257,6 +3360,10 @@ components:
             > decisions: `accept-source-revision` on a retargeted `claim-retained` entry. These are
             > never required, and an entry left undecided keeps today's outcome.
             > `DISPOSITION_REQUIRED` still keys on `claim-orphaned` alone. [assumes A-30378-10]
+
+            > **🚧 Planned — MVP-30379, not yet implemented.** It may also carry `accept-fields`
+            > (with `acceptedFields`) on `claim-retained` / `member-add-collision`, and `release` on
+            > `claim-superseded`. These are optional too. [assumes A-30379-7]
           items:
             type: object
             required: [entryId, action]
@@ -3283,6 +3390,44 @@ components:
                   on `remove`. **🚧 Planned — MVP-30378, not yet implemented:** also ignored on
                   `accept-source-revision`, whose revision is always the candidate's.
                   [assumes A-30378-11]
+              acceptedFields:
+                type: object
+                minProperties: 1
+                additionalProperties: false
+                x-planned: { ticket: MVP-30379, assumptions: [A-30379-1, A-30379-2, A-30379-7] }
+                description: |
+                  **🚧 Planned — MVP-30379, not yet implemented.** `accept-fields` only, and
+                  required there. Each key is a field of the entry and each value says what to do
+                  with it. **Name only what you are taking.** An omitted field keeps the branch's
+                  own value, which is today's outcome.
+
+                  | Value | Meaning | Stores |
+                  |---|---|---|
+                  | `candidate` | Hold what upstream resolves now | the candidate's value. For the revision this is a **pin**, which reports `retargeted: true` again when upstream next moves the line. |
+                  | `release` | Stop holding the branch's own value | nothing. For the revision this is the state `trackChildRevision: true` leaves. A claim becomes a tracking claim that follows T_R and still gets a `claim-*` entry on every pull. A native row (`member-add-collision`) floats at the read clock. |
+
+                  `candidate` and `release` render identically on this pull and differently on
+                  later ones.
+
+                  Refused with `400 INVALID_REQUEST`:
+
+                  - any key other than the three below, including `childItem` and the old spelling
+                    `childItemRevision`
+                  - an empty object
+                  - a field that does not **actually diverge**. A tracking claim's revision never
+                    does, because it renders the source line's by construction.
+                  - `release` on a value the branch does not hold
+                  - `release` on `quantity` or `findNumber`, which have no clock to fall back to.
+                    Use `revert`, or `release` on `claim-superseded`.
+                  - `acceptedFields` on any action other than `accept-fields`
+
+                  [assumes A-30379-1, A-30379-2, A-30379-7]
+                properties:
+                  quantity: { type: string, enum: [candidate] }
+                  findNumber: { type: string, enum: [candidate] }
+                  childItemRevisionId: { type: string, enum: [candidate, release] }
+                examples:
+                  - { childItemRevisionId: candidate }
 
     PullCommitResult:
       type: object
@@ -3319,7 +3464,14 @@ components:
         entryId: { type: string }
         kind:
           type: string
-          enum: [claim-orphaned, claim-retained, claim-superseded, member-add-converged]
+          enum: [claim-orphaned, claim-retained, claim-superseded, member-add-converged, member-add-collision]
+          description: |
+            | Value | Status |
+            |---|---|
+            | `claim-orphaned`, `claim-retained`, `claim-superseded`, `member-add-converged` | ✅ shipped |
+            | `member-add-collision` | 🚧 MVP-30379 — only when an `accept-fields` decision was taken on it |
+
+            [assumes A-30379-8]
         action:
           oneOf: [{ type: string }, { type: 'null' }]
           description: |
@@ -3333,6 +3485,9 @@ components:
             - `accept-source-revision` — **🚧 Planned — MVP-30378, not yet implemented.** On a
               `claim-retained` entry that took that optional decision. The claim is now pinned to
               the candidate's revision. [assumes A-30378-11]
+            - `accept-fields` / `release` — **🚧 Planned — MVP-30379, not yet implemented.** On the
+              `claim-retained`, `member-add-collision` or `claim-superseded` entry that took that
+              decision. [assumes A-30379-8]
         edgeId:
           oneOf: [{ $ref: '#/components/schemas/SalesforceId' }, { type: 'null' }]
           description: The branch-owned `Assembly_CI__c` this entry's target names, if any.
@@ -4820,6 +4975,183 @@ components:
         diffFingerprint: 'sha256:4c0d9e72b1a83f56'
         generatedAt: '2026-04-05T17:22:03.518Z'
 
+    PullPreviewPerFieldDecisions:
+      summary: '🚧 MVP-30379 (planned) — the three kinds that offer optional per-field decisions'
+      description: |
+        **🚧 Planned — MVP-30379, not yet implemented.** Three entries, none of them required:
+
+        - **Motor-002**, `claim-retained`. It is pinned to rev-1 while upstream moved to rev-2,
+          and its quantity 4 differs from upstream's 6. It offers `accept-fields` and, being
+          retargeted, `accept-source-revision`.
+        - **Label-400**, `member-add-collision`. It is a branch `add` at quantity 1, where upstream
+          now supplies quantity 2. It offers `accept-fields`.
+        - **Bracket-005**, `claim-superseded`. It is a tracking claim that matches upstream. It
+          offers `release`, which would revert it to `base`.
+      x-planned: { ticket: MVP-30379, assumptions: [A-30379-3, A-30379-7] }
+      value:
+        sourceId: a1Cg8000000AbCeEAK
+        branchId: a1Bg8000000AbCdEAK
+        branchLabel: MBOM-GDL
+        sourceType: Ebom
+        currentSourceVersion:
+          sourceRevisionId: a1Dg8000000AbCfEAK
+          rootItemRevisionId: a0Ag8000000Ab01EAC
+          rootItemNumber: Assy-100
+          rootRevisionLabel: rev-1
+          resolutionTimestamp: '2026-01-15T00:00:00.000Z'
+          acceptedAt: '2026-01-15T09:12:44.000Z'
+        candidateSourceVersion:
+          sourceRevisionId: null
+          rootItemRevisionId: a0Ag8000000Ab02EAC
+          rootItemNumber: Assy-100
+          rootRevisionLabel: rev-2
+          resolutionTimestamp: '2026-04-02T00:00:00.000Z'
+          acceptedAt: null
+        hasChanges: true
+        summary:
+          total: 3
+          informational: 3
+          required: 0
+          byKind:
+            claim-retained: 1
+            member-add-collision: 1
+            claim-superseded: 1
+        entries:
+          - entryId: '8a3e5f09c2d71b64'
+            kind: claim-retained
+            decision: informational
+            availableActions: [accept-fields, accept-source-revision]
+            retargeted: true
+            revisionAdvances: false
+            claimKind: claim
+            message: "Your change to this member is kept, and the newer revision's version of it is suppressed."
+            target:
+              ciKind: assembly-edge
+              edgeId: a1Eg8000000AbD1EAK
+              edgeKey: a0Bg8000000Ab10EAC
+              label: Motor-002
+              path:
+                - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
+            current:
+              provenance: claiming
+              governingClock: branch
+              governingTimestamp: '2026-04-05T17:22:03.518Z'
+              detail:
+                ciKind: assembly-edge
+                parentItemId: a02g8000000Ab01EAC
+                parentItemNumber: Assy-100
+                childItemId: a02g8000000Ab20EAC
+                childItemNumber: Motor-002
+                childItemRevisionId: a0Ag8000000Ab41EAC
+                childRevisionLabel: rev-1
+                quantity: 4
+                findNumber: 10
+            candidate:
+              provenance: base
+              governingClock: source
+              governingTimestamp: '2026-04-02T00:00:00.000Z'
+              detail:
+                ciKind: assembly-edge
+                parentItemId: a02g8000000Ab01EAC
+                parentItemNumber: Assy-100
+                childItemId: a02g8000000Ab20EAC
+                childItemNumber: Motor-002
+                childItemRevisionId: a0Ag8000000Ab42EAC
+                childRevisionLabel: rev-2
+                quantity: 6
+                findNumber: 10
+          - entryId: 'c7d42a9e0b15f386'
+            kind: member-add-collision
+            decision: informational
+            availableActions: [accept-fields]
+            retargeted: null
+            revisionAdvances: null
+            claimKind: null
+            message: 'The newer revision adds a member this branch already provides itself. Your own version is kept.'
+            target:
+              ciKind: assembly-edge
+              edgeId: a1Eg8000000AbD5EAK
+              edgeKey: 'new-a1Bg8000000AbCdEAK-a02g8000000Ab01EAC-a02g8000000Ab24EAC'
+              label: Label-400
+              path:
+                - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
+            current:
+              provenance: new
+              governingClock: branch
+              governingTimestamp: '2026-04-05T17:22:03.518Z'
+              detail:
+                ciKind: assembly-edge
+                parentItemId: a02g8000000Ab01EAC
+                parentItemNumber: Assy-100
+                childItemId: a02g8000000Ab24EAC
+                childItemNumber: Label-400
+                childItemRevisionId: a0Ag8000000Ab71EAC
+                childRevisionLabel: rev-1
+                quantity: 1
+                findNumber: 60
+            candidate:
+              provenance: base
+              governingClock: source
+              governingTimestamp: '2026-04-02T00:00:00.000Z'
+              detail:
+                ciKind: assembly-edge
+                parentItemId: a02g8000000Ab01EAC
+                parentItemNumber: Assy-100
+                childItemId: a02g8000000Ab24EAC
+                childItemNumber: Label-400
+                childItemRevisionId: a0Ag8000000Ab71EAC
+                childRevisionLabel: rev-1
+                quantity: 2
+                findNumber: 60
+          - entryId: '3b91c7e0d5a2f846'
+            kind: claim-superseded
+            decision: informational
+            availableActions: [release]
+            retargeted: null
+            revisionAdvances: false
+            claimKind: claim
+            message: 'The newer revision now matches your change to this member, so your change no longer alters anything.'
+            target:
+              ciKind: assembly-edge
+              edgeId: a1Eg8000000AbD2EAK
+              edgeKey: a0Bg8000000Ab11EAC
+              label: Bracket-005
+              path:
+                - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
+            current:
+              provenance: claiming
+              governingClock: branch
+              governingTimestamp: '2026-04-05T17:22:03.518Z'
+              detail:
+                ciKind: assembly-edge
+                parentItemId: a02g8000000Ab01EAC
+                parentItemNumber: Assy-100
+                childItemId: a02g8000000Ab21EAC
+                childItemNumber: Bracket-005
+                childItemRevisionId: a0Ag8000000Ab31EAC
+                childRevisionLabel: rev-3
+                quantity: 2
+                findNumber: 20
+            candidate:
+              provenance: base
+              governingClock: source
+              governingTimestamp: '2026-04-02T00:00:00.000Z'
+              detail:
+                ciKind: assembly-edge
+                parentItemId: a02g8000000Ab01EAC
+                parentItemNumber: Assy-100
+                childItemId: a02g8000000Ab21EAC
+                childItemNumber: Bracket-005
+                childItemRevisionId: a0Ag8000000Ab31EAC
+                childRevisionLabel: rev-3
+                quantity: 2
+                findNumber: 20
+        warnings: []
+        truncated: false
+        entriesLimit: 200
+        diffFingerprint: 'sha256:b5e81c3a9f04d267'
+        generatedAt: '2026-04-05T17:22:03.518Z'
+
     PullPreviewNoChanges:
       value:
         sourceId: a1Cg8000000AbCeEAK
@@ -4948,6 +5280,36 @@ components:
           - entryId: '3b91c7e0d5a2f846'
             kind: claim-superseded
             action: null
+            edgeId: a1Eg8000000AbD2EAK
+
+    PullCommitAcceptedFields:
+      summary: '🚧 MVP-30379 (planned) — per-field decisions applied'
+      description: |
+        **🚧 Planned — MVP-30379, not yet implemented.** The commit that follows
+        `PullPreviewPerFieldDecisions`:
+
+        - Motor-002 took the revision (`childItemRevisionId: candidate`, a pin to rev-2) and kept
+          quantity 4.
+        - Label-400 took upstream's quantity.
+        - Bracket-005's claim was released, and the row is `base` from now on.
+      x-planned: { ticket: MVP-30379, assumptions: [A-30379-3, A-30379-8] }
+      value:
+        sourceId: a1Cg8000000AbCeEAK
+        newSourceRevisionId: a1Dg8000000AbChEAK
+        acceptedRootRevisionId: a0Ag8000000Ab02EAC
+        acceptedAt: '2026-04-06T14:02:51.317Z'
+        applied:
+          - entryId: '8a3e5f09c2d71b64'
+            kind: claim-retained
+            action: accept-fields
+            edgeId: a1Eg8000000AbD1EAK
+          - entryId: 'c7d42a9e0b15f386'
+            kind: member-add-collision
+            action: accept-fields
+            edgeId: a1Eg8000000AbD5EAK
+          - entryId: '3b91c7e0d5a2f846'
+            kind: claim-superseded
+            action: release
             edgeId: a1Eg8000000AbD2EAK
 
     PullCommitAlreadyCurrent:

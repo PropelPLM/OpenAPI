@@ -11445,6 +11445,163 @@
 									]
 								},
 								{
+									"name": "🚧 MVP-30379 — Preview a Pull (per-field decisions offered)",
+									"protocolProfileBehavior": {
+										"disableBodyPruning": true
+									},
+									"request": {
+										"method": "GET",
+										"header": [
+											{
+												"key": "Content-Type",
+												"value": "application/json"
+											},
+											{
+												"key": "Accept",
+												"value": "application/json"
+											}
+										],
+										"url": {
+											"raw": "{{propelApiUrl}}/v4/mbom/sources/:sourceId/pull-preview?candidateRootRevisionId=&entriesLimit=200",
+											"host": [
+												"{{propelApiUrl}}"
+											],
+											"path": [
+												"v4",
+												"mbom",
+												"sources",
+												":sourceId",
+												"pull-preview"
+											],
+											"query": [
+												{
+													"key": "candidateRootRevisionId",
+													"value": ""
+												},
+												{
+													"key": "entriesLimit",
+													"value": "200"
+												}
+											],
+											"variable": [
+												{
+													"key": "sourceId",
+													"value": "{{mbomSourceId}}"
+												}
+											]
+										},
+										"description": "**🚧 Planned — MVP-30379, not yet implemented.** Same request as *Preview a Pull*.\n\n## Setup\n\n1. Claim Motor-002's line **pinned** to rev-1, and change its quantity to 4.\n2. `add` Label-400 at quantity 1, at a position upstream will later supply at quantity 2.\n3. Claim Bracket-005's line **tracking**, and leave it matching upstream.\n4. Release a new Assy-100 revision that re-revs Motor-002, sets its quantity to 6, and adds Label-400 at quantity 2.\n\n## What to assert\n\n| Entry | `availableActions` once MVP-30379 ships | Today |\n| --- | --- | --- |\n| Motor-002 `claim-retained` (revision and quantity diverge) | `[accept-fields, accept-source-revision]` | `[]` |\n| Label-400 `member-add-collision` (quantity diverges) | `[accept-fields]` | `[]` |\n| Bracket-005 `claim-superseded` | `[release]` | `[]` |\n\n- Every entry stays `decision: informational`, and `summary.required` is 0: nothing here blocks the commit.\n- `accept-fields` covers only the fields that **actually diverge**. A tracking claim's revision never does.\n- `diffFingerprint` is computed as today.\n- `revisionAdvances` is MVP-30378's field [assumes A-30379-7]."
+									},
+									"response": [
+										{
+											"name": "🚧 expected once MVP-30379 ships",
+											"originalRequest": {
+												"method": "GET",
+												"header": [
+													{
+														"key": "Content-Type",
+														"value": "application/json"
+													}
+												],
+												"url": {
+													"raw": "{{propelApiUrl}}/v4/mbom/sources/:sourceId/pull-preview?candidateRootRevisionId=&entriesLimit=200",
+													"host": [
+														"{{propelApiUrl}}"
+													],
+													"path": [
+														"v4",
+														"mbom",
+														"sources",
+														":sourceId",
+														"pull-preview"
+													],
+													"query": [
+														{
+															"key": "candidateRootRevisionId",
+															"value": ""
+														},
+														{
+															"key": "entriesLimit",
+															"value": "200"
+														}
+													],
+													"variable": [
+														{
+															"key": "sourceId",
+															"value": "a1Cg8000000AbCeEAK"
+														}
+													]
+												}
+											},
+											"status": "OK",
+											"code": 200,
+											"_postman_previewlanguage": "json",
+											"header": [
+												{
+													"key": "Content-Type",
+													"value": "application/json"
+												}
+											],
+											"cookie": [],
+											"responseTime": null,
+											"body": "{\n  \"sourceId\": \"a1Cg8000000AbCeEAK\",\n  \"branchId\": \"a1Bg8000000AbCdEAK\",\n  \"branchLabel\": \"MBOM-GDL\",\n  \"sourceType\": \"Ebom\",\n  \"currentSourceVersion\": {\n    \"sourceRevisionId\": \"a1Dg8000000AbCfEAK\",\n    \"rootItemRevisionId\": \"a0Ag8000000Ab01EAC\",\n    \"rootItemNumber\": \"Assy-100\",\n    \"rootRevisionLabel\": \"rev-1\",\n    \"resolutionTimestamp\": \"2026-01-15T00:00:00.000Z\",\n    \"acceptedAt\": \"2026-01-15T09:12:44.000Z\"\n  },\n  \"candidateSourceVersion\": {\n    \"sourceRevisionId\": null,\n    \"rootItemRevisionId\": \"a0Ag8000000Ab02EAC\",\n    \"rootItemNumber\": \"Assy-100\",\n    \"rootRevisionLabel\": \"rev-2\",\n    \"resolutionTimestamp\": \"2026-04-02T00:00:00.000Z\",\n    \"acceptedAt\": null\n  },\n  \"hasChanges\": true,\n  \"summary\": {\n    \"total\": 3,\n    \"informational\": 3,\n    \"required\": 0,\n    \"byKind\": {\n      \"claim-retained\": 1,\n      \"member-add-collision\": 1,\n      \"claim-superseded\": 1\n    }\n  },\n  \"entries\": [\n    {\n      \"entryId\": \"8a3e5f09c2d71b64\",\n      \"kind\": \"claim-retained\",\n      \"decision\": \"informational\",\n      \"availableActions\": [\n        \"accept-fields\",\n        \"accept-source-revision\"\n      ],\n      \"retargeted\": true,\n      \"revisionAdvances\": false,\n      \"claimKind\": \"claim\",\n      \"message\": \"Your change to this member is kept, and the newer revision's version of it is suppressed.\",\n      \"target\": {\n        \"ciKind\": \"assembly-edge\",\n        \"edgeId\": \"a1Eg8000000AbD1EAK\",\n        \"edgeKey\": \"a0Bg8000000Ab10EAC\",\n        \"label\": \"Motor-002\",\n        \"path\": [\n          {\n            \"ciKind\": \"source\",\n            \"label\": \"Assy-100\",\n            \"edgeId\": null,\n            \"edgeKey\": null\n          }\n        ]\n      },\n      \"current\": {\n        \"provenance\": \"claiming\",\n        \"governingClock\": \"branch\",\n        \"governingTimestamp\": \"2026-04-05T17:22:03.518Z\",\n        \"detail\": {\n          \"ciKind\": \"assembly-edge\",\n          \"parentItemId\": \"a02g8000000Ab01EAC\",\n          \"parentItemNumber\": \"Assy-100\",\n          \"childItemId\": \"a02g8000000Ab20EAC\",\n          \"childItemNumber\": \"Motor-002\",\n          \"childItemRevisionId\": \"a0Ag8000000Ab41EAC\",\n          \"childRevisionLabel\": \"rev-1\",\n          \"quantity\": 4,\n          \"findNumber\": 10\n        }\n      },\n      \"candidate\": {\n        \"provenance\": \"base\",\n        \"governingClock\": \"source\",\n        \"governingTimestamp\": \"2026-04-02T00:00:00.000Z\",\n        \"detail\": {\n          \"ciKind\": \"assembly-edge\",\n          \"parentItemId\": \"a02g8000000Ab01EAC\",\n          \"parentItemNumber\": \"Assy-100\",\n          \"childItemId\": \"a02g8000000Ab20EAC\",\n          \"childItemNumber\": \"Motor-002\",\n          \"childItemRevisionId\": \"a0Ag8000000Ab42EAC\",\n          \"childRevisionLabel\": \"rev-2\",\n          \"quantity\": 6,\n          \"findNumber\": 10\n        }\n      }\n    },\n    {\n      \"entryId\": \"c7d42a9e0b15f386\",\n      \"kind\": \"member-add-collision\",\n      \"decision\": \"informational\",\n      \"availableActions\": [\n        \"accept-fields\"\n      ],\n      \"retargeted\": null,\n      \"revisionAdvances\": null,\n      \"claimKind\": null,\n      \"message\": \"The newer revision adds a member this branch already provides itself. Your own version is kept.\",\n      \"target\": {\n        \"ciKind\": \"assembly-edge\",\n        \"edgeId\": \"a1Eg8000000AbD5EAK\",\n        \"edgeKey\": \"new-a1Bg8000000AbCdEAK-a02g8000000Ab01EAC-a02g8000000Ab24EAC\",\n        \"label\": \"Label-400\",\n        \"path\": [\n          {\n            \"ciKind\": \"source\",\n            \"label\": \"Assy-100\",\n            \"edgeId\": null,\n            \"edgeKey\": null\n          }\n        ]\n      },\n      \"current\": {\n        \"provenance\": \"new\",\n        \"governingClock\": \"branch\",\n        \"governingTimestamp\": \"2026-04-05T17:22:03.518Z\",\n        \"detail\": {\n          \"ciKind\": \"assembly-edge\",\n          \"parentItemId\": \"a02g8000000Ab01EAC\",\n          \"parentItemNumber\": \"Assy-100\",\n          \"childItemId\": \"a02g8000000Ab24EAC\",\n          \"childItemNumber\": \"Label-400\",\n          \"childItemRevisionId\": \"a0Ag8000000Ab71EAC\",\n          \"childRevisionLabel\": \"rev-1\",\n          \"quantity\": 1,\n          \"findNumber\": 60\n        }\n      },\n      \"candidate\": {\n        \"provenance\": \"base\",\n        \"governingClock\": \"source\",\n        \"governingTimestamp\": \"2026-04-02T00:00:00.000Z\",\n        \"detail\": {\n          \"ciKind\": \"assembly-edge\",\n          \"parentItemId\": \"a02g8000000Ab01EAC\",\n          \"parentItemNumber\": \"Assy-100\",\n          \"childItemId\": \"a02g8000000Ab24EAC\",\n          \"childItemNumber\": \"Label-400\",\n          \"childItemRevisionId\": \"a0Ag8000000Ab71EAC\",\n          \"childRevisionLabel\": \"rev-1\",\n          \"quantity\": 2,\n          \"findNumber\": 60\n        }\n      }\n    },\n    {\n      \"entryId\": \"3b91c7e0d5a2f846\",\n      \"kind\": \"claim-superseded\",\n      \"decision\": \"informational\",\n      \"availableActions\": [\n        \"release\"\n      ],\n      \"retargeted\": null,\n      \"revisionAdvances\": false,\n      \"claimKind\": \"claim\",\n      \"message\": \"The newer revision now matches your change to this member, so your change no longer alters anything.\",\n      \"target\": {\n        \"ciKind\": \"assembly-edge\",\n        \"edgeId\": \"a1Eg8000000AbD2EAK\",\n        \"edgeKey\": \"a0Bg8000000Ab11EAC\",\n        \"label\": \"Bracket-005\",\n        \"path\": [\n          {\n            \"ciKind\": \"source\",\n            \"label\": \"Assy-100\",\n            \"edgeId\": null,\n            \"edgeKey\": null\n          }\n        ]\n      },\n      \"current\": {\n        \"provenance\": \"claiming\",\n        \"governingClock\": \"branch\",\n        \"governingTimestamp\": \"2026-04-05T17:22:03.518Z\",\n        \"detail\": {\n          \"ciKind\": \"assembly-edge\",\n          \"parentItemId\": \"a02g8000000Ab01EAC\",\n          \"parentItemNumber\": \"Assy-100\",\n          \"childItemId\": \"a02g8000000Ab21EAC\",\n          \"childItemNumber\": \"Bracket-005\",\n          \"childItemRevisionId\": \"a0Ag8000000Ab31EAC\",\n          \"childRevisionLabel\": \"rev-3\",\n          \"quantity\": 2,\n          \"findNumber\": 20\n        }\n      },\n      \"candidate\": {\n        \"provenance\": \"base\",\n        \"governingClock\": \"source\",\n        \"governingTimestamp\": \"2026-04-02T00:00:00.000Z\",\n        \"detail\": {\n          \"ciKind\": \"assembly-edge\",\n          \"parentItemId\": \"a02g8000000Ab01EAC\",\n          \"parentItemNumber\": \"Assy-100\",\n          \"childItemId\": \"a02g8000000Ab21EAC\",\n          \"childItemNumber\": \"Bracket-005\",\n          \"childItemRevisionId\": \"a0Ag8000000Ab31EAC\",\n          \"childRevisionLabel\": \"rev-3\",\n          \"quantity\": 2,\n          \"findNumber\": 20\n        }\n      }\n    }\n  ],\n  \"warnings\": [],\n  \"truncated\": false,\n  \"entriesLimit\": 200,\n  \"diffFingerprint\": \"sha256:b5e81c3a9f04d267\",\n  \"generatedAt\": \"2026-04-05T17:22:03.518Z\"\n}"
+										},
+										{
+											"name": "Today — no optional actions offered",
+											"originalRequest": {
+												"method": "GET",
+												"header": [
+													{
+														"key": "Content-Type",
+														"value": "application/json"
+													}
+												],
+												"url": {
+													"raw": "{{propelApiUrl}}/v4/mbom/sources/:sourceId/pull-preview?candidateRootRevisionId=&entriesLimit=200",
+													"host": [
+														"{{propelApiUrl}}"
+													],
+													"path": [
+														"v4",
+														"mbom",
+														"sources",
+														":sourceId",
+														"pull-preview"
+													],
+													"query": [
+														{
+															"key": "candidateRootRevisionId",
+															"value": ""
+														},
+														{
+															"key": "entriesLimit",
+															"value": "200"
+														}
+													],
+													"variable": [
+														{
+															"key": "sourceId",
+															"value": "a1Cg8000000AbCeEAK"
+														}
+													]
+												}
+											},
+											"status": "OK",
+											"code": 200,
+											"_postman_previewlanguage": "json",
+											"header": [
+												{
+													"key": "Content-Type",
+													"value": "application/json"
+												}
+											],
+											"cookie": [],
+											"responseTime": null,
+											"body": "{\n  \"sourceId\": \"a1Cg8000000AbCeEAK\",\n  \"branchId\": \"a1Bg8000000AbCdEAK\",\n  \"branchLabel\": \"MBOM-GDL\",\n  \"sourceType\": \"Ebom\",\n  \"currentSourceVersion\": {\n    \"sourceRevisionId\": \"a1Dg8000000AbCfEAK\",\n    \"rootItemRevisionId\": \"a0Ag8000000Ab01EAC\",\n    \"rootItemNumber\": \"Assy-100\",\n    \"rootRevisionLabel\": \"rev-1\",\n    \"resolutionTimestamp\": \"2026-01-15T00:00:00.000Z\",\n    \"acceptedAt\": \"2026-01-15T09:12:44.000Z\"\n  },\n  \"candidateSourceVersion\": {\n    \"sourceRevisionId\": null,\n    \"rootItemRevisionId\": \"a0Ag8000000Ab02EAC\",\n    \"rootItemNumber\": \"Assy-100\",\n    \"rootRevisionLabel\": \"rev-2\",\n    \"resolutionTimestamp\": \"2026-04-02T00:00:00.000Z\",\n    \"acceptedAt\": null\n  },\n  \"hasChanges\": true,\n  \"summary\": {\n    \"total\": 3,\n    \"informational\": 3,\n    \"required\": 0,\n    \"byKind\": {\n      \"claim-retained\": 1,\n      \"member-add-collision\": 1,\n      \"claim-superseded\": 1\n    }\n  },\n  \"entries\": [\n    {\n      \"entryId\": \"8a3e5f09c2d71b64\",\n      \"kind\": \"claim-retained\",\n      \"decision\": \"informational\",\n      \"availableActions\": [],\n      \"retargeted\": true,\n      \"claimKind\": \"claim\",\n      \"message\": \"Your change to this member is kept, and the newer revision's version of it is suppressed.\",\n      \"target\": {\n        \"ciKind\": \"assembly-edge\",\n        \"edgeId\": \"a1Eg8000000AbD1EAK\",\n        \"edgeKey\": \"a0Bg8000000Ab10EAC\",\n        \"label\": \"Motor-002\",\n        \"path\": [\n          {\n            \"ciKind\": \"source\",\n            \"label\": \"Assy-100\",\n            \"edgeId\": null,\n            \"edgeKey\": null\n          }\n        ]\n      },\n      \"current\": {\n        \"provenance\": \"claiming\",\n        \"governingClock\": \"branch\",\n        \"governingTimestamp\": \"2026-04-05T17:22:03.518Z\",\n        \"detail\": {\n          \"ciKind\": \"assembly-edge\",\n          \"parentItemId\": \"a02g8000000Ab01EAC\",\n          \"parentItemNumber\": \"Assy-100\",\n          \"childItemId\": \"a02g8000000Ab20EAC\",\n          \"childItemNumber\": \"Motor-002\",\n          \"childItemRevisionId\": \"a0Ag8000000Ab41EAC\",\n          \"childRevisionLabel\": \"rev-1\",\n          \"quantity\": 4,\n          \"findNumber\": 10\n        }\n      },\n      \"candidate\": {\n        \"provenance\": \"base\",\n        \"governingClock\": \"source\",\n        \"governingTimestamp\": \"2026-04-02T00:00:00.000Z\",\n        \"detail\": {\n          \"ciKind\": \"assembly-edge\",\n          \"parentItemId\": \"a02g8000000Ab01EAC\",\n          \"parentItemNumber\": \"Assy-100\",\n          \"childItemId\": \"a02g8000000Ab20EAC\",\n          \"childItemNumber\": \"Motor-002\",\n          \"childItemRevisionId\": \"a0Ag8000000Ab42EAC\",\n          \"childRevisionLabel\": \"rev-2\",\n          \"quantity\": 6,\n          \"findNumber\": 10\n        }\n      }\n    },\n    {\n      \"entryId\": \"c7d42a9e0b15f386\",\n      \"kind\": \"member-add-collision\",\n      \"decision\": \"informational\",\n      \"availableActions\": [],\n      \"retargeted\": null,\n      \"claimKind\": null,\n      \"message\": \"The newer revision adds a member this branch already provides itself. Your own version is kept.\",\n      \"target\": {\n        \"ciKind\": \"assembly-edge\",\n        \"edgeId\": \"a1Eg8000000AbD5EAK\",\n        \"edgeKey\": \"new-a1Bg8000000AbCdEAK-a02g8000000Ab01EAC-a02g8000000Ab24EAC\",\n        \"label\": \"Label-400\",\n        \"path\": [\n          {\n            \"ciKind\": \"source\",\n            \"label\": \"Assy-100\",\n            \"edgeId\": null,\n            \"edgeKey\": null\n          }\n        ]\n      },\n      \"current\": {\n        \"provenance\": \"new\",\n        \"governingClock\": \"branch\",\n        \"governingTimestamp\": \"2026-04-05T17:22:03.518Z\",\n        \"detail\": {\n          \"ciKind\": \"assembly-edge\",\n          \"parentItemId\": \"a02g8000000Ab01EAC\",\n          \"parentItemNumber\": \"Assy-100\",\n          \"childItemId\": \"a02g8000000Ab24EAC\",\n          \"childItemNumber\": \"Label-400\",\n          \"childItemRevisionId\": \"a0Ag8000000Ab71EAC\",\n          \"childRevisionLabel\": \"rev-1\",\n          \"quantity\": 1,\n          \"findNumber\": 60\n        }\n      },\n      \"candidate\": {\n        \"provenance\": \"base\",\n        \"governingClock\": \"source\",\n        \"governingTimestamp\": \"2026-04-02T00:00:00.000Z\",\n        \"detail\": {\n          \"ciKind\": \"assembly-edge\",\n          \"parentItemId\": \"a02g8000000Ab01EAC\",\n          \"parentItemNumber\": \"Assy-100\",\n          \"childItemId\": \"a02g8000000Ab24EAC\",\n          \"childItemNumber\": \"Label-400\",\n          \"childItemRevisionId\": \"a0Ag8000000Ab71EAC\",\n          \"childRevisionLabel\": \"rev-1\",\n          \"quantity\": 2,\n          \"findNumber\": 60\n        }\n      }\n    },\n    {\n      \"entryId\": \"3b91c7e0d5a2f846\",\n      \"kind\": \"claim-superseded\",\n      \"decision\": \"informational\",\n      \"availableActions\": [],\n      \"retargeted\": null,\n      \"claimKind\": \"claim\",\n      \"message\": \"The newer revision now matches your change to this member, so your change no longer alters anything.\",\n      \"target\": {\n        \"ciKind\": \"assembly-edge\",\n        \"edgeId\": \"a1Eg8000000AbD2EAK\",\n        \"edgeKey\": \"a0Bg8000000Ab11EAC\",\n        \"label\": \"Bracket-005\",\n        \"path\": [\n          {\n            \"ciKind\": \"source\",\n            \"label\": \"Assy-100\",\n            \"edgeId\": null,\n            \"edgeKey\": null\n          }\n        ]\n      },\n      \"current\": {\n        \"provenance\": \"claiming\",\n        \"governingClock\": \"branch\",\n        \"governingTimestamp\": \"2026-04-05T17:22:03.518Z\",\n        \"detail\": {\n          \"ciKind\": \"assembly-edge\",\n          \"parentItemId\": \"a02g8000000Ab01EAC\",\n          \"parentItemNumber\": \"Assy-100\",\n          \"childItemId\": \"a02g8000000Ab21EAC\",\n          \"childItemNumber\": \"Bracket-005\",\n          \"childItemRevisionId\": \"a0Ag8000000Ab31EAC\",\n          \"childRevisionLabel\": \"rev-3\",\n          \"quantity\": 2,\n          \"findNumber\": 20\n        }\n      },\n      \"candidate\": {\n        \"provenance\": \"base\",\n        \"governingClock\": \"source\",\n        \"governingTimestamp\": \"2026-04-02T00:00:00.000Z\",\n        \"detail\": {\n          \"ciKind\": \"assembly-edge\",\n          \"parentItemId\": \"a02g8000000Ab01EAC\",\n          \"parentItemNumber\": \"Assy-100\",\n          \"childItemId\": \"a02g8000000Ab21EAC\",\n          \"childItemNumber\": \"Bracket-005\",\n          \"childItemRevisionId\": \"a0Ag8000000Ab31EAC\",\n          \"childRevisionLabel\": \"rev-3\",\n          \"quantity\": 2,\n          \"findNumber\": 20\n        }\n      }\n    }\n  ],\n  \"warnings\": [],\n  \"truncated\": false,\n  \"entriesLimit\": 200,\n  \"diffFingerprint\": \"sha256:b5e81c3a9f04d267\",\n  \"generatedAt\": \"2026-04-05T17:22:03.518Z\"\n}"
+										}
+									]
+								},
+								{
 									"name": "Commit a Pull",
 									"event": [
 										{
@@ -11962,6 +12119,316 @@
 												"body": {
 													"mode": "raw",
 													"raw": "{\n  \"candidateRootRevisionId\": \"a0Ag8000000Ab02EAC\",\n  \"diffFingerprint\": \"sha256:4c0d9e72b1a83f56\",\n  \"decisions\": [\n    {\n      \"entryId\": \"8a3e5f09c2d71b64\",\n      \"action\": \"accept-source-revision\"\n    }\n  ]\n}",
+													"options": {
+														"raw": {
+															"language": "json"
+														}
+													}
+												},
+												"url": {
+													"raw": "{{propelApiUrl}}/v4/mbom/sources/:sourceId/pull",
+													"host": [
+														"{{propelApiUrl}}"
+													],
+													"path": [
+														"v4",
+														"mbom",
+														"sources",
+														":sourceId",
+														"pull"
+													],
+													"variable": [
+														{
+															"key": "sourceId",
+															"value": "a1Cg8000000AbCeEAK"
+														}
+													]
+												}
+											},
+											"status": "Bad Request",
+											"code": 400,
+											"_postman_previewlanguage": "json",
+											"header": [
+												{
+													"key": "Content-Type",
+													"value": "application/json"
+												}
+											],
+											"cookie": [],
+											"responseTime": null,
+											"body": "{\n  \"code\": \"INVALID_REQUEST\",\n  \"message\": \"That request could not be read. Check that the body is valid JSON and that every required value is supplied. (entryId 8a3e5f09c2d71b64 is claim-retained, which is never actionable)\"\n}"
+										}
+									]
+								},
+								{
+									"name": "🚧 MVP-30379 — Commit a Pull with accept-fields and release",
+									"protocolProfileBehavior": {
+										"disableBodyPruning": true
+									},
+									"request": {
+										"method": "POST",
+										"header": [
+											{
+												"key": "Content-Type",
+												"value": "application/json"
+											},
+											{
+												"key": "Accept",
+												"value": "application/json"
+											}
+										],
+										"body": {
+											"mode": "raw",
+											"raw": "{\n  \"candidateRootRevisionId\": \"{{mbomCandidateRootRevisionId}}\",\n  \"diffFingerprint\": \"{{mbomDiffFingerprint}}\",\n  \"decisions\": [\n    {\n      \"entryId\": \"{{mbomRetainedEntryId}}\",\n      \"action\": \"accept-fields\",\n      \"acceptedFields\": {\n        \"childItemRevisionId\": \"candidate\"\n      }\n    },\n    {\n      \"entryId\": \"{{mbomCollisionEntryId}}\",\n      \"action\": \"accept-fields\",\n      \"acceptedFields\": {\n        \"quantity\": \"candidate\"\n      }\n    },\n    {\n      \"entryId\": \"{{mbomSupersededEntryId}}\",\n      \"action\": \"release\"\n    }\n  ]\n}",
+											"options": {
+												"raw": {
+													"language": "json"
+												}
+											}
+										},
+										"url": {
+											"raw": "{{propelApiUrl}}/v4/mbom/sources/:sourceId/pull",
+											"host": [
+												"{{propelApiUrl}}"
+											],
+											"path": [
+												"v4",
+												"mbom",
+												"sources",
+												":sourceId",
+												"pull"
+											],
+											"variable": [
+												{
+													"key": "sourceId",
+													"value": "{{mbomSourceId}}"
+												}
+											]
+										},
+										"description": "**🚧 Planned — MVP-30379, not yet implemented.** Commit the preview above with one decision per decidable entry.\n\n## `acceptedFields`\n\nThe keys are `quantity`, `findNumber` and `childItemRevisionId`. Name only what you are taking; an omitted field keeps the branch's value.\n\n| Value | Revision | Quantity / find number |\n| --- | --- | --- |\n| `candidate` | **pins** the candidate's revision, and reports `retargeted: true` again on the next pull that moves the line | takes upstream's value |\n| `release` | stores nothing. A claim then **tracks** T_R, still gets a `claim-*` entry every pull, and is never retargeted. A native row **floats** at `asOf`. | **refused**, because there is no clock to fall back to [assumes A-30379-2] |\n\n`release` on `claim-superseded` takes no `acceptedFields`. It clears a **pinned** claim's revision, and it **reverts** a **tracking** claim to `base` [assumes A-30379-3].\n\n## What to assert\n\n- **Result:** `201`. `applied[]` reports `accept-fields` on the `claim-retained` entry and on the `member-add-collision` entry, whose kind appears in `applied` only when it was decided. It reports `release` on the `claim-superseded` entry [assumes A-30379-8].\n- **A tree read afterwards:**\n  - Motor-002 renders rev-2 and keeps **quantity 4**.\n  - Label-400 is at quantity 2.\n  - Bracket-005 is `base`.\n- **`candidate` and `release` behave differently on the next pull** that moves Motor-002's line. After `candidate` it is `claim-retained` with `retargeted: true`. After `release` it has `retargeted: false`, and it renders the new revision.\n- **Accepting the quantity and the revision on one row** emits **one** operation for that edge, a `set-revision` carrying the quantity, never two [assumes A-30379-5].\n- **Refusals, each `400 INVALID_REQUEST` with nothing written:**\n  - a field that does not diverge, including a tracking claim's revision\n  - an unknown key: `childItem`, or the old spelling `childItemRevision`\n  - an empty `acceptedFields`\n  - `acceptedFields` on `claim-orphaned`, or with any action but `accept-fields`\n  - more than 200 compiled operations. This is refused, not chunked [assumes A-30379-4].\n- **Zero decisions** still commits, because only `claim-orphaned` is required.\n\n**Today:** `400 INVALID_REQUEST`. No kind other than `claim-orphaned` is actionable."
+									},
+									"response": [
+										{
+											"name": "🚧 expected once MVP-30379 ships",
+											"originalRequest": {
+												"method": "POST",
+												"header": [
+													{
+														"key": "Content-Type",
+														"value": "application/json"
+													}
+												],
+												"body": {
+													"mode": "raw",
+													"raw": "{\n  \"candidateRootRevisionId\": \"a0Ag8000000Ab02EAC\",\n  \"diffFingerprint\": \"sha256:b5e81c3a9f04d267\",\n  \"decisions\": [\n    {\n      \"entryId\": \"8a3e5f09c2d71b64\",\n      \"action\": \"accept-fields\",\n      \"acceptedFields\": {\n        \"childItemRevisionId\": \"candidate\"\n      }\n    },\n    {\n      \"entryId\": \"c7d42a9e0b15f386\",\n      \"action\": \"accept-fields\",\n      \"acceptedFields\": {\n        \"quantity\": \"candidate\"\n      }\n    },\n    {\n      \"entryId\": \"3b91c7e0d5a2f846\",\n      \"action\": \"release\"\n    }\n  ]\n}",
+													"options": {
+														"raw": {
+															"language": "json"
+														}
+													}
+												},
+												"url": {
+													"raw": "{{propelApiUrl}}/v4/mbom/sources/:sourceId/pull",
+													"host": [
+														"{{propelApiUrl}}"
+													],
+													"path": [
+														"v4",
+														"mbom",
+														"sources",
+														":sourceId",
+														"pull"
+													],
+													"variable": [
+														{
+															"key": "sourceId",
+															"value": "a1Cg8000000AbCeEAK"
+														}
+													]
+												}
+											},
+											"status": "Created",
+											"code": 201,
+											"_postman_previewlanguage": "json",
+											"header": [
+												{
+													"key": "Content-Type",
+													"value": "application/json"
+												}
+											],
+											"cookie": [],
+											"responseTime": null,
+											"body": "{\n  \"sourceId\": \"a1Cg8000000AbCeEAK\",\n  \"newSourceRevisionId\": \"a1Dg8000000AbChEAK\",\n  \"acceptedRootRevisionId\": \"a0Ag8000000Ab02EAC\",\n  \"acceptedAt\": \"2026-04-06T14:02:51.317Z\",\n  \"applied\": [\n    {\n      \"entryId\": \"8a3e5f09c2d71b64\",\n      \"kind\": \"claim-retained\",\n      \"action\": \"accept-fields\",\n      \"edgeId\": \"a1Eg8000000AbD1EAK\"\n    },\n    {\n      \"entryId\": \"c7d42a9e0b15f386\",\n      \"kind\": \"member-add-collision\",\n      \"action\": \"accept-fields\",\n      \"edgeId\": \"a1Eg8000000AbD5EAK\"\n    },\n    {\n      \"entryId\": \"3b91c7e0d5a2f846\",\n      \"kind\": \"claim-superseded\",\n      \"action\": \"release\",\n      \"edgeId\": \"a1Eg8000000AbD2EAK\"\n    }\n  ]\n}"
+										},
+										{
+											"name": "🚧 expected once MVP-30379 ships — field does not diverge",
+											"originalRequest": {
+												"method": "POST",
+												"header": [
+													{
+														"key": "Content-Type",
+														"value": "application/json"
+													}
+												],
+												"body": {
+													"mode": "raw",
+													"raw": "{\n  \"candidateRootRevisionId\": \"a0Ag8000000Ab02EAC\",\n  \"diffFingerprint\": \"sha256:b5e81c3a9f04d267\",\n  \"decisions\": [\n    {\n      \"entryId\": \"8a3e5f09c2d71b64\",\n      \"action\": \"accept-fields\",\n      \"acceptedFields\": {\n        \"findNumber\": \"candidate\"\n      }\n    }\n  ]\n}",
+													"options": {
+														"raw": {
+															"language": "json"
+														}
+													}
+												},
+												"url": {
+													"raw": "{{propelApiUrl}}/v4/mbom/sources/:sourceId/pull",
+													"host": [
+														"{{propelApiUrl}}"
+													],
+													"path": [
+														"v4",
+														"mbom",
+														"sources",
+														":sourceId",
+														"pull"
+													],
+													"variable": [
+														{
+															"key": "sourceId",
+															"value": "a1Cg8000000AbCeEAK"
+														}
+													]
+												}
+											},
+											"status": "Bad Request",
+											"code": 400,
+											"_postman_previewlanguage": "json",
+											"header": [
+												{
+													"key": "Content-Type",
+													"value": "application/json"
+												}
+											],
+											"cookie": [],
+											"responseTime": null,
+											"body": "{\n  \"code\": \"INVALID_REQUEST\",\n  \"message\": \"That request could not be read. Check that the body is valid JSON and that every required value is supplied. (entryId 8a3e5f09c2d71b64: findNumber does not differ from upstream, so there is nothing to accept)\"\n}"
+										},
+										{
+											"name": "🚧 expected once MVP-30379 ships — childItem is not assertable",
+											"originalRequest": {
+												"method": "POST",
+												"header": [
+													{
+														"key": "Content-Type",
+														"value": "application/json"
+													}
+												],
+												"body": {
+													"mode": "raw",
+													"raw": "{\n  \"candidateRootRevisionId\": \"a0Ag8000000Ab02EAC\",\n  \"diffFingerprint\": \"sha256:b5e81c3a9f04d267\",\n  \"decisions\": [\n    {\n      \"entryId\": \"8a3e5f09c2d71b64\",\n      \"action\": \"accept-fields\",\n      \"acceptedFields\": {\n        \"childItem\": \"candidate\"\n      }\n    }\n  ]\n}",
+													"options": {
+														"raw": {
+															"language": "json"
+														}
+													}
+												},
+												"url": {
+													"raw": "{{propelApiUrl}}/v4/mbom/sources/:sourceId/pull",
+													"host": [
+														"{{propelApiUrl}}"
+													],
+													"path": [
+														"v4",
+														"mbom",
+														"sources",
+														":sourceId",
+														"pull"
+													],
+													"variable": [
+														{
+															"key": "sourceId",
+															"value": "a1Cg8000000AbCeEAK"
+														}
+													]
+												}
+											},
+											"status": "Bad Request",
+											"code": 400,
+											"_postman_previewlanguage": "json",
+											"header": [
+												{
+													"key": "Content-Type",
+													"value": "application/json"
+												}
+											],
+											"cookie": [],
+											"responseTime": null,
+											"body": "{\n  \"code\": \"INVALID_REQUEST\",\n  \"message\": \"That request could not be read. Check that the body is valid JSON and that every required value is supplied. (entryId 8a3e5f09c2d71b64: childItem is not a field a decision can accept)\"\n}"
+										},
+										{
+											"name": "🚧 expected once MVP-30379 ships — release on a quantity",
+											"originalRequest": {
+												"method": "POST",
+												"header": [
+													{
+														"key": "Content-Type",
+														"value": "application/json"
+													}
+												],
+												"body": {
+													"mode": "raw",
+													"raw": "{\n  \"candidateRootRevisionId\": \"a0Ag8000000Ab02EAC\",\n  \"diffFingerprint\": \"sha256:b5e81c3a9f04d267\",\n  \"decisions\": [\n    {\n      \"entryId\": \"c7d42a9e0b15f386\",\n      \"action\": \"accept-fields\",\n      \"acceptedFields\": {\n        \"quantity\": \"release\"\n      }\n    }\n  ]\n}",
+													"options": {
+														"raw": {
+															"language": "json"
+														}
+													}
+												},
+												"url": {
+													"raw": "{{propelApiUrl}}/v4/mbom/sources/:sourceId/pull",
+													"host": [
+														"{{propelApiUrl}}"
+													],
+													"path": [
+														"v4",
+														"mbom",
+														"sources",
+														":sourceId",
+														"pull"
+													],
+													"variable": [
+														{
+															"key": "sourceId",
+															"value": "a1Cg8000000AbCeEAK"
+														}
+													]
+												}
+											},
+											"status": "Bad Request",
+											"code": 400,
+											"_postman_previewlanguage": "json",
+											"header": [
+												{
+													"key": "Content-Type",
+													"value": "application/json"
+												}
+											],
+											"cookie": [],
+											"responseTime": null,
+											"body": "{\n  \"code\": \"INVALID_REQUEST\",\n  \"message\": \"That request could not be read. Check that the body is valid JSON and that every required value is supplied. (entryId c7d42a9e0b15f386: quantity has no upstream clock to release to; accept the candidate value or revert the row)\"\n}"
+										},
+										{
+											"name": "Today — claim-retained is not actionable",
+											"originalRequest": {
+												"method": "POST",
+												"header": [
+													{
+														"key": "Content-Type",
+														"value": "application/json"
+													}
+												],
+												"body": {
+													"mode": "raw",
+													"raw": "{\n  \"candidateRootRevisionId\": \"a0Ag8000000Ab02EAC\",\n  \"diffFingerprint\": \"sha256:b5e81c3a9f04d267\",\n  \"decisions\": [\n    {\n      \"entryId\": \"8a3e5f09c2d71b64\",\n      \"action\": \"accept-fields\",\n      \"acceptedFields\": {\n        \"childItemRevisionId\": \"candidate\"\n      }\n    },\n    {\n      \"entryId\": \"c7d42a9e0b15f386\",\n      \"action\": \"accept-fields\",\n      \"acceptedFields\": {\n        \"quantity\": \"candidate\"\n      }\n    },\n    {\n      \"entryId\": \"3b91c7e0d5a2f846\",\n      \"action\": \"release\"\n    }\n  ]\n}",
 													"options": {
 														"raw": {
 															"language": "json"
