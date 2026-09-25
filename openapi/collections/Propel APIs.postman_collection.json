@@ -6799,6 +6799,163 @@
 									"uid": "46943044-de4f0de5-851e-438a-a300-7ebcb2812234"
 								},
 								{
+									"name": "🚧 MVP-30375 — Read a Branch's Effective Structure (override badges)",
+									"protocolProfileBehavior": {
+										"disableBodyPruning": true
+									},
+									"request": {
+										"method": "GET",
+										"header": [
+											{
+												"key": "Content-Type",
+												"value": "application/json"
+											},
+											{
+												"key": "Accept",
+												"value": "application/json"
+											}
+										],
+										"url": {
+											"raw": "{{propelApiUrl}}/v4/mbom/branches/:branchId/tree?flat=true&asOf=",
+											"host": [
+												"{{propelApiUrl}}"
+											],
+											"path": [
+												"v4",
+												"mbom",
+												"branches",
+												":branchId",
+												"tree"
+											],
+											"query": [
+												{
+													"key": "flat",
+													"value": "true"
+												},
+												{
+													"key": "asOf",
+													"value": ""
+												}
+											],
+											"variable": [
+												{
+													"key": "branchId",
+													"value": "{{mbomBranchId}}"
+												}
+											]
+										},
+										"description": "**🚧 Planned — MVP-30375, not yet implemented.** Same request as *Read a Branch's Effective Structure*. Every row gains `isPinned` and `wasClaimed`, both never null. `pinnedById` / `pinnedAt` are present and null on a live read.\n\n## What to assert\n\n| Row | `isPinned` | `wasClaimed` | Why |\n| --- | --- | --- | --- |\n| claim pinned to the **same** revision its source line resolves to | `true` | `false` | a choice, although it renders nothing different |\n| tracking claim (`trackChildRevision: true`) | `false` | `false` | nothing chosen, although it renders a released revision |\n| floating `add` (no `childItemRevisionId`) | `false` | `false` | floats at `asOf` |\n| `convert-to-native` that stamped a revision | `true` | `true` | a stamp is a choice, and the row once claimed |\n\nThe badge follows the **explicit choice**, never the structural pin. A floating `new` row that renders a pinned structure because the read clock moved past T_R stays `false`. `PINNED_SUBTREE_HIDES_EDITS` is the separate, structural signal [assumes A-30375-1, A-30375-2].\n\n**Today** the four fields are absent from every row."
+									},
+									"response": [
+										{
+											"name": "🚧 expected once MVP-30375 ships",
+											"originalRequest": {
+												"method": "GET",
+												"header": [
+													{
+														"key": "Content-Type",
+														"value": "application/json"
+													}
+												],
+												"url": {
+													"raw": "{{propelApiUrl}}/v4/mbom/branches/:branchId/tree?flat=true&asOf=",
+													"host": [
+														"{{propelApiUrl}}"
+													],
+													"path": [
+														"v4",
+														"mbom",
+														"branches",
+														":branchId",
+														"tree"
+													],
+													"query": [
+														{
+															"key": "flat",
+															"value": "true"
+														},
+														{
+															"key": "asOf",
+															"value": ""
+														}
+													],
+													"variable": [
+														{
+															"key": "branchId",
+															"value": "a1Bg8000000AbCdEAK"
+														}
+													]
+												}
+											},
+											"status": "OK",
+											"code": 200,
+											"_postman_previewlanguage": "json",
+											"header": [
+												{
+													"key": "Content-Type",
+													"value": "application/json"
+												}
+											],
+											"cookie": [],
+											"responseTime": null,
+											"body": "{\n  \"asOf\": \"2026-04-05T17:22:03.518Z\",\n  \"rootRevisionId\": \"a0Ag8000000Ab01EAC\",\n  \"sourceTimePoint\": \"2026-01-15T00:00:00.000Z\",\n  \"rows\": [\n    {\n      \"edgeId\": \"a1Eg8000000AbD1EAK\",\n      \"edgeKey\": \"a0Bg8000000Ab10EAC\",\n      \"detail\": {\n        \"ciKind\": \"assembly-edge\",\n        \"parentItemId\": \"a02g8000000Ab01EAC\",\n        \"childItemId\": \"a02g8000000Ab20EAC\",\n        \"childItemRevisionId\": \"a0Ag8000000Ab41EAC\",\n        \"quantity\": 4,\n        \"findNumber\": 10\n      },\n      \"provenance\": \"claiming\",\n      \"governingTimestamp\": \"2026-04-05T17:22:03.518Z\",\n      \"sourceId\": \"a1Cg8000000AbCeEAK\",\n      \"isClaimed\": true,\n      \"isExcluded\": false,\n      \"isReplaced\": false,\n      \"isEditable\": true,\n      \"isPinned\": true,\n      \"wasClaimed\": false,\n      \"pinnedById\": null,\n      \"pinnedAt\": null,\n      \"childRows\": []\n    },\n    {\n      \"edgeId\": \"a1Eg8000000AbD2EAK\",\n      \"edgeKey\": \"a0Bg8000000Ab11EAC\",\n      \"detail\": {\n        \"ciKind\": \"assembly-edge\",\n        \"parentItemId\": \"a02g8000000Ab01EAC\",\n        \"childItemId\": \"a02g8000000Ab21EAC\",\n        \"childItemRevisionId\": \"a0Ag8000000Ab31EAC\",\n        \"quantity\": 3,\n        \"findNumber\": 20\n      },\n      \"provenance\": \"claiming\",\n      \"governingTimestamp\": \"2026-04-05T17:22:03.518Z\",\n      \"sourceId\": \"a1Cg8000000AbCeEAK\",\n      \"isClaimed\": true,\n      \"isExcluded\": false,\n      \"isReplaced\": false,\n      \"isEditable\": true,\n      \"isPinned\": false,\n      \"wasClaimed\": false,\n      \"pinnedById\": null,\n      \"pinnedAt\": null,\n      \"childRows\": []\n    },\n    {\n      \"edgeId\": \"a1Eg8000000AbD9EAK\",\n      \"edgeKey\": \"new-a1Bg8000000AbCdEAK-a02g8000000Ab01EAC-a02g8000000Ab90EAC\",\n      \"detail\": {\n        \"ciKind\": \"assembly-edge\",\n        \"parentItemId\": \"a02g8000000Ab01EAC\",\n        \"childItemId\": \"a02g8000000Ab90EAC\",\n        \"childItemRevisionId\": \"a0Ag8000000Ab95EAC\",\n        \"quantity\": 1,\n        \"findNumber\": 90\n      },\n      \"provenance\": \"new\",\n      \"governingTimestamp\": \"2026-04-05T17:22:03.518Z\",\n      \"sourceId\": null,\n      \"isClaimed\": false,\n      \"isExcluded\": false,\n      \"isReplaced\": false,\n      \"isEditable\": true,\n      \"isPinned\": false,\n      \"wasClaimed\": false,\n      \"pinnedById\": null,\n      \"pinnedAt\": null,\n      \"childRows\": []\n    },\n    {\n      \"edgeId\": \"a1Eg8000000AbD3EAK\",\n      \"edgeKey\": \"a0Bg8000000Ab12EAC\",\n      \"detail\": {\n        \"ciKind\": \"assembly-edge\",\n        \"parentItemId\": \"a02g8000000Ab01EAC\",\n        \"childItemId\": \"a02g8000000Ab22EAC\",\n        \"childItemRevisionId\": \"a0Ag8000000Ab61EAC\",\n        \"quantity\": 3,\n        \"findNumber\": 30\n      },\n      \"provenance\": \"new\",\n      \"governingTimestamp\": \"2026-04-05T17:22:03.518Z\",\n      \"sourceId\": null,\n      \"isClaimed\": false,\n      \"isExcluded\": false,\n      \"isReplaced\": false,\n      \"isEditable\": true,\n      \"isPinned\": true,\n      \"wasClaimed\": true,\n      \"pinnedById\": null,\n      \"pinnedAt\": null,\n      \"childRows\": []\n    }\n  ],\n  \"warnings\": []\n}"
+										},
+										{
+											"name": "Today — no badge fields",
+											"originalRequest": {
+												"method": "GET",
+												"header": [
+													{
+														"key": "Content-Type",
+														"value": "application/json"
+													}
+												],
+												"url": {
+													"raw": "{{propelApiUrl}}/v4/mbom/branches/:branchId/tree?flat=true&asOf=",
+													"host": [
+														"{{propelApiUrl}}"
+													],
+													"path": [
+														"v4",
+														"mbom",
+														"branches",
+														":branchId",
+														"tree"
+													],
+													"query": [
+														{
+															"key": "flat",
+															"value": "true"
+														},
+														{
+															"key": "asOf",
+															"value": ""
+														}
+													],
+													"variable": [
+														{
+															"key": "branchId",
+															"value": "a1Bg8000000AbCdEAK"
+														}
+													]
+												}
+											},
+											"status": "OK",
+											"code": 200,
+											"_postman_previewlanguage": "json",
+											"header": [
+												{
+													"key": "Content-Type",
+													"value": "application/json"
+												}
+											],
+											"cookie": [],
+											"responseTime": null,
+											"body": "{\n  \"asOf\": \"2026-04-05T17:22:03.518Z\",\n  \"rootRevisionId\": \"a0Ag8000000Ab01EAC\",\n  \"sourceTimePoint\": \"2026-01-15T00:00:00.000Z\",\n  \"rows\": [\n    {\n      \"edgeId\": \"a1Eg8000000AbD1EAK\",\n      \"edgeKey\": \"a0Bg8000000Ab10EAC\",\n      \"detail\": {\n        \"ciKind\": \"assembly-edge\",\n        \"parentItemId\": \"a02g8000000Ab01EAC\",\n        \"childItemId\": \"a02g8000000Ab20EAC\",\n        \"childItemRevisionId\": \"a0Ag8000000Ab41EAC\",\n        \"quantity\": 4,\n        \"findNumber\": 10\n      },\n      \"provenance\": \"claiming\",\n      \"governingTimestamp\": \"2026-04-05T17:22:03.518Z\",\n      \"sourceId\": \"a1Cg8000000AbCeEAK\",\n      \"isClaimed\": true,\n      \"isExcluded\": false,\n      \"isReplaced\": false,\n      \"isEditable\": true,\n      \"childRows\": []\n    },\n    {\n      \"edgeId\": \"a1Eg8000000AbD2EAK\",\n      \"edgeKey\": \"a0Bg8000000Ab11EAC\",\n      \"detail\": {\n        \"ciKind\": \"assembly-edge\",\n        \"parentItemId\": \"a02g8000000Ab01EAC\",\n        \"childItemId\": \"a02g8000000Ab21EAC\",\n        \"childItemRevisionId\": \"a0Ag8000000Ab31EAC\",\n        \"quantity\": 3,\n        \"findNumber\": 20\n      },\n      \"provenance\": \"claiming\",\n      \"governingTimestamp\": \"2026-04-05T17:22:03.518Z\",\n      \"sourceId\": \"a1Cg8000000AbCeEAK\",\n      \"isClaimed\": true,\n      \"isExcluded\": false,\n      \"isReplaced\": false,\n      \"isEditable\": true,\n      \"childRows\": []\n    },\n    {\n      \"edgeId\": \"a1Eg8000000AbD9EAK\",\n      \"edgeKey\": \"new-a1Bg8000000AbCdEAK-a02g8000000Ab01EAC-a02g8000000Ab90EAC\",\n      \"detail\": {\n        \"ciKind\": \"assembly-edge\",\n        \"parentItemId\": \"a02g8000000Ab01EAC\",\n        \"childItemId\": \"a02g8000000Ab90EAC\",\n        \"childItemRevisionId\": \"a0Ag8000000Ab95EAC\",\n        \"quantity\": 1,\n        \"findNumber\": 90\n      },\n      \"provenance\": \"new\",\n      \"governingTimestamp\": \"2026-04-05T17:22:03.518Z\",\n      \"sourceId\": null,\n      \"isClaimed\": false,\n      \"isExcluded\": false,\n      \"isReplaced\": false,\n      \"isEditable\": true,\n      \"childRows\": []\n    },\n    {\n      \"edgeId\": \"a1Eg8000000AbD3EAK\",\n      \"edgeKey\": \"a0Bg8000000Ab12EAC\",\n      \"detail\": {\n        \"ciKind\": \"assembly-edge\",\n        \"parentItemId\": \"a02g8000000Ab01EAC\",\n        \"childItemId\": \"a02g8000000Ab22EAC\",\n        \"childItemRevisionId\": \"a0Ag8000000Ab61EAC\",\n        \"quantity\": 3,\n        \"findNumber\": 30\n      },\n      \"provenance\": \"new\",\n      \"governingTimestamp\": \"2026-04-05T17:22:03.518Z\",\n      \"sourceId\": null,\n      \"isClaimed\": false,\n      \"isExcluded\": false,\n      \"isReplaced\": false,\n      \"isEditable\": true,\n      \"childRows\": []\n    }\n  ],\n  \"warnings\": []\n}"
+										}
+									]
+								},
+								{
 									"name": "Read What a Source Supplies",
 									"id": "45f6dbcb-16f8-4f06-8c8f-218bd1cd433e",
 									"protocolProfileBehavior": {
@@ -9665,6 +9822,200 @@
 									"createdAt": "2026-09-04T13:53:21.000Z",
 									"updatedAt": "2026-09-04T13:54:22.000Z",
 									"uid": "46943044-04de9b29-f0cc-4ba0-8c37-7f489430e235"
+								},
+								{
+									"name": "🚧 MVP-30375 — Read a Baseline (who pinned each row; pin drift)",
+									"protocolProfileBehavior": {
+										"disableBodyPruning": true
+									},
+									"request": {
+										"method": "GET",
+										"header": [
+											{
+												"key": "Content-Type",
+												"value": "application/json"
+											},
+											{
+												"key": "Accept",
+												"value": "application/json"
+											}
+										],
+										"url": {
+											"raw": "{{propelApiUrl}}/v4/mbom/baselines/:baselineId/tree?flat=true",
+											"host": [
+												"{{propelApiUrl}}"
+											],
+											"path": [
+												"v4",
+												"mbom",
+												"baselines",
+												":baselineId",
+												"tree"
+											],
+											"query": [
+												{
+													"key": "flat",
+													"value": "true"
+												}
+											],
+											"variable": [
+												{
+													"key": "baselineId",
+													"value": "{{mbomBaselineId}}"
+												}
+											]
+										},
+										"description": "**🚧 Planned — MVP-30375, not yet implemented.** Same request as *Read a Baseline*.\n\n## Who pinned it, and when\n\nOn a row with `isPinned: true`, `pinnedById` / `pinnedAt` name the `CreatedById` / `CreatedDate` of the **payload revision that carries the row's current value**. That means who last revised the row: an `update` that changed only the quantity carries the pin forward and becomes the author. They are null on unpinned rows, and on every live tree read [assumes A-30375-4].\n\n## `BASELINE_PIN_DRIFT`\n\nThe cut stamps a count of pinned rows. It counts contained members only: no tombstones, no `nested` rows, and no edits hidden behind a pin. A re-derived read that finds a different number warns and still returns the rows. A baseline cut before MVP-30375 has no count and **never** warns. The count itself is not returned; the cut response still carries only `memberCount` [assumes A-30375-3, A-30375-5].\n\n**Setup for the drift example (needs fixture):** cut a baseline over a branch with one pinned claim. Then clear that pin in the **same whole second** as the cut, which is the same narrow window `BASELINE_PROVENANCE_DRIFT` has. Two ways to clear it: MVP-30378's `set-revision` with `trackChildRevision: true`, or a direct data edit. A convert-to-native would also move the claim count.\n\n**Today** the rows carry none of the four fields, and `BASELINE_PIN_DRIFT` is never raised."
+									},
+									"response": [
+										{
+											"name": "🚧 expected once MVP-30375 ships",
+											"originalRequest": {
+												"method": "GET",
+												"header": [
+													{
+														"key": "Content-Type",
+														"value": "application/json"
+													}
+												],
+												"url": {
+													"raw": "{{propelApiUrl}}/v4/mbom/baselines/:baselineId/tree?flat=true",
+													"host": [
+														"{{propelApiUrl}}"
+													],
+													"path": [
+														"v4",
+														"mbom",
+														"baselines",
+														":baselineId",
+														"tree"
+													],
+													"query": [
+														{
+															"key": "flat",
+															"value": "true"
+														}
+													],
+													"variable": [
+														{
+															"key": "baselineId",
+															"value": "a1Fg8000000AbE1EAK"
+														}
+													]
+												}
+											},
+											"status": "OK",
+											"code": 200,
+											"_postman_previewlanguage": "json",
+											"header": [
+												{
+													"key": "Content-Type",
+													"value": "application/json"
+												}
+											],
+											"cookie": [],
+											"responseTime": null,
+											"body": "{\n  \"baselineId\": \"a1Fg8000000AbE1EAK\",\n  \"label\": \"Pilot build 1\",\n  \"resolutionTimePoint\": \"2026-04-06T14:31:02.000Z\",\n  \"rows\": [\n    {\n      \"edgeId\": null,\n      \"edgeKey\": null,\n      \"detail\": {\n        \"ciKind\": \"assembly-edge\",\n        \"parentItemId\": \"a02g8000000Ab01EAC\",\n        \"childItemId\": \"a02g8000000Ab20EAC\",\n        \"childItemRevisionId\": \"a0Ag8000000Ab41EAC\",\n        \"quantity\": 4,\n        \"findNumber\": 10\n      },\n      \"provenance\": \"claiming\",\n      \"governingTimestamp\": \"2026-04-06T14:31:02.000Z\",\n      \"sourceId\": \"a1Cg8000000AbCeEAK\",\n      \"isClaimed\": true,\n      \"isExcluded\": false,\n      \"isReplaced\": false,\n      \"isEditable\": true,\n      \"isPinned\": true,\n      \"wasClaimed\": false,\n      \"pinnedById\": \"005g8000000AbZ1AAK\",\n      \"pinnedAt\": \"2026-04-05T17:22:04.000Z\",\n      \"childRows\": []\n    }\n  ],\n  \"warnings\": []\n}"
+										},
+										{
+											"name": "🚧 expected once MVP-30375 ships — pin drift",
+											"originalRequest": {
+												"method": "GET",
+												"header": [
+													{
+														"key": "Content-Type",
+														"value": "application/json"
+													}
+												],
+												"url": {
+													"raw": "{{propelApiUrl}}/v4/mbom/baselines/:baselineId/tree?flat=true",
+													"host": [
+														"{{propelApiUrl}}"
+													],
+													"path": [
+														"v4",
+														"mbom",
+														"baselines",
+														":baselineId",
+														"tree"
+													],
+													"query": [
+														{
+															"key": "flat",
+															"value": "true"
+														}
+													],
+													"variable": [
+														{
+															"key": "baselineId",
+															"value": "a1Fg8000000AbE1EAK"
+														}
+													]
+												}
+											},
+											"status": "OK",
+											"code": 200,
+											"_postman_previewlanguage": "json",
+											"header": [
+												{
+													"key": "Content-Type",
+													"value": "application/json"
+												}
+											],
+											"cookie": [],
+											"responseTime": null,
+											"body": "{\n  \"baselineId\": \"a1Fg8000000AbE1EAK\",\n  \"label\": \"Pilot build 1\",\n  \"resolutionTimePoint\": \"2026-04-06T14:31:02.000Z\",\n  \"rows\": [],\n  \"warnings\": [\n    {\n      \"warningCode\": \"BASELINE_PIN_DRIFT\",\n      \"message\": \"This baseline recorded a different number of rows with a chosen revision than it now re-derives. The rows shown are still the honest answer for the stored timepoint, but something the resolution depends on has changed since the baseline was taken.\",\n      \"itemId\": null,\n      \"itemRevisionIds\": [],\n      \"governingTimestamps\": []\n    }\n  ]\n}"
+										},
+										{
+											"name": "Today — no author fields, no pin-drift canary",
+											"originalRequest": {
+												"method": "GET",
+												"header": [
+													{
+														"key": "Content-Type",
+														"value": "application/json"
+													}
+												],
+												"url": {
+													"raw": "{{propelApiUrl}}/v4/mbom/baselines/:baselineId/tree?flat=true",
+													"host": [
+														"{{propelApiUrl}}"
+													],
+													"path": [
+														"v4",
+														"mbom",
+														"baselines",
+														":baselineId",
+														"tree"
+													],
+													"query": [
+														{
+															"key": "flat",
+															"value": "true"
+														}
+													],
+													"variable": [
+														{
+															"key": "baselineId",
+															"value": "a1Fg8000000AbE1EAK"
+														}
+													]
+												}
+											},
+											"status": "OK",
+											"code": 200,
+											"_postman_previewlanguage": "json",
+											"header": [
+												{
+													"key": "Content-Type",
+													"value": "application/json"
+												}
+											],
+											"cookie": [],
+											"responseTime": null,
+											"body": "{\n  \"baselineId\": \"a1Fg8000000AbE1EAK\",\n  \"label\": \"Pilot build 1\",\n  \"resolutionTimePoint\": \"2026-04-06T14:31:02.000Z\",\n  \"rows\": [\n    {\n      \"edgeId\": null,\n      \"edgeKey\": null,\n      \"detail\": {\n        \"ciKind\": \"assembly-edge\",\n        \"parentItemId\": \"a02g8000000Ab01EAC\",\n        \"childItemId\": \"a02g8000000Ab20EAC\",\n        \"childItemRevisionId\": \"a0Ag8000000Ab41EAC\",\n        \"quantity\": 4,\n        \"findNumber\": 10\n      },\n      \"provenance\": \"claiming\",\n      \"governingTimestamp\": \"2026-04-06T14:31:02.000Z\",\n      \"sourceId\": \"a1Cg8000000AbCeEAK\",\n      \"isClaimed\": true,\n      \"isExcluded\": false,\n      \"isReplaced\": false,\n      \"isEditable\": true,\n      \"childRows\": []\n    }\n  ],\n  \"warnings\": []\n}"
+										}
+									]
 								}
 							],
 							"id": "8928ab04-173f-417f-ab14-e5a7193af235",

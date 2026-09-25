@@ -96,6 +96,8 @@ info:
     **re-resolves** the branch at that timestamp. Two stored counts act as canaries if something the
     resolution depends on has moved since — `BASELINE_COUNT_DRIFT` for the row count, and
     `BASELINE_PROVENANCE_DRIFT` for how many of those rows are the branch's own claims.
+    (**🚧 Planned — MVP-30375, not yet implemented:** a third, `BASELINE_PIN_DRIFT`, for how many
+    rows hold an explicitly chosen revision.)
 
     ### 8. "Pull", not "merge"
 
@@ -172,6 +174,7 @@ info:
     | Ticket | Surface it adds or changes |
     |---|---|
     | [MVP-30214](https://propelplm.atlassian.net/browse/MVP-30214) | **No wire change.** A `replace` substitute no longer absorbs an unrelated line that shares its child item. Each occurrence of an item rendered at two revisions gets its own pinned structure. `AMBIGUOUS_CORRELATION` is narrowed to genuine duplicates. |
+    | [MVP-30375](https://propelplm.atlassian.net/browse/MVP-30375) | `TreeRow.isPinned` and `TreeRow.wasClaimed` on every tree read. `TreeRow.pinnedById` / `pinnedAt` on baseline rows. A `BASELINE_PIN_DRIFT` warning on the baseline read. |
 
   contact:
     name: Propel PLM Engineering
@@ -192,6 +195,7 @@ info:
     revisionChoice: MVP-30357
     # 🚧 planned, not yet implemented; see info.description "Planned changes".
     perOccurrencePins: MVP-30214
+    overrideDisclosure: MVP-30375
   x-design-doc: docs/architecture/mbom/mbom-pull-api.md
   x-demo-plan: docs/architecture/mbom/mbom-demo-test-plan.md
 
@@ -414,6 +418,11 @@ paths:
           > own row with its own `replaces-{branchId}-{supersededEdgeKey}-{newChildItemId}` key,
           > and the unrelated line survives. The ambiguous match is declined rather than refused,
           > so the read never answers `AMBIGUOUS_CORRELATION`. [assumes A-30214-3]
+        - **🚧 Planned — MVP-30375, not yet implemented: every row says whether its revision was a
+          choice.** `isPinned` is true exactly when the row stores a chosen child revision. A
+          clock-resolved row that happens to resolve to the same revision is `false`. `wasClaimed`
+          marks a `new` row that `convert-to-native` flipped from `claiming`. Both follow the
+          explicit decision, not the structural pin above. [assumes A-30375-1, A-30375-2]
         - **Unreachable rows are dropped.** A delta can name a parent item that is not in the tree —
           a subassembly whose item had nothing released at T_R drops out, and a claim beneath it
           survives the overlay as a row with an absent parent. This read walks down from the root and
@@ -461,6 +470,9 @@ paths:
                 pinnedClaim:
                   summary: A claim pinned to another revision — its structure nested beneath, and a hidden edit warned
                   $ref: '#/components/examples/BranchTreePinnedClaim'
+                overrideBadges:
+                  summary: '🚧 MVP-30375 (planned) — isPinned / wasClaimed badges'
+                  $ref: '#/components/examples/BranchTreeOverrideBadges'
         '400':
           description: |
             `ASOF_INVALID` — `asOf` could not be parsed. `ASOF_IN_FUTURE` — `asOf` is later than now;
@@ -1029,6 +1041,10 @@ paths:
           revision's `nested` structure beneath it and the source's lines suppressed, just as the
           branch read rendered it at the cut (MVP-30357). Before that, a baseline recorded the pin
           over the source revision's children.
+        - **🚧 Planned — MVP-30375, not yet implemented: pinned rows name who pinned them.** A row
+          with `isPinned: true` carries `pinnedById` and `pinnedAt`, taken from the payload
+          revision that carries its current value. The branch read leaves both null.
+          [assumes A-30375-4]
 
         ## The drift canaries
 
@@ -1036,6 +1052,7 @@ paths:
         |---|---|
         | `BASELINE_COUNT_DRIFT` | the baseline re-derived a **different number of rows** than its cut recorded — a corrected release date, an edit to an already-released BOM |
         | `BASELINE_PROVENANCE_DRIFT` | the same rows came back with a **different number of them `claiming`** — a claim severed or added since the cut. The row count cannot see this, because severing one moves no row |
+        | `BASELINE_PIN_DRIFT` | **🚧 Planned — MVP-30375, not yet implemented.** The same rows came back with a **different number of them explicitly pinned** (`isPinned`). A revision decision moved where neither the row count nor the claim count did. [assumes A-30375-5] |
 
         Both **warn rather than throw**: the rows returned are still the honest answer for the
         stored timepoint. Each comparison is skipped when the cut never recorded its counter, so a
@@ -1062,6 +1079,12 @@ paths:
                 drifted:
                   summary: Count drift after a direct edit to an already-released eBOM
                   $ref: '#/components/examples/BaselineTreeDrift'
+                pinnedAuthor:
+                  summary: '🚧 MVP-30375 (planned) — who pinned each row, and when'
+                  $ref: '#/components/examples/BaselineTreePinnedAuthor'
+                pinDrift:
+                  summary: '🚧 MVP-30375 (planned) — BASELINE_PIN_DRIFT'
+                  $ref: '#/components/examples/BaselineTreePinDrift'
         '400':
           description: '`INVALID_REQUEST` — `asOf` was supplied. A baseline is already resolved.'
           content:
@@ -2108,6 +2131,58 @@ components:
 
             Defaults to `false`. Populated on baseline rows too, where — because a baseline
             forwards drift warnings only — it is the sole signal of the collapse.
+        isPinned:
+          type: boolean
+          x-planned: { ticket: MVP-30375, assumptions: [A-30375-1] }
+          description: |
+            **🚧 Planned — MVP-30375, not yet implemented.** True when this row stores a child
+            revision somebody **chose**: an `add` or `replace` that sent `childItemRevisionId`, a
+            `claim` that pinned, or a `convert-to-native` that stamped. Never null.
+
+            It follows the explicit choice only, never what the row happens to render:
+
+            - A tracking claim or a floating row is `false`, even when it resolves to exactly the
+              revision a pin would have named.
+            - A pin **equal** to its source line's revision is `true`, although it renders no
+              pinned structure.
+            - A floating `new` row that renders a pinned structure because the read clock moved
+              past T_R is `false`: nobody chose it.
+            - Tombstones, `nested` rows and every row of a source tree are `false`.
+
+            The structural sense of "pinned" is a different signal: a row whose revision differs
+            from its source line's renders that revision's structure and can raise
+            `PINNED_SUBTREE_HIDES_EDITS`. Never derive one from the other. Populated on baseline
+            rows too.
+        wasClaimed:
+          type: boolean
+          x-planned: { ticket: MVP-30375, assumptions: [A-30375-2, A-30375-6] }
+          description: |
+            **🚧 Planned — MVP-30375, not yet implemented.** True on a `new` row that once claimed
+            a source row, and that `convert-to-native` flipped from `claiming` to `new`. The
+            provenance says the row is the branch's own now. This says it did not start that way,
+            which an audit of a released configuration needs to see. Never null.
+
+            A display fact about one row's history, deliberately **not** a provenance value.
+            Populated on baseline rows too, resolved at the baseline's own timepoint. Since
+            MVP-30357 every convert makes a stamp-or-track choice, so a `wasClaimed` row may or may
+            not be `isPinned`.
+        pinnedById:
+          oneOf: [{ $ref: '#/components/schemas/SalesforceId' }, { type: 'null' }]
+          x-planned: { ticket: MVP-30375, assumptions: [A-30375-4] }
+          description: |
+            **🚧 Planned — MVP-30375, not yet implemented.** On a **baseline** row with
+            `isPinned: true`, the user who created the payload revision carrying the row's current
+            value. Null on every live tree read, and on every unpinned row.
+
+            It names who last revised the row, not necessarily who first chose the revision: an
+            `update` that changed only the quantity carries the pin forward and becomes the author.
+            A live read is left null because its winning revision can still move.
+        pinnedAt:
+          oneOf: [{ type: string, format: date-time }, { type: 'null' }]
+          x-planned: { ticket: MVP-30375, assumptions: [A-30375-4] }
+          description: |
+            **🚧 Planned — MVP-30375, not yet implemented.** When that payload revision was
+            created. Null exactly where `pinnedById` is.
         childRows:
           type: array
           description: Populated in the nested shape only; **empty, never null**, in the flat shape.
@@ -2125,9 +2200,20 @@ components:
       properties:
         warningCode:
           type: string
-          enum: [MIXED_REVISION, BASELINE_COUNT_DRIFT, BASELINE_PROVENANCE_DRIFT, NESTED_CYCLE_PRUNED, PINNED_SUBTREE_HIDES_EDITS, MEMBER_ADD_COLLISION, COMPARE_ROOTS_DIFFER]
+          enum: [MIXED_REVISION, BASELINE_COUNT_DRIFT, BASELINE_PROVENANCE_DRIFT, NESTED_CYCLE_PRUNED, PINNED_SUBTREE_HIDES_EDITS, MEMBER_ADD_COLLISION, COMPARE_ROOTS_DIFFER, BASELINE_PIN_DRIFT]
           description: |
             The complete vocabulary.
+
+            | Value | Status |
+            |---|---|
+            | `MIXED_REVISION` | ✅ shipped |
+            | `BASELINE_COUNT_DRIFT` | ✅ shipped |
+            | `BASELINE_PROVENANCE_DRIFT` | ✅ shipped |
+            | `NESTED_CYCLE_PRUNED` | ✅ shipped |
+            | `PINNED_SUBTREE_HIDES_EDITS` | ✅ shipped |
+            | `MEMBER_ADD_COLLISION` | ✅ shipped |
+            | `COMPARE_ROOTS_DIFFER` | ✅ shipped |
+            | `BASELINE_PIN_DRIFT` | 🚧 MVP-30375 |
 
             - `MIXED_REVISION` — one item rendered at more than one revision in the same tree,
               because two clocks are in play. Legal and expected; warned, never blocked.
@@ -2164,6 +2250,13 @@ components:
               third, and the left is the side the caller addressed by path. It carries no `itemId`
               and no revisions: there is no single item it is about, and `left` / `right` already
               publish both roots.
+            - `BASELINE_PIN_DRIFT` — **🚧 Planned — MVP-30375, not yet implemented.** A baseline
+              re-derived a different number of **explicitly pinned** rows (`isPinned`) than its cut
+              recorded. The count covers contained members, excluding tombstones, `nested` rows and
+              edits hidden behind a pin. It catches a revision decision moving where no row count
+              or claim count moved. Baseline reads only. It carries no `itemId` and empty arrays,
+              like the other drift codes. A baseline cut before the ticket has no count and never
+              raises it. [assumes A-30375-5]
         message:
           type: string
           description: Human-readable, from a Custom Label. Translated; never parse it.
@@ -2429,6 +2522,10 @@ components:
             canary behind `BASELINE_COUNT_DRIFT`; `BASELINE_PROVENANCE_DRIFT` is fed by the
             `claiming`-row count recorded alongside it.
 
+            > **🚧 Planned — MVP-30375, not yet implemented.** The cut also records a count of
+            > explicitly pinned rows, feeding `BASELINE_PIN_DRIFT`. Like the `claiming` count, it is
+            > stored and **not** returned here: there is no `pinnedCount`. [assumes A-30375-3]
+
     BaselineTree:
       type: object
       required: [baselineId, resolutionTimePoint, rows, warnings]
@@ -2451,6 +2548,9 @@ components:
           description: |
             **Drift only** — `BASELINE_COUNT_DRIFT` and `BASELINE_PROVENANCE_DRIFT`. Mixed-revision
             and collision warnings from the underlying resolution are not forwarded.
+
+            > **🚧 Planned — MVP-30375, not yet implemented.** A third drift code,
+            > `BASELINE_PIN_DRIFT`. [assumes A-30375-5]
           items: { $ref: '#/components/schemas/TreeWarning' }
 
     # -------------------------------------------------- pull
@@ -3524,6 +3624,108 @@ components:
             itemRevisionIds: [a0Ag8000000Ab73EAC]
             governingTimestamps: []
 
+    BranchTreeOverrideBadges:
+      summary: '🚧 MVP-30375 (planned) — isPinned follows the choice, not the rendered revision'
+      description: |
+        **🚧 Planned — MVP-30375, not yet implemented.** Four rows:
+
+        1. A claim pinned to the **same** revision its source line resolves to. It is badged,
+           although it renders no pinned structure.
+        2. A tracking claim. It is unbadged, although it renders a released revision.
+        3. A floating `new` row. It is unbadged.
+        4. A converted row that stamped a revision. It is badged, and it carries `wasClaimed`.
+      x-planned: { ticket: MVP-30375, assumptions: [A-30375-1, A-30375-2, A-30375-4] }
+      value:
+        asOf: '2026-04-05T17:22:03.518Z'
+        rootRevisionId: a0Ag8000000Ab01EAC
+        sourceTimePoint: '2026-01-15T00:00:00.000Z'
+        rows:
+          - edgeId: a1Eg8000000AbD1EAK
+            edgeKey: a0Bg8000000Ab10EAC
+            detail:
+              ciKind: assembly-edge
+              parentItemId: a02g8000000Ab01EAC
+              childItemId: a02g8000000Ab20EAC
+              childItemRevisionId: a0Ag8000000Ab41EAC
+              quantity: 4
+              findNumber: 10
+            provenance: claiming
+            governingTimestamp: '2026-04-05T17:22:03.518Z'
+            sourceId: a1Cg8000000AbCeEAK
+            isClaimed: true
+            isExcluded: false
+            isReplaced: false
+            isEditable: true
+            isPinned: true
+            wasClaimed: false
+            pinnedById: null
+            pinnedAt: null
+            childRows: []
+          - edgeId: a1Eg8000000AbD2EAK
+            edgeKey: a0Bg8000000Ab11EAC
+            detail:
+              ciKind: assembly-edge
+              parentItemId: a02g8000000Ab01EAC
+              childItemId: a02g8000000Ab21EAC
+              childItemRevisionId: a0Ag8000000Ab31EAC
+              quantity: 3
+              findNumber: 20
+            provenance: claiming
+            governingTimestamp: '2026-04-05T17:22:03.518Z'
+            sourceId: a1Cg8000000AbCeEAK
+            isClaimed: true
+            isExcluded: false
+            isReplaced: false
+            isEditable: true
+            isPinned: false
+            wasClaimed: false
+            pinnedById: null
+            pinnedAt: null
+            childRows: []
+          - edgeId: a1Eg8000000AbD9EAK
+            edgeKey: 'new-a1Bg8000000AbCdEAK-a02g8000000Ab01EAC-a02g8000000Ab90EAC'
+            detail:
+              ciKind: assembly-edge
+              parentItemId: a02g8000000Ab01EAC
+              childItemId: a02g8000000Ab90EAC
+              childItemRevisionId: a0Ag8000000Ab95EAC
+              quantity: 1
+              findNumber: 90
+            provenance: new
+            governingTimestamp: '2026-04-05T17:22:03.518Z'
+            sourceId: null
+            isClaimed: false
+            isExcluded: false
+            isReplaced: false
+            isEditable: true
+            isPinned: false
+            wasClaimed: false
+            pinnedById: null
+            pinnedAt: null
+            childRows: []
+          - edgeId: a1Eg8000000AbD3EAK
+            edgeKey: a0Bg8000000Ab12EAC
+            detail:
+              ciKind: assembly-edge
+              parentItemId: a02g8000000Ab01EAC
+              childItemId: a02g8000000Ab22EAC
+              childItemRevisionId: a0Ag8000000Ab61EAC
+              quantity: 3
+              findNumber: 30
+            provenance: new
+            governingTimestamp: '2026-04-05T17:22:03.518Z'
+            sourceId: null
+            isClaimed: false
+            isExcluded: false
+            isReplaced: false
+            isEditable: true
+            isPinned: true
+            wasClaimed: true
+            pinnedById: null
+            pinnedAt: null
+            childRows: []
+        warnings: []
+
     SourceTree:
       value:
         asOf: '2026-04-05T17:22:03.518Z'
@@ -3716,6 +3918,59 @@ components:
         warnings:
           - warningCode: BASELINE_COUNT_DRIFT
             message: 'This baseline now resolves to a different number of rows than when it was cut. Something it depends on has changed. Cut recorded 4; this read resolved 5.'
+            itemId: null
+            itemRevisionIds: []
+            governingTimestamps: []
+
+    BaselineTreePinnedAuthor:
+      summary: '🚧 MVP-30375 (planned) — a pinned baseline row names who pinned it, and when'
+      description: |
+        **🚧 Planned — MVP-30375, not yet implemented.** `pinnedById` / `pinnedAt` come from the
+        payload revision that carries the row's current value.
+      x-planned: { ticket: MVP-30375, assumptions: [A-30375-4] }
+      value:
+        baselineId: a1Fg8000000AbE1EAK
+        label: Pilot build 1
+        resolutionTimePoint: '2026-04-06T14:31:02.000Z'
+        rows:
+          - edgeId: null
+            edgeKey: null
+            detail:
+              ciKind: assembly-edge
+              parentItemId: a02g8000000Ab01EAC
+              childItemId: a02g8000000Ab20EAC
+              childItemRevisionId: a0Ag8000000Ab41EAC
+              quantity: 4
+              findNumber: 10
+            provenance: claiming
+            governingTimestamp: '2026-04-06T14:31:02.000Z'
+            sourceId: a1Cg8000000AbCeEAK
+            isClaimed: true
+            isExcluded: false
+            isReplaced: false
+            isEditable: true
+            isPinned: true
+            wasClaimed: false
+            pinnedById: 005g8000000AbZ1AAK
+            pinnedAt: '2026-04-05T17:22:04.000Z'
+            childRows: []
+        warnings: []
+
+    BaselineTreePinDrift:
+      summary: '🚧 MVP-30375 (planned) — BASELINE_PIN_DRIFT'
+      description: |
+        **🚧 Planned — MVP-30375, not yet implemented.** The cut recorded one pinned row. The
+        re-derived read finds none, while the row and claim counts still match. `rows` is omitted
+        here.
+      x-planned: { ticket: MVP-30375, assumptions: [A-30375-5] }
+      value:
+        baselineId: a1Fg8000000AbE1EAK
+        label: Pilot build 1
+        resolutionTimePoint: '2026-04-06T14:31:02.000Z'
+        rows: []
+        warnings:
+          - warningCode: BASELINE_PIN_DRIFT
+            message: 'This baseline recorded a different number of rows with a chosen revision than it now re-derives. The rows shown are still the honest answer for the stored timepoint, but something the resolution depends on has changed since the baseline was taken.'
             itemId: null
             itemRevisionIds: []
             governingTimestamps: []
