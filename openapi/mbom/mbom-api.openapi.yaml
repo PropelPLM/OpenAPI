@@ -150,6 +150,29 @@ info:
     There is **no `branchId` path segment on the source endpoints**: a source already names its
     owning branch. `branchId` still appears in the pull-preview *body*, denormalised for display.
 
+    ---
+
+    ## Planned changes (not yet implemented)
+
+    This version of the contract also describes tickets that are **designed but not built**, so
+    their test cases can be written ahead of the code. Nothing below is live yet:
+
+    - Every planned operation, schema, property or parameter carries
+      `x-planned: { ticket, assumptions }`, and its description opens with
+      **🚧 Planned — MVP-xxxxx, not yet implemented.**
+    - A planned value added to an existing enum is listed in the enum. The enum's description
+      has a `Value | Status` table saying which values are planned.
+    - Behaviour changes to existing elements are called out inline with the same banner.
+    - Where a ticket left a design question open, the answer assumed here is recorded in the
+      assumptions ledger, `docs/architecture/cm/cm-api-planned-assumptions.md` (PLM repo), under
+      an ID like `A-30378-2`. Each passage that depends on an answer cites its ID.
+
+    When a ticket ships, remove its markers: grep for its key.
+
+    | Ticket | Surface it adds or changes |
+    |---|---|
+    | [MVP-30214](https://propelplm.atlassian.net/browse/MVP-30214) | **No wire change.** A `replace` substitute no longer absorbs an unrelated line that shares its child item. Each occurrence of an item rendered at two revisions gets its own pinned structure. `AMBIGUOUS_CORRELATION` is narrowed to genuine duplicates. |
+
   contact:
     name: Propel PLM Engineering
   license:
@@ -167,6 +190,8 @@ info:
     comparison: MVP-30296
     vocabularyRename: MVP-30309
     revisionChoice: MVP-30357
+    # 🚧 planned, not yet implemented; see info.description "Planned changes".
+    perOccurrencePins: MVP-30214
   x-design-doc: docs/architecture/mbom/mbom-pull-api.md
   x-demo-plan: docs/architecture/mbom/mbom-demo-test-plan.md
 
@@ -371,6 +396,24 @@ paths:
           rather than failing. (When one item is rendered at two different revisions in the same
           tree, it keeps the source's lines under both occurrences and is flagged
           `MIXED_REVISION` instead — per-occurrence structure is not built yet.)
+
+          > **🚧 Planned — MVP-30214, not yet implemented.** Each occurrence gets its own
+          > structure. An occurrence pinned to another revision renders that revision's `nested`
+          > rows beneath it, and an unpinned occurrence keeps the source's lines. The
+          > hidden-edit check runs per occurrence, and `MIXED_REVISION` still fires, never
+          > blocking. A branch `add` under such an item appears under **both** occurrences, with
+          > no warning of its own, and survives the parent advancing to a newer revision. No
+          > field is added to the row: occurrences are told apart by `edgeKey` and
+          > `detail.parentItemId` as today. [assumes A-30214-1, A-30214-4]
+        - **A substitute can swallow an unrelated line (known defect).** When a `replace`
+          substitute's child item also has its own, unrelated eBOM line under the same parent at
+          a different find number, the two are merged into one row: one line disappears, and the
+          survivor carries the other line's `edgeKey`.
+
+          > **🚧 Planned — MVP-30214, not yet implemented.** Both render. The substitute is its
+          > own row with its own `replaces-{branchId}-{supersededEdgeKey}-{newChildItemId}` key,
+          > and the unrelated line survives. The ambiguous match is declined rather than refused,
+          > so the read never answers `AMBIGUOUS_CORRELATION`. [assumes A-30214-3]
         - **Unreachable rows are dropped.** A delta can name a parent item that is not in the tree —
           a subassembly whose item had nothing released at T_R drops out, and a claim beneath it
           survives the overlay as a row with an absent parent. This read walks down from the root and
@@ -1072,6 +1115,21 @@ paths:
         `Secondary_Unique_Key__c` rather than `Find_Number__c` because find-number uniqueness is org
         configuration, and a key built on it would give two orgs with identical data different diffs.
 
+        The key is **not unique** on one side when a parent item renders at two revisions in the
+        same tree. `ItemCloneBatch` preserves `Secondary_Unique_Key__c`, so both revisions' copies
+        of a line share one key. Where that happens today, the pull answers
+        `AMBIGUOUS_CORRELATION` (422), and the message calls it a known limitation. (A pinned
+        occurrence does not reach it yet, because a pin on one of two occurrences is not rendered;
+        see the branch tree read.)
+
+        > **🚧 Planned — MVP-30214, not yet implemented.** Same-side edges are also told apart by
+        > their **parent revision**, so a pull or comparison over a doubly-rendered parent
+        > completes. The parent revision separates same-side edges only. Cross-side matching still
+        > joins a branch edge to its source counterpart across a parent revision advance.
+        > `AMBIGUOUS_CORRELATION` stays, narrowed to genuine duplicates: the same parent revision,
+        > child item and secondary unique key. There is still no tie-break on find number.
+        > [assumes A-30214-2]
+
         ## The two sides are deliberately asymmetric
 
         - **current** — the branch resolved at the accepted T_R, *with* its own deltas overlaid.
@@ -1438,6 +1496,10 @@ paths:
         parent *item* does not move when its revision does, so the key survives the BOM clone a
         revision advance performs. Two edges on **one side** sharing a key is
         `AMBIGUOUS_CORRELATION` (422) rather than a guess.
+
+        > **🚧 Planned — MVP-30214, not yet implemented.** Same-side edges are also told apart by
+        > parent revision, so a side that renders one parent item at two revisions compares
+        > cleanly. `AMBIGUOUS_CORRELATION` is kept for genuine duplicate lines. [assumes A-30214-2]
 
         ### Exclusion tombstones are filtered out before the join
 
@@ -1996,6 +2058,11 @@ components:
             The `add` prefix was `local-` before MVP-30309. Keys minted before the rename keep the
             old prefix — an edge key is identity and is never re-stamped — so treat the key as
             opaque and never parse the prefix.
+
+            > **🚧 Planned — MVP-30214, not yet implemented.** A substitute always carries its own
+            > `replaces-…` key. Today, a substitute whose child item already has its own line
+            > under the same parent is merged into that line's row and shows that line's key; see
+            > the branch tree read. [assumes A-30214-3]
           examples: ['a0Bg8000000Ab10EAC']
         detail:
           $ref: '#/components/schemas/AssemblyEdgeDetail'
@@ -2064,6 +2131,8 @@ components:
 
             - `MIXED_REVISION` — one item rendered at more than one revision in the same tree,
               because two clocks are in play. Legal and expected; warned, never blocked.
+              **🚧 Planned — MVP-30214, not yet implemented:** still raised, and still never
+              blocking, once each occurrence renders its own pinned structure. [assumes A-30214-1]
             - `BASELINE_COUNT_DRIFT` — a baseline re-derived a different **row count** than its cut
               recorded.
             - `BASELINE_PROVENANCE_DRIFT` — a baseline re-derived a different number of **`claiming`**
@@ -3183,6 +3252,11 @@ components:
         | `AMBIGUOUS_CORRELATION` | two edges on the **same side** of the diff share a correlation key, so which upstream line matches which branch line cannot be determined — no branch state the caller can reach will fix it |
         | `REVISION_CHOICE_REQUIRED` | *commit only* — a `convert-to-native` decision carried neither or both of `childItemRevisionId` and `trackChildRevision: true` |
         | `REVISION_ITEM_MISMATCH` | *commit only* — a `convert-to-native` decision's `childItemRevisionId` is not a revision of the row's child item |
+
+        > **🚧 Planned — MVP-30214, not yet implemented.** `AMBIGUOUS_CORRELATION` is no longer
+        > raised merely because a parent item renders at two revisions in one tree. It is raised
+        > only for a genuine duplicate: the same parent revision, child item and secondary unique
+        > key. [assumes A-30214-2]
       content:
         application/json:
           schema: { $ref: '#/components/schemas/RestError' }
@@ -3236,6 +3310,10 @@ components:
         `current side` is the **left** side and `candidate side` is the **right** one. The message
         is shared with pull-preview, which is the surface that vocabulary was written for; switch on
         `code`, and read the ids rather than the nouns.
+
+        > **🚧 Planned — MVP-30214, not yet implemented.** Narrowed to genuine duplicates, as on the
+        > pull. A side rendering one parent item at two revisions no longer raises it.
+        > [assumes A-30214-2]
 
         A comparison always reports a cycle as **`CYCLE_DETECTED`**, never as the traversal's own
         `EBOM_CYCLE`: the two mean the same thing to a caller and are both 422, and carrying the
