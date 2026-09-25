@@ -9627,6 +9627,470 @@
 									"uid": "46943044-9760908d-3dee-4358-ae54-5eca2ed30a2e"
 								},
 								{
+									"name": "🚧 MVP-30378 — set-revision — change or clear a stored revision",
+									"protocolProfileBehavior": {
+										"disableBodyPruning": true
+									},
+									"request": {
+										"method": "POST",
+										"header": [
+											{
+												"key": "Content-Type",
+												"value": "application/json"
+											},
+											{
+												"key": "Accept",
+												"value": "application/json"
+											}
+										],
+										"body": {
+											"mode": "raw",
+											"raw": "{\n  \"operations\": [\n    {\n      \"op\": \"set-revision\",\n      \"clientRef\": \"take-rev-2\",\n      \"assemblyCiId\": \"{{mbomAssemblyCiId}}\",\n      \"childItemRevisionId\": \"{{mbomPinRevisionId}}\"\n    }\n  ]\n}",
+											"options": {
+												"raw": {
+													"language": "json"
+												}
+											}
+										},
+										"url": {
+											"raw": "{{propelApiUrl}}/v4/mbom/branches/:branchId/deltas",
+											"host": [
+												"{{propelApiUrl}}"
+											],
+											"path": [
+												"v4",
+												"mbom",
+												"branches",
+												":branchId",
+												"deltas"
+											],
+											"variable": [
+												{
+													"key": "branchId",
+													"value": "{{mbomBranchId}}"
+												}
+											]
+										},
+										"description": "**🚧 Planned — MVP-30378, not yet implemented.**\n\nOnce a row stores a child revision, nothing can change it today except `revert`, which also drops the branch's quantity and find number. `set-revision` changes only the revision.\n\n## Fields\n\n| Field | Required | Description |\n| --- | --- | --- |\n| `assemblyCiId` | one of | The branch-owned edge. It also finds a row hidden behind a pin. |\n| `ebomAssemblyId` | one of | The legacy line. On a `base` row the answer is `CLAIM_REQUIRED`. It never finds a hidden row. |\n| `childItemRevisionId` | **exactly one of these two** | **Set or change** the pin. It must be a revision of the row's own child item, or `REVISION_ITEM_MISMATCH`. |\n| `trackChildRevision` | | `true` **clears** the pin. |\n\nClearing is spelled `trackChildRevision: true`, not a null `childItemRevisionId` [assumes A-30378-2].\n\n## What clearing means depends on the row\n\n- A cleared **claim** becomes a *tracking claim*. It renders its source line's revision at **T_R**, does **not** pick up a newer release on read, and moves when a pull accepts a newer source.\n- A cleared **`new` row or substitute** floats at **`asOf`**. The next read picks up a newer release.\n\n## Structure follows the pin\n\n- Setting a pin **different** from the source line's revision renders that revision's structure beneath the row as read-only `nested` rows. Edits there may then be hidden (`PINNED_SUBTREE_HIDES_EDITS`).\n- Clearing it, or setting it back to the source line's revision, restores the source's lines, and any edits it hid render again.\n\n## Also\n\n- It always appends a new `CI_Rev__c` and never edits a Draft in place. `forked` is always null.\n- Sending the value the row already stores succeeds and writes nothing [assumes A-30378-8].\n- It is refused in this order: `INVALID_REQUEST` (no id) → `REVISION_CHOICE_REQUIRED` → `NOT_FOUND` → `NOT_EDITABLE` (nested) → `NOT_SUPPLIED` (tombstone) → `CLAIM_REQUIRED` (`base`) → `REVISION_ITEM_MISMATCH`. A past `asOf` is tolerated, as on `update` [assumes A-30378-9].\n- `convert-to-native` can also re-stamp or clear a revision, but it severs the source tie. `set-revision` is the non-severing path [assumes A-30378-7].\n\n**Today:** `400 INVALID_REQUEST`, unknown op."
+									},
+									"response": [
+										{
+											"name": "🚧 expected once MVP-30378 ships",
+											"originalRequest": {
+												"method": "POST",
+												"header": [
+													{
+														"key": "Content-Type",
+														"value": "application/json"
+													}
+												],
+												"body": {
+													"mode": "raw",
+													"raw": "{\n  \"operations\": [\n    {\n      \"op\": \"set-revision\",\n      \"clientRef\": \"take-rev-2\",\n      \"assemblyCiId\": \"a1Eg8000000AbD1EAK\",\n      \"childItemRevisionId\": \"a0Ag8000000Ab42EAC\"\n    }\n  ]\n}",
+													"options": {
+														"raw": {
+															"language": "json"
+														}
+													}
+												},
+												"url": {
+													"raw": "{{propelApiUrl}}/v4/mbom/branches/:branchId/deltas",
+													"host": [
+														"{{propelApiUrl}}"
+													],
+													"path": [
+														"v4",
+														"mbom",
+														"branches",
+														":branchId",
+														"deltas"
+													],
+													"variable": [
+														{
+															"key": "branchId",
+															"value": "a1Bg8000000AbCdEAK"
+														}
+													]
+												}
+											},
+											"status": "OK",
+											"code": 200,
+											"_postman_previewlanguage": "json",
+											"header": [
+												{
+													"key": "Content-Type",
+													"value": "application/json"
+												}
+											],
+											"cookie": [],
+											"responseTime": null,
+											"body": "{\n  \"branchId\": \"a1Bg8000000AbCdEAK\",\n  \"atomic\": true,\n  \"asOf\": \"2026-04-06T15:10:00.000Z\",\n  \"applied\": 1,\n  \"failed\": 0,\n  \"results\": [\n    {\n      \"index\": 0,\n      \"clientRef\": \"take-rev-2\",\n      \"op\": \"set-revision\",\n      \"success\": true,\n      \"errorCode\": null,\n      \"message\": null,\n      \"ciId\": \"a1Gg8000000AbF1EAK\",\n      \"edgeId\": \"a1Eg8000000AbD1EAK\",\n      \"forked\": null\n    }\n  ]\n}"
+										},
+										{
+											"name": "🚧 expected once MVP-30378 ships — cleared",
+											"originalRequest": {
+												"method": "POST",
+												"header": [
+													{
+														"key": "Content-Type",
+														"value": "application/json"
+													}
+												],
+												"body": {
+													"mode": "raw",
+													"raw": "{\n  \"operations\": [\n    {\n      \"op\": \"set-revision\",\n      \"clientRef\": \"stop-pinning\",\n      \"assemblyCiId\": \"a1Eg8000000AbD1EAK\",\n      \"trackChildRevision\": true\n    }\n  ]\n}",
+													"options": {
+														"raw": {
+															"language": "json"
+														}
+													}
+												},
+												"url": {
+													"raw": "{{propelApiUrl}}/v4/mbom/branches/:branchId/deltas",
+													"host": [
+														"{{propelApiUrl}}"
+													],
+													"path": [
+														"v4",
+														"mbom",
+														"branches",
+														":branchId",
+														"deltas"
+													],
+													"variable": [
+														{
+															"key": "branchId",
+															"value": "a1Bg8000000AbCdEAK"
+														}
+													]
+												}
+											},
+											"status": "OK",
+											"code": 200,
+											"_postman_previewlanguage": "json",
+											"header": [
+												{
+													"key": "Content-Type",
+													"value": "application/json"
+												}
+											],
+											"cookie": [],
+											"responseTime": null,
+											"body": "{\n  \"branchId\": \"a1Bg8000000AbCdEAK\",\n  \"atomic\": true,\n  \"asOf\": \"2026-04-06T15:10:00.000Z\",\n  \"applied\": 1,\n  \"failed\": 0,\n  \"results\": [\n    {\n      \"index\": 0,\n      \"clientRef\": \"stop-pinning\",\n      \"op\": \"set-revision\",\n      \"success\": true,\n      \"errorCode\": null,\n      \"message\": null,\n      \"ciId\": \"a1Gg8000000AbF1EAK\",\n      \"edgeId\": \"a1Eg8000000AbD1EAK\",\n      \"forked\": null\n    }\n  ]\n}"
+										},
+										{
+											"name": "🚧 expected once MVP-30378 ships — no choice",
+											"originalRequest": {
+												"method": "POST",
+												"header": [
+													{
+														"key": "Content-Type",
+														"value": "application/json"
+													}
+												],
+												"body": {
+													"mode": "raw",
+													"raw": "{\n  \"operations\": [\n    {\n      \"op\": \"set-revision\",\n      \"clientRef\": \"no-choice\",\n      \"assemblyCiId\": \"a1Eg8000000AbD1EAK\"\n    }\n  ]\n}",
+													"options": {
+														"raw": {
+															"language": "json"
+														}
+													}
+												},
+												"url": {
+													"raw": "{{propelApiUrl}}/v4/mbom/branches/:branchId/deltas",
+													"host": [
+														"{{propelApiUrl}}"
+													],
+													"path": [
+														"v4",
+														"mbom",
+														"branches",
+														":branchId",
+														"deltas"
+													],
+													"variable": [
+														{
+															"key": "branchId",
+															"value": "a1Bg8000000AbCdEAK"
+														}
+													]
+												}
+											},
+											"status": "Unprocessable Entity",
+											"code": 422,
+											"_postman_previewlanguage": "json",
+											"header": [
+												{
+													"key": "Content-Type",
+													"value": "application/json"
+												}
+											],
+											"cookie": [],
+											"responseTime": null,
+											"body": "{\n  \"code\": \"REVISION_CHOICE_REQUIRED\",\n  \"message\": \"Choose how this line's part revision behaves: pick a specific revision to hold, or leave it to follow the timepoint in effect. (1 of 1 operations failed validation)\",\n  \"failures\": [\n    {\n      \"index\": 0,\n      \"clientRef\": \"no-choice\",\n      \"op\": \"set-revision\",\n      \"success\": false,\n      \"errorCode\": \"REVISION_CHOICE_REQUIRED\",\n      \"message\": \"Choose how this line's part revision behaves: pick a specific revision to hold, or leave it to follow the timepoint in effect. (set-revision requires childItemRevisionId or trackChildRevision: true)\",\n      \"ciId\": null,\n      \"edgeId\": null,\n      \"forked\": null\n    }\n  ]\n}"
+										},
+										{
+											"name": "🚧 expected once MVP-30378 ships — base row",
+											"originalRequest": {
+												"method": "POST",
+												"header": [
+													{
+														"key": "Content-Type",
+														"value": "application/json"
+													}
+												],
+												"body": {
+													"mode": "raw",
+													"raw": "{\n  \"operations\": [\n    {\n      \"op\": \"set-revision\",\n      \"clientRef\": \"not-owned\",\n      \"ebomAssemblyId\": \"a0Bg8000000Ab12EAC\",\n      \"childItemRevisionId\": \"a0Ag8000000Ab62EAC\"\n    }\n  ]\n}",
+													"options": {
+														"raw": {
+															"language": "json"
+														}
+													}
+												},
+												"url": {
+													"raw": "{{propelApiUrl}}/v4/mbom/branches/:branchId/deltas",
+													"host": [
+														"{{propelApiUrl}}"
+													],
+													"path": [
+														"v4",
+														"mbom",
+														"branches",
+														":branchId",
+														"deltas"
+													],
+													"variable": [
+														{
+															"key": "branchId",
+															"value": "a1Bg8000000AbCdEAK"
+														}
+													]
+												}
+											},
+											"status": "Conflict",
+											"code": 409,
+											"_postman_previewlanguage": "json",
+											"header": [
+												{
+													"key": "Content-Type",
+													"value": "application/json"
+												}
+											],
+											"cookie": [],
+											"responseTime": null,
+											"body": "{\n  \"code\": \"CLAIM_REQUIRED\",\n  \"message\": \"This row is supplied by the source and read-only. Claim it before editing. (1 of 1 operations failed validation)\",\n  \"failures\": [\n    {\n      \"index\": 0,\n      \"clientRef\": \"not-owned\",\n      \"op\": \"set-revision\",\n      \"success\": false,\n      \"errorCode\": \"CLAIM_REQUIRED\",\n      \"message\": \"This row is supplied by the source and read-only. Claim it before editing. (edge a0Bg8000000Ab12EAC)\",\n      \"ciId\": null,\n      \"edgeId\": null,\n      \"forked\": null\n    }\n  ]\n}"
+										},
+										{
+											"name": "Today — unknown op",
+											"originalRequest": {
+												"method": "POST",
+												"header": [
+													{
+														"key": "Content-Type",
+														"value": "application/json"
+													}
+												],
+												"body": {
+													"mode": "raw",
+													"raw": "{\n  \"operations\": [\n    {\n      \"op\": \"set-revision\",\n      \"clientRef\": \"take-rev-2\",\n      \"assemblyCiId\": \"a1Eg8000000AbD1EAK\",\n      \"childItemRevisionId\": \"a0Ag8000000Ab42EAC\"\n    }\n  ]\n}",
+													"options": {
+														"raw": {
+															"language": "json"
+														}
+													}
+												},
+												"url": {
+													"raw": "{{propelApiUrl}}/v4/mbom/branches/:branchId/deltas",
+													"host": [
+														"{{propelApiUrl}}"
+													],
+													"path": [
+														"v4",
+														"mbom",
+														"branches",
+														":branchId",
+														"deltas"
+													],
+													"variable": [
+														{
+															"key": "branchId",
+															"value": "a1Bg8000000AbCdEAK"
+														}
+													]
+												}
+											},
+											"status": "Bad Request",
+											"code": 400,
+											"_postman_previewlanguage": "json",
+											"header": [
+												{
+													"key": "Content-Type",
+													"value": "application/json"
+												}
+											],
+											"cookie": [],
+											"responseTime": null,
+											"body": "{\n  \"code\": \"INVALID_REQUEST\",\n  \"message\": \"That request could not be read. Check that the body is valid JSON and that every required value is supplied. (1 of 1 operations failed validation)\",\n  \"failures\": [\n    {\n      \"index\": 0,\n      \"clientRef\": \"take-rev-2\",\n      \"op\": \"set-revision\",\n      \"success\": false,\n      \"errorCode\": \"INVALID_REQUEST\",\n      \"message\": \"That request could not be read. Check that the body is valid JSON and that every required value is supplied. (unknown op set-revision)\",\n      \"ciId\": null,\n      \"edgeId\": null,\n      \"forked\": null\n    }\n  ]\n}"
+										}
+									]
+								},
+								{
+									"name": "🚧 MVP-30378 — update with childItemRevisionId — refused, use set-revision",
+									"protocolProfileBehavior": {
+										"disableBodyPruning": true
+									},
+									"request": {
+										"method": "POST",
+										"header": [
+											{
+												"key": "Content-Type",
+												"value": "application/json"
+											},
+											{
+												"key": "Accept",
+												"value": "application/json"
+											}
+										],
+										"body": {
+											"mode": "raw",
+											"raw": "{\n  \"operations\": [\n    {\n      \"op\": \"update\",\n      \"clientRef\": \"qty-and-rev\",\n      \"assemblyCiId\": \"{{mbomAssemblyCiId}}\",\n      \"quantity\": 5,\n      \"childItemRevisionId\": \"{{mbomPinRevisionId}}\"\n    }\n  ]\n}",
+											"options": {
+												"raw": {
+													"language": "json"
+												}
+											}
+										},
+										"url": {
+											"raw": "{{propelApiUrl}}/v4/mbom/branches/:branchId/deltas",
+											"host": [
+												"{{propelApiUrl}}"
+											],
+											"path": [
+												"v4",
+												"mbom",
+												"branches",
+												":branchId",
+												"deltas"
+											],
+											"variable": [
+												{
+													"key": "branchId",
+													"value": "{{mbomBranchId}}"
+												}
+											]
+										},
+										"description": "**🚧 Planned — MVP-30378, not yet implemented.**\n\nToday `update` silently **ignores** `childItemRevisionId`. It carries the stored revision forward and applies only the quantity, so a client that expected the revision to change gets a quiet no-op.\n\nOnce MVP-30378 ships, a non-null `childItemRevisionId` on a plain `update` is refused with `400 INVALID_REQUEST` naming `set-revision`. `trackChildRevision` on a plain `update` stays ignored. The exception is `update` with MVP-30377's `autoClaim`, whose rules are on that request [assumes A-30378-6].\n\n**Today:** `200`. The quantity is applied, and the revision is unchanged."
+									},
+									"response": [
+										{
+											"name": "🚧 expected once MVP-30378 ships",
+											"originalRequest": {
+												"method": "POST",
+												"header": [
+													{
+														"key": "Content-Type",
+														"value": "application/json"
+													}
+												],
+												"body": {
+													"mode": "raw",
+													"raw": "{\n  \"operations\": [\n    {\n      \"op\": \"update\",\n      \"clientRef\": \"qty-and-rev\",\n      \"assemblyCiId\": \"a1Eg8000000AbD1EAK\",\n      \"quantity\": 5,\n      \"childItemRevisionId\": \"a0Ag8000000Ab42EAC\"\n    }\n  ]\n}",
+													"options": {
+														"raw": {
+															"language": "json"
+														}
+													}
+												},
+												"url": {
+													"raw": "{{propelApiUrl}}/v4/mbom/branches/:branchId/deltas",
+													"host": [
+														"{{propelApiUrl}}"
+													],
+													"path": [
+														"v4",
+														"mbom",
+														"branches",
+														":branchId",
+														"deltas"
+													],
+													"variable": [
+														{
+															"key": "branchId",
+															"value": "a1Bg8000000AbCdEAK"
+														}
+													]
+												}
+											},
+											"status": "Bad Request",
+											"code": 400,
+											"_postman_previewlanguage": "json",
+											"header": [
+												{
+													"key": "Content-Type",
+													"value": "application/json"
+												}
+											],
+											"cookie": [],
+											"responseTime": null,
+											"body": "{\n  \"code\": \"INVALID_REQUEST\",\n  \"message\": \"That request could not be read. Check that the body is valid JSON and that every required value is supplied. (1 of 1 operations failed validation)\",\n  \"failures\": [\n    {\n      \"index\": 0,\n      \"clientRef\": \"qty-and-rev\",\n      \"op\": \"update\",\n      \"success\": false,\n      \"errorCode\": \"INVALID_REQUEST\",\n      \"message\": \"That request could not be read. Check that the body is valid JSON and that every required value is supplied. (update does not change a child revision; use set-revision)\",\n      \"ciId\": null,\n      \"edgeId\": null,\n      \"forked\": null\n    }\n  ]\n}"
+										},
+										{
+											"name": "Today — revision silently ignored",
+											"originalRequest": {
+												"method": "POST",
+												"header": [
+													{
+														"key": "Content-Type",
+														"value": "application/json"
+													}
+												],
+												"body": {
+													"mode": "raw",
+													"raw": "{\n  \"operations\": [\n    {\n      \"op\": \"update\",\n      \"clientRef\": \"qty-and-rev\",\n      \"assemblyCiId\": \"a1Eg8000000AbD1EAK\",\n      \"quantity\": 5,\n      \"childItemRevisionId\": \"a0Ag8000000Ab42EAC\"\n    }\n  ]\n}",
+													"options": {
+														"raw": {
+															"language": "json"
+														}
+													}
+												},
+												"url": {
+													"raw": "{{propelApiUrl}}/v4/mbom/branches/:branchId/deltas",
+													"host": [
+														"{{propelApiUrl}}"
+													],
+													"path": [
+														"v4",
+														"mbom",
+														"branches",
+														":branchId",
+														"deltas"
+													],
+													"variable": [
+														{
+															"key": "branchId",
+															"value": "a1Bg8000000AbCdEAK"
+														}
+													]
+												}
+											},
+											"status": "OK",
+											"code": 200,
+											"_postman_previewlanguage": "json",
+											"header": [
+												{
+													"key": "Content-Type",
+													"value": "application/json"
+												}
+											],
+											"cookie": [],
+											"responseTime": null,
+											"body": "{\n  \"branchId\": \"a1Bg8000000AbCdEAK\",\n  \"atomic\": true,\n  \"asOf\": \"2026-04-05T17:24:40.220Z\",\n  \"applied\": 1,\n  \"failed\": 0,\n  \"results\": [\n    {\n      \"index\": 0,\n      \"clientRef\": \"qty-and-rev\",\n      \"op\": \"update\",\n      \"success\": true,\n      \"errorCode\": null,\n      \"message\": null,\n      \"ciId\": \"a1Gg8000000AbF1EAK\",\n      \"edgeId\": \"a1Eg8000000AbD1EAK\",\n      \"forked\": false\n    }\n  ]\n}"
+										}
+									]
+								},
+								{
 									"name": "Mixed batch (atomic: false)",
 									"id": "295a71fa-066c-482e-8b8f-a54904d4cb9f",
 									"protocolProfileBehavior": {
@@ -10824,6 +11288,163 @@
 									"uid": "46943044-3d2fcaae-3d98-4995-9e2d-4bfa5590401b"
 								},
 								{
+									"name": "🚧 MVP-30378 — Preview a Pull (accept-source-revision offered)",
+									"protocolProfileBehavior": {
+										"disableBodyPruning": true
+									},
+									"request": {
+										"method": "GET",
+										"header": [
+											{
+												"key": "Content-Type",
+												"value": "application/json"
+											},
+											{
+												"key": "Accept",
+												"value": "application/json"
+											}
+										],
+										"url": {
+											"raw": "{{propelApiUrl}}/v4/mbom/sources/:sourceId/pull-preview?candidateRootRevisionId=&entriesLimit=200",
+											"host": [
+												"{{propelApiUrl}}"
+											],
+											"path": [
+												"v4",
+												"mbom",
+												"sources",
+												":sourceId",
+												"pull-preview"
+											],
+											"query": [
+												{
+													"key": "candidateRootRevisionId",
+													"value": ""
+												},
+												{
+													"key": "entriesLimit",
+													"value": "200"
+												}
+											],
+											"variable": [
+												{
+													"key": "sourceId",
+													"value": "{{mbomSourceId}}"
+												}
+											]
+										},
+										"description": "**🚧 Planned — MVP-30378, not yet implemented.** Same request as *Preview a Pull*.\n\n## Setup\n\n1. Claim Motor-002's line **pinned** to its current revision: `claim` with `childItemRevisionId`.\n2. Claim Bracket-005's line **tracking**: `claim` with `trackChildRevision: true`. Leave its quantity alone.\n3. Release a new Assy-100 revision that re-revs both children.\n\n## What to assert\n\n| Entry | Once MVP-30378 ships | Today |\n| --- | --- | --- |\n| Motor-002, `claim-retained`, `retargeted: true` | `availableActions: [accept-source-revision]`, `decision: informational`, `revisionAdvances: false` | `availableActions: []`, and no `revisionAdvances` |\n| Bracket-005, `claim-superseded` | `revisionAdvances: true` (it will render rev-4), `retargeted: null` | no `revisionAdvances` |\n| `summary.required` | 0: the accept is optional | 0 |\n\n- `revisionAdvances` is present on `claim-retained` and `claim-superseded` only, and null elsewhere. It is never true together with `retargeted`.\n- A `base` row's advance is still `member-version-advance`.\n- No new entry kind is added [assumes A-30378-3, A-30378-4, A-30378-10]."
+									},
+									"response": [
+										{
+											"name": "🚧 expected once MVP-30378 ships",
+											"originalRequest": {
+												"method": "GET",
+												"header": [
+													{
+														"key": "Content-Type",
+														"value": "application/json"
+													}
+												],
+												"url": {
+													"raw": "{{propelApiUrl}}/v4/mbom/sources/:sourceId/pull-preview?candidateRootRevisionId=&entriesLimit=200",
+													"host": [
+														"{{propelApiUrl}}"
+													],
+													"path": [
+														"v4",
+														"mbom",
+														"sources",
+														":sourceId",
+														"pull-preview"
+													],
+													"query": [
+														{
+															"key": "candidateRootRevisionId",
+															"value": ""
+														},
+														{
+															"key": "entriesLimit",
+															"value": "200"
+														}
+													],
+													"variable": [
+														{
+															"key": "sourceId",
+															"value": "a1Cg8000000AbCeEAK"
+														}
+													]
+												}
+											},
+											"status": "OK",
+											"code": 200,
+											"_postman_previewlanguage": "json",
+											"header": [
+												{
+													"key": "Content-Type",
+													"value": "application/json"
+												}
+											],
+											"cookie": [],
+											"responseTime": null,
+											"body": "{\n  \"sourceId\": \"a1Cg8000000AbCeEAK\",\n  \"branchId\": \"a1Bg8000000AbCdEAK\",\n  \"branchLabel\": \"MBOM-GDL\",\n  \"sourceType\": \"Ebom\",\n  \"currentSourceVersion\": {\n    \"sourceRevisionId\": \"a1Dg8000000AbCfEAK\",\n    \"rootItemRevisionId\": \"a0Ag8000000Ab01EAC\",\n    \"rootItemNumber\": \"Assy-100\",\n    \"rootRevisionLabel\": \"rev-1\",\n    \"resolutionTimestamp\": \"2026-01-15T00:00:00.000Z\",\n    \"acceptedAt\": \"2026-01-15T09:12:44.000Z\"\n  },\n  \"candidateSourceVersion\": {\n    \"sourceRevisionId\": null,\n    \"rootItemRevisionId\": \"a0Ag8000000Ab02EAC\",\n    \"rootItemNumber\": \"Assy-100\",\n    \"rootRevisionLabel\": \"rev-2\",\n    \"resolutionTimestamp\": \"2026-04-02T00:00:00.000Z\",\n    \"acceptedAt\": null\n  },\n  \"hasChanges\": true,\n  \"summary\": {\n    \"total\": 3,\n    \"informational\": 3,\n    \"required\": 0,\n    \"byKind\": {\n      \"source-version-advance\": 1,\n      \"claim-retained\": 1,\n      \"claim-superseded\": 1\n    }\n  },\n  \"entries\": [\n    {\n      \"entryId\": \"5c1e0a77f9b34d20\",\n      \"kind\": \"source-version-advance\",\n      \"decision\": \"informational\",\n      \"availableActions\": [],\n      \"retargeted\": null,\n      \"revisionAdvances\": null,\n      \"claimKind\": null,\n      \"message\": \"The source assembly moves to a newer released revision.\",\n      \"target\": {\n        \"ciKind\": \"source\",\n        \"edgeId\": null,\n        \"edgeKey\": null,\n        \"label\": \"Assy-100\",\n        \"path\": [\n          {\n            \"ciKind\": \"source\",\n            \"label\": \"Assy-100\",\n            \"edgeId\": null,\n            \"edgeKey\": null\n          }\n        ]\n      },\n      \"current\": null,\n      \"candidate\": null\n    },\n    {\n      \"entryId\": \"8a3e5f09c2d71b64\",\n      \"kind\": \"claim-retained\",\n      \"decision\": \"informational\",\n      \"availableActions\": [\n        \"accept-source-revision\"\n      ],\n      \"retargeted\": true,\n      \"revisionAdvances\": false,\n      \"claimKind\": \"claim\",\n      \"message\": \"Your change to this member is kept, and the newer revision's version of it is suppressed.\",\n      \"target\": {\n        \"ciKind\": \"assembly-edge\",\n        \"edgeId\": \"a1Eg8000000AbD1EAK\",\n        \"edgeKey\": \"a0Bg8000000Ab10EAC\",\n        \"label\": \"Motor-002\",\n        \"path\": [\n          {\n            \"ciKind\": \"source\",\n            \"label\": \"Assy-100\",\n            \"edgeId\": null,\n            \"edgeKey\": null\n          }\n        ]\n      },\n      \"current\": {\n        \"provenance\": \"claiming\",\n        \"governingClock\": \"branch\",\n        \"governingTimestamp\": \"2026-04-05T17:22:03.518Z\",\n        \"detail\": {\n          \"ciKind\": \"assembly-edge\",\n          \"parentItemId\": \"a02g8000000Ab01EAC\",\n          \"parentItemNumber\": \"Assy-100\",\n          \"childItemId\": \"a02g8000000Ab20EAC\",\n          \"childItemNumber\": \"Motor-002\",\n          \"childItemRevisionId\": \"a0Ag8000000Ab41EAC\",\n          \"childRevisionLabel\": \"rev-1\",\n          \"quantity\": 4,\n          \"findNumber\": 10\n        }\n      },\n      \"candidate\": {\n        \"provenance\": \"base\",\n        \"governingClock\": \"source\",\n        \"governingTimestamp\": \"2026-04-02T00:00:00.000Z\",\n        \"detail\": {\n          \"ciKind\": \"assembly-edge\",\n          \"parentItemId\": \"a02g8000000Ab01EAC\",\n          \"parentItemNumber\": \"Assy-100\",\n          \"childItemId\": \"a02g8000000Ab20EAC\",\n          \"childItemNumber\": \"Motor-002\",\n          \"childItemRevisionId\": \"a0Ag8000000Ab42EAC\",\n          \"childRevisionLabel\": \"rev-2\",\n          \"quantity\": 4,\n          \"findNumber\": 10\n        }\n      }\n    },\n    {\n      \"entryId\": \"3b91c7e0d5a2f846\",\n      \"kind\": \"claim-superseded\",\n      \"decision\": \"informational\",\n      \"availableActions\": [],\n      \"retargeted\": null,\n      \"revisionAdvances\": true,\n      \"claimKind\": \"claim\",\n      \"message\": \"The newer revision now matches your change to this member, so your change no longer alters anything.\",\n      \"target\": {\n        \"ciKind\": \"assembly-edge\",\n        \"edgeId\": \"a1Eg8000000AbD2EAK\",\n        \"edgeKey\": \"a0Bg8000000Ab11EAC\",\n        \"label\": \"Bracket-005\",\n        \"path\": [\n          {\n            \"ciKind\": \"source\",\n            \"label\": \"Assy-100\",\n            \"edgeId\": null,\n            \"edgeKey\": null\n          }\n        ]\n      },\n      \"current\": {\n        \"provenance\": \"claiming\",\n        \"governingClock\": \"branch\",\n        \"governingTimestamp\": \"2026-04-05T17:22:03.518Z\",\n        \"detail\": {\n          \"ciKind\": \"assembly-edge\",\n          \"parentItemId\": \"a02g8000000Ab01EAC\",\n          \"parentItemNumber\": \"Assy-100\",\n          \"childItemId\": \"a02g8000000Ab21EAC\",\n          \"childItemNumber\": \"Bracket-005\",\n          \"childItemRevisionId\": \"a0Ag8000000Ab31EAC\",\n          \"childRevisionLabel\": \"rev-3\",\n          \"quantity\": 2,\n          \"findNumber\": 20\n        }\n      },\n      \"candidate\": {\n        \"provenance\": \"base\",\n        \"governingClock\": \"source\",\n        \"governingTimestamp\": \"2026-04-02T00:00:00.000Z\",\n        \"detail\": {\n          \"ciKind\": \"assembly-edge\",\n          \"parentItemId\": \"a02g8000000Ab01EAC\",\n          \"parentItemNumber\": \"Assy-100\",\n          \"childItemId\": \"a02g8000000Ab21EAC\",\n          \"childItemNumber\": \"Bracket-005\",\n          \"childItemRevisionId\": \"a0Ag8000000Ab32EAC\",\n          \"childRevisionLabel\": \"rev-4\",\n          \"quantity\": 2,\n          \"findNumber\": 20\n        }\n      }\n    }\n  ],\n  \"warnings\": [],\n  \"truncated\": false,\n  \"entriesLimit\": 200,\n  \"diffFingerprint\": \"sha256:4c0d9e72b1a83f56\",\n  \"generatedAt\": \"2026-04-05T17:22:03.518Z\"\n}"
+										},
+										{
+											"name": "Today — no action on a retargeted pin, no revisionAdvances",
+											"originalRequest": {
+												"method": "GET",
+												"header": [
+													{
+														"key": "Content-Type",
+														"value": "application/json"
+													}
+												],
+												"url": {
+													"raw": "{{propelApiUrl}}/v4/mbom/sources/:sourceId/pull-preview?candidateRootRevisionId=&entriesLimit=200",
+													"host": [
+														"{{propelApiUrl}}"
+													],
+													"path": [
+														"v4",
+														"mbom",
+														"sources",
+														":sourceId",
+														"pull-preview"
+													],
+													"query": [
+														{
+															"key": "candidateRootRevisionId",
+															"value": ""
+														},
+														{
+															"key": "entriesLimit",
+															"value": "200"
+														}
+													],
+													"variable": [
+														{
+															"key": "sourceId",
+															"value": "a1Cg8000000AbCeEAK"
+														}
+													]
+												}
+											},
+											"status": "OK",
+											"code": 200,
+											"_postman_previewlanguage": "json",
+											"header": [
+												{
+													"key": "Content-Type",
+													"value": "application/json"
+												}
+											],
+											"cookie": [],
+											"responseTime": null,
+											"body": "{\n  \"sourceId\": \"a1Cg8000000AbCeEAK\",\n  \"branchId\": \"a1Bg8000000AbCdEAK\",\n  \"branchLabel\": \"MBOM-GDL\",\n  \"sourceType\": \"Ebom\",\n  \"currentSourceVersion\": {\n    \"sourceRevisionId\": \"a1Dg8000000AbCfEAK\",\n    \"rootItemRevisionId\": \"a0Ag8000000Ab01EAC\",\n    \"rootItemNumber\": \"Assy-100\",\n    \"rootRevisionLabel\": \"rev-1\",\n    \"resolutionTimestamp\": \"2026-01-15T00:00:00.000Z\",\n    \"acceptedAt\": \"2026-01-15T09:12:44.000Z\"\n  },\n  \"candidateSourceVersion\": {\n    \"sourceRevisionId\": null,\n    \"rootItemRevisionId\": \"a0Ag8000000Ab02EAC\",\n    \"rootItemNumber\": \"Assy-100\",\n    \"rootRevisionLabel\": \"rev-2\",\n    \"resolutionTimestamp\": \"2026-04-02T00:00:00.000Z\",\n    \"acceptedAt\": null\n  },\n  \"hasChanges\": true,\n  \"summary\": {\n    \"total\": 3,\n    \"informational\": 3,\n    \"required\": 0,\n    \"byKind\": {\n      \"source-version-advance\": 1,\n      \"claim-retained\": 1,\n      \"claim-superseded\": 1\n    }\n  },\n  \"entries\": [\n    {\n      \"entryId\": \"5c1e0a77f9b34d20\",\n      \"kind\": \"source-version-advance\",\n      \"decision\": \"informational\",\n      \"availableActions\": [],\n      \"retargeted\": null,\n      \"claimKind\": null,\n      \"message\": \"The source assembly moves to a newer released revision.\",\n      \"target\": {\n        \"ciKind\": \"source\",\n        \"edgeId\": null,\n        \"edgeKey\": null,\n        \"label\": \"Assy-100\",\n        \"path\": [\n          {\n            \"ciKind\": \"source\",\n            \"label\": \"Assy-100\",\n            \"edgeId\": null,\n            \"edgeKey\": null\n          }\n        ]\n      },\n      \"current\": null,\n      \"candidate\": null\n    },\n    {\n      \"entryId\": \"8a3e5f09c2d71b64\",\n      \"kind\": \"claim-retained\",\n      \"decision\": \"informational\",\n      \"availableActions\": [],\n      \"retargeted\": true,\n      \"claimKind\": \"claim\",\n      \"message\": \"Your change to this member is kept, and the newer revision's version of it is suppressed.\",\n      \"target\": {\n        \"ciKind\": \"assembly-edge\",\n        \"edgeId\": \"a1Eg8000000AbD1EAK\",\n        \"edgeKey\": \"a0Bg8000000Ab10EAC\",\n        \"label\": \"Motor-002\",\n        \"path\": [\n          {\n            \"ciKind\": \"source\",\n            \"label\": \"Assy-100\",\n            \"edgeId\": null,\n            \"edgeKey\": null\n          }\n        ]\n      },\n      \"current\": {\n        \"provenance\": \"claiming\",\n        \"governingClock\": \"branch\",\n        \"governingTimestamp\": \"2026-04-05T17:22:03.518Z\",\n        \"detail\": {\n          \"ciKind\": \"assembly-edge\",\n          \"parentItemId\": \"a02g8000000Ab01EAC\",\n          \"parentItemNumber\": \"Assy-100\",\n          \"childItemId\": \"a02g8000000Ab20EAC\",\n          \"childItemNumber\": \"Motor-002\",\n          \"childItemRevisionId\": \"a0Ag8000000Ab41EAC\",\n          \"childRevisionLabel\": \"rev-1\",\n          \"quantity\": 4,\n          \"findNumber\": 10\n        }\n      },\n      \"candidate\": {\n        \"provenance\": \"base\",\n        \"governingClock\": \"source\",\n        \"governingTimestamp\": \"2026-04-02T00:00:00.000Z\",\n        \"detail\": {\n          \"ciKind\": \"assembly-edge\",\n          \"parentItemId\": \"a02g8000000Ab01EAC\",\n          \"parentItemNumber\": \"Assy-100\",\n          \"childItemId\": \"a02g8000000Ab20EAC\",\n          \"childItemNumber\": \"Motor-002\",\n          \"childItemRevisionId\": \"a0Ag8000000Ab42EAC\",\n          \"childRevisionLabel\": \"rev-2\",\n          \"quantity\": 4,\n          \"findNumber\": 10\n        }\n      }\n    },\n    {\n      \"entryId\": \"3b91c7e0d5a2f846\",\n      \"kind\": \"claim-superseded\",\n      \"decision\": \"informational\",\n      \"availableActions\": [],\n      \"retargeted\": null,\n      \"claimKind\": \"claim\",\n      \"message\": \"The newer revision now matches your change to this member, so your change no longer alters anything.\",\n      \"target\": {\n        \"ciKind\": \"assembly-edge\",\n        \"edgeId\": \"a1Eg8000000AbD2EAK\",\n        \"edgeKey\": \"a0Bg8000000Ab11EAC\",\n        \"label\": \"Bracket-005\",\n        \"path\": [\n          {\n            \"ciKind\": \"source\",\n            \"label\": \"Assy-100\",\n            \"edgeId\": null,\n            \"edgeKey\": null\n          }\n        ]\n      },\n      \"current\": {\n        \"provenance\": \"claiming\",\n        \"governingClock\": \"branch\",\n        \"governingTimestamp\": \"2026-04-05T17:22:03.518Z\",\n        \"detail\": {\n          \"ciKind\": \"assembly-edge\",\n          \"parentItemId\": \"a02g8000000Ab01EAC\",\n          \"parentItemNumber\": \"Assy-100\",\n          \"childItemId\": \"a02g8000000Ab21EAC\",\n          \"childItemNumber\": \"Bracket-005\",\n          \"childItemRevisionId\": \"a0Ag8000000Ab31EAC\",\n          \"childRevisionLabel\": \"rev-3\",\n          \"quantity\": 2,\n          \"findNumber\": 20\n        }\n      },\n      \"candidate\": {\n        \"provenance\": \"base\",\n        \"governingClock\": \"source\",\n        \"governingTimestamp\": \"2026-04-02T00:00:00.000Z\",\n        \"detail\": {\n          \"ciKind\": \"assembly-edge\",\n          \"parentItemId\": \"a02g8000000Ab01EAC\",\n          \"parentItemNumber\": \"Assy-100\",\n          \"childItemId\": \"a02g8000000Ab21EAC\",\n          \"childItemNumber\": \"Bracket-005\",\n          \"childItemRevisionId\": \"a0Ag8000000Ab32EAC\",\n          \"childRevisionLabel\": \"rev-4\",\n          \"quantity\": 2,\n          \"findNumber\": 20\n        }\n      }\n    }\n  ],\n  \"warnings\": [],\n  \"truncated\": false,\n  \"entriesLimit\": 200,\n  \"diffFingerprint\": \"sha256:4c0d9e72b1a83f56\",\n  \"generatedAt\": \"2026-04-05T17:22:03.518Z\"\n}"
+										}
+									]
+								},
+								{
 									"name": "Commit a Pull",
 									"event": [
 										{
@@ -11227,6 +11848,160 @@
 									"createdAt": "2026-09-04T13:53:21.000Z",
 									"updatedAt": "2026-09-04T13:54:22.000Z",
 									"uid": "46943044-0e7eb5c6-a441-4ccc-af4d-7d412d0104e7"
+								},
+								{
+									"name": "🚧 MVP-30378 — Commit a Pull with accept-source-revision",
+									"protocolProfileBehavior": {
+										"disableBodyPruning": true
+									},
+									"request": {
+										"method": "POST",
+										"header": [
+											{
+												"key": "Content-Type",
+												"value": "application/json"
+											},
+											{
+												"key": "Accept",
+												"value": "application/json"
+											}
+										],
+										"body": {
+											"mode": "raw",
+											"raw": "{\n  \"candidateRootRevisionId\": \"{{mbomCandidateRootRevisionId}}\",\n  \"diffFingerprint\": \"{{mbomDiffFingerprint}}\",\n  \"decisions\": [\n    {\n      \"entryId\": \"{{mbomRetainedEntryId}}\",\n      \"action\": \"accept-source-revision\"\n    }\n  ]\n}",
+											"options": {
+												"raw": {
+													"language": "json"
+												}
+											}
+										},
+										"url": {
+											"raw": "{{propelApiUrl}}/v4/mbom/sources/:sourceId/pull",
+											"host": [
+												"{{propelApiUrl}}"
+											],
+											"path": [
+												"v4",
+												"mbom",
+												"sources",
+												":sourceId",
+												"pull"
+											],
+											"variable": [
+												{
+													"key": "sourceId",
+													"value": "{{mbomSourceId}}"
+												}
+											]
+										},
+										"description": "**🚧 Planned — MVP-30378, not yet implemented.** Commit the preview above, taking the newer revision on the pinned claim. Set `mbomRetainedEntryId` to the `claim-retained` entry's `entryId`.\n\n## What to assert\n\n- `201`, with `applied[]` reporting `{kind: claim-retained, action: accept-source-revision}`.\n- **A tree read afterwards**:\n  - Motor-002 renders the candidate's revision, with its **quantity and find number unchanged**.\n  - It is still pinned: its pin now equals the source line's revision, so no `nested` rows appear beneath it.\n  - Any edit its old pin hid renders again.\n- **The next pull that moves the line** reports `retargeted: true` again. A `release`/track would not; that is MVP-30379.\n- Omitting the decision still commits, and the pin wins as today.\n- `accept-source-revision` on an entry that does not offer it, such as `claim-retained` with `retargeted: false`, answers `400 INVALID_REQUEST`.\n- The commit never becomes an `update` [assumes A-30378-3, A-30378-11].\n\n**Today:** `400 INVALID_REQUEST`. No kind other than `claim-orphaned` is actionable."
+									},
+									"response": [
+										{
+											"name": "🚧 expected once MVP-30378 ships",
+											"originalRequest": {
+												"method": "POST",
+												"header": [
+													{
+														"key": "Content-Type",
+														"value": "application/json"
+													}
+												],
+												"body": {
+													"mode": "raw",
+													"raw": "{\n  \"candidateRootRevisionId\": \"a0Ag8000000Ab02EAC\",\n  \"diffFingerprint\": \"sha256:4c0d9e72b1a83f56\",\n  \"decisions\": [\n    {\n      \"entryId\": \"8a3e5f09c2d71b64\",\n      \"action\": \"accept-source-revision\"\n    }\n  ]\n}",
+													"options": {
+														"raw": {
+															"language": "json"
+														}
+													}
+												},
+												"url": {
+													"raw": "{{propelApiUrl}}/v4/mbom/sources/:sourceId/pull",
+													"host": [
+														"{{propelApiUrl}}"
+													],
+													"path": [
+														"v4",
+														"mbom",
+														"sources",
+														":sourceId",
+														"pull"
+													],
+													"variable": [
+														{
+															"key": "sourceId",
+															"value": "a1Cg8000000AbCeEAK"
+														}
+													]
+												}
+											},
+											"status": "Created",
+											"code": 201,
+											"_postman_previewlanguage": "json",
+											"header": [
+												{
+													"key": "Content-Type",
+													"value": "application/json"
+												}
+											],
+											"cookie": [],
+											"responseTime": null,
+											"body": "{\n  \"sourceId\": \"a1Cg8000000AbCeEAK\",\n  \"newSourceRevisionId\": \"a1Dg8000000AbChEAK\",\n  \"acceptedRootRevisionId\": \"a0Ag8000000Ab02EAC\",\n  \"acceptedAt\": \"2026-04-06T14:02:51.317Z\",\n  \"applied\": [\n    {\n      \"entryId\": \"8a3e5f09c2d71b64\",\n      \"kind\": \"claim-retained\",\n      \"action\": \"accept-source-revision\",\n      \"edgeId\": \"a1Eg8000000AbD1EAK\"\n    },\n    {\n      \"entryId\": \"3b91c7e0d5a2f846\",\n      \"kind\": \"claim-superseded\",\n      \"action\": null,\n      \"edgeId\": \"a1Eg8000000AbD2EAK\"\n    }\n  ]\n}"
+										},
+										{
+											"name": "Today — claim-retained is not actionable",
+											"originalRequest": {
+												"method": "POST",
+												"header": [
+													{
+														"key": "Content-Type",
+														"value": "application/json"
+													}
+												],
+												"body": {
+													"mode": "raw",
+													"raw": "{\n  \"candidateRootRevisionId\": \"a0Ag8000000Ab02EAC\",\n  \"diffFingerprint\": \"sha256:4c0d9e72b1a83f56\",\n  \"decisions\": [\n    {\n      \"entryId\": \"8a3e5f09c2d71b64\",\n      \"action\": \"accept-source-revision\"\n    }\n  ]\n}",
+													"options": {
+														"raw": {
+															"language": "json"
+														}
+													}
+												},
+												"url": {
+													"raw": "{{propelApiUrl}}/v4/mbom/sources/:sourceId/pull",
+													"host": [
+														"{{propelApiUrl}}"
+													],
+													"path": [
+														"v4",
+														"mbom",
+														"sources",
+														":sourceId",
+														"pull"
+													],
+													"variable": [
+														{
+															"key": "sourceId",
+															"value": "a1Cg8000000AbCeEAK"
+														}
+													]
+												}
+											},
+											"status": "Bad Request",
+											"code": 400,
+											"_postman_previewlanguage": "json",
+											"header": [
+												{
+													"key": "Content-Type",
+													"value": "application/json"
+												}
+											],
+											"cookie": [],
+											"responseTime": null,
+											"body": "{\n  \"code\": \"INVALID_REQUEST\",\n  \"message\": \"That request could not be read. Check that the body is valid JSON and that every required value is supplied. (entryId 8a3e5f09c2d71b64 is claim-retained, which is never actionable)\"\n}"
+										}
+									]
 								}
 							],
 							"id": "ed3d83cb-c989-4b43-aef3-da7fcfd277bc",

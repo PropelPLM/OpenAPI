@@ -56,7 +56,9 @@ info:
     A row's **child revision** can also be the caller's explicit choice rather than any clock's
     output. Every operation that creates or takes over a row (`claim`, `add`, `replace`,
     `convert-to-native`) accepts a `childItemRevisionId`; a row that stores one is **pinned** and
-    renders exactly that revision whatever T_R or `asOf` say. A row that stores none **tracks**:
+    renders exactly that revision whatever T_R or `asOf` say. (**🚧 Planned — MVP-30378, not yet
+    implemented:** `set-revision` changes or clears it afterwards.) A row that stores none
+    **tracks**:
 
     | Row | Stored revision | Child revision it renders |
     |---|---|---|
@@ -179,6 +181,7 @@ info:
     | [MVP-30375](https://propelplm.atlassian.net/browse/MVP-30375) | `TreeRow.isPinned` and `TreeRow.wasClaimed` on every tree read. `TreeRow.pinnedById` / `pinnedAt` on baseline rows. A `BASELINE_PIN_DRIFT` warning on the baseline read. |
     | [MVP-30376](https://propelplm.atlassian.net/browse/MVP-30376) | A `STORED_REVISION_RETIRED` warning on the branch tree read, one per row whose chosen revision is now Cancelled or Expired. The revision still renders. |
     | [MVP-30377](https://propelplm.atlassian.net/browse/MVP-30377) | `DeltaOperation.autoClaim` on `update`, which claims and revises a `base` edge in one operation and carries the same revision choice as `claim`. `DeltaResult.claimed` reports it. |
+    | [MVP-30378](https://propelplm.atlassian.net/browse/MVP-30378) | A `set-revision` delta op that sets, changes or clears a stored child revision, with clearing spelled `trackChildRevision: true`. An optional `accept-source-revision` pull action on a retargeted `claim-retained` entry. `DiffEntry.revisionAdvances`. `update` refuses a `childItemRevisionId`, and `update` / `set-revision` reach a row hidden behind a pin by `assemblyCiId`. |
 
   contact:
     name: Propel PLM Engineering
@@ -202,6 +205,7 @@ info:
     overrideDisclosure: MVP-30375
     retiredStoredRevision: MVP-30376
     autoClaim: MVP-30377
+    setRevision: MVP-30378
   x-design-doc: docs/architecture/mbom/mbom-pull-api.md
   x-demo-plan: docs/architecture/mbom/mbom-demo-test-plan.md
 
@@ -562,7 +566,8 @@ paths:
       description: |
         The single write endpoint for editing a branch. Eight operations — `claim`, `update`, `add`,
         `exclude`, `restore`, `replace`, `revert`, `convert-to-native` — arrive in one array and are
-        applied under one envelope.
+        applied under one envelope. (**🚧 Planned — MVP-30378, not yet implemented:** a ninth,
+        `set-revision`.)
 
         **Returns `200`, not `201`**, even though rows are created: the response is a *report* on a
         set of operations, not a pointer to one new resource, and under `atomic: false` some of them
@@ -637,6 +642,27 @@ paths:
         | `revert` | `ciId` **or** `ebomAssemblyId` | Discards the branch's claim so the row falls back to what its source supplies. Nothing on disk is touched — a `Revert` marker is appended and the fold drops it entirely. |
         | `convert-to-native` | `ciId`, and **exactly one of** `childItemRevisionId` \| `trackChildRevision: true` | Severs a claiming edge's link to the source it claims: same quantity and find number, but now branch-owned in its own right (`provenance` flips `claiming` → `new`). Appends an `Add` with `Claims_Source__c` null; the child revision is the caller's choice — a chosen revision is stamped on, `trackChildRevision: true` floats at `asOf`. |
 
+        > **🚧 Planned — MVP-30378, not yet implemented.** A ninth operation:
+        >
+        > | `op` | Required fields | What it does |
+        > |---|---|---|
+        > | `set-revision` | `assemblyCiId` **or** `ebomAssemblyId`, and **exactly one of** `childItemRevisionId` \| `trackChildRevision: true` | Sets, changes or **clears** a branch-owned row's stored child revision, keeping its quantity and find number. It always appends a new `CI_Rev__c` and never edits one in place. A `childItemRevisionId` **pins** the row. `trackChildRevision: true` **clears** the pin, and what the row then follows depends on the row. A cleared claim becomes a tracking claim: it renders its source line's revision at T_R and moves only when a pull accepts a newer source. A cleared `new` row or substitute floats at `asOf`. Setting a pin that differs from the source line's revision starts rendering that revision's structure beneath the row. Clearing it, or setting it back to the source line's revision, stops that, and any edits it hid render again. |
+        >
+        > It refuses the following, in this order:
+        >
+        > 1. `INVALID_REQUEST`: no id.
+        > 2. `REVISION_CHOICE_REQUIRED`: neither or both choice fields.
+        > 3. `NOT_FOUND`
+        > 4. `NOT_EDITABLE`: a nested row.
+        > 5. `NOT_SUPPLIED`: a tombstone.
+        > 6. `CLAIM_REQUIRED`: a row that is still `base`. There is nothing to store a revision on
+        >    until the branch owns the row.
+        > 7. `REVISION_ITEM_MISMATCH`
+        >
+        > Sending the revision the row already stores succeeds and writes nothing. `forked` is
+        > always null. A past `asOf` is tolerated, as on `update`.
+        > [assumes A-30378-1, A-30378-2, A-30378-8, A-30378-9]
+
         > **🚧 Planned — MVP-30377, not yet implemented.** `update` gains an optional
         > `autoClaim: true`. With it, the operation also needs **exactly one of**
         > `childItemRevisionId` | `trackChildRevision: true`, and an update of a `base` edge claims
@@ -660,6 +686,15 @@ paths:
         > **🚧 Planned — MVP-30377, not yet implemented.** The two `update` rows above are
         > planned. [assumes A-30377-1]
 
+        > **🚧 Planned — MVP-30378, not yet implemented.** Two more rows change:
+        >
+        > | `op` | `childItemRevisionId` sent | `trackChildRevision: true` sent | Neither | Both |
+        > |---|---|---|---|---|
+        > | `set-revision` | **sets or changes** the pin | **clears** it | `422 REVISION_CHOICE_REQUIRED` | `422 REVISION_CHOICE_REQUIRED` |
+        > | `update` (without `autoClaim`) | `400 INVALID_REQUEST` naming `set-revision`, where today it is silently ignored | ignored | — | `400 INVALID_REQUEST` |
+        >
+        > [assumes A-30378-2, A-30378-6]
+
         - **There is no server-side "pin what I see".** To pin the revision the tree is showing, or
           to have a convert "keep what it shows", send back that row's own
           `detail.childItemRevisionId`. That includes converting a *pinned* claim that should stay
@@ -680,6 +715,10 @@ paths:
           [branch tree read](#operation/getBranchTree) and `PINNED_SUBTREE_HIDES_EDITS`.
         - Changing or clearing a revision after the row exists is not an operation this release
           offers.
+          **🚧 Planned — MVP-30378, not yet implemented:** `set-revision` changes or clears it
+          and keeps the row's quantity and find number. `convert-to-native` may still stamp **any**
+          revision of the child item, or switch to tracking. That is legitimate, and it is the
+          severing path. `set-revision` is the non-severing one. [assumes A-30378-1, A-30378-7]
 
         ### Addressing quirks worth knowing
 
@@ -692,6 +731,13 @@ paths:
         - `replace` only works on eBOM-derived rows. A `new` row has a synthetic `new-…` edge
           key and no `Assembly__c` line, so replacing branch-added content is `update`, or
           `exclude` plus `add`.
+        - A row **hidden behind a pin** (see `PINNED_SUBTREE_HIDES_EDITS`) is addressable by
+          `ciId` for `exclude`, `restore`, `revert` and `convert-to-native`. `update` and `claim`
+          answer `NOT_FOUND` for it.
+          **🚧 Planned — MVP-30378, not yet implemented:** `update` and `set-revision` addressed
+          by `assemblyCiId` find it too. Addressed by `ebomAssemblyId`, they still answer
+          `NOT_FOUND`. `claim` of a hidden line keeps answering `NOT_FOUND`: a line that renders
+          nowhere has nothing visible to claim. [assumes A-30378-5]
 
         ## Access
 
@@ -754,6 +800,24 @@ paths:
                       ebomAssemblyId: a0Bg8000000Ab11EAC
                       quantity: 3
                       autoClaim: true
+                      trackChildRevision: true
+              setRevisionPin:
+                summary: '🚧 MVP-30378 (planned) — change a claim''s stored revision, keeping its quantity'
+                x-planned: { ticket: MVP-30378, assumptions: [A-30378-1, A-30378-2] }
+                value:
+                  operations:
+                    - op: set-revision
+                      clientRef: take-rev-2
+                      assemblyCiId: a1Eg8000000AbD1EAK
+                      childItemRevisionId: a0Ag8000000Ab42EAC
+              setRevisionClear:
+                summary: '🚧 MVP-30378 (planned) — clear a pin; a claim then tracks its source line at T_R'
+                x-planned: { ticket: MVP-30378, assumptions: [A-30378-2] }
+                value:
+                  operations:
+                    - op: set-revision
+                      clientRef: stop-pinning
+                      assemblyCiId: a1Eg8000000AbD1EAK
                       trackChildRevision: true
               addLocal:
                 summary: Add a part the eBOM never supplied
@@ -831,6 +895,9 @@ paths:
                 autoClaimed:
                   summary: '🚧 MVP-30377 (planned) — an update that claimed a base line'
                   $ref: '#/components/examples/DeltaBatchAutoClaimed'
+                revisionSet:
+                  summary: '🚧 MVP-30378 (planned) — set-revision applied'
+                  $ref: '#/components/examples/DeltaBatchRevisionSet'
         '400':
           description: |
             `INVALID_REQUEST` — the body could not be read; or (under `atomic: true`) an operation
@@ -878,6 +945,10 @@ paths:
             *`NO_CLAIM` was `NO_OVERRIDE` before MVP-30309; `restore` of a row that is not excluded
             answered it too, and now has its own code — a row can be claiming and not excluded at
             once, so "no claim" would be false for exactly that row.*
+
+            > **🚧 Planned — MVP-30378, not yet implemented.** `set-revision` answers
+            > `CLAIM_REQUIRED` on a `base` row, `NOT_EDITABLE` on a nested one and `NOT_SUPPLIED` on
+            > a tombstone. [assumes A-30378-9]
           content:
             application/json:
               schema: { $ref: '#/components/schemas/RestError' }
@@ -916,6 +987,11 @@ paths:
             target is named and before any claim or exclusion state: a `claim` of an
             already-claimed line that also chose nothing answers `REVISION_CHOICE_REQUIRED`, not
             `ALREADY_CLAIMED`. `REVISION_ITEM_MISMATCH` is checked after the state guards.
+
+            > **🚧 Planned — MVP-30378, not yet implemented.** Both codes also apply to
+            > `set-revision`. `REVISION_CHOICE_REQUIRED` means neither or both of
+            > `childItemRevisionId` and `trackChildRevision: true`. `REVISION_ITEM_MISMATCH` means a
+            > revision of a different item than the row's own child. [assumes A-30378-2, A-30378-9]
           content:
             application/json:
               schema: { $ref: '#/components/schemas/RestError' }
@@ -1241,6 +1317,20 @@ paths:
         *The three `claim-*` kinds were `override-retained` / `override-superseded` /
         `override-orphaned` before MVP-30309.*
 
+        > **🚧 Planned — MVP-30378, not yet implemented.** Two changes to the table:
+        >
+        > - **`claim-retained` with `retargeted: true`** offers
+        >   `availableActions: [accept-source-revision]`. This is an **optional** decision: the
+        >   `decision` stays `informational`, and a commit without it still succeeds, with the pin
+        >   winning as today. Accepting pins the row to the candidate's revision and keeps its
+        >   quantity and find number.
+        > - **`claim-retained` and `claim-superseded`** carry `revisionAdvances`, which is true when
+        >   a **tracking** claim's rendered revision moves with this pull. No new entry kind is
+        >   added, so each position still has exactly one entry. `member-version-advance` still
+        >   means base content only.
+        >
+        > [assumes A-30378-3, A-30378-4, A-30378-10]
+
         ### Why a revision advance is never a decision
 
         A revision is not an independently assertable value. Once you accept that the *line* exists,
@@ -1249,6 +1339,12 @@ paths:
         (or `add`, `replace`, `convert-to-native`) carrying a chosen `childItemRevisionId`, a
         separate and deliberate act on the delta endpoint. A *tracking* claim holds nothing: it
         follows the source's revision and moves with it.
+
+        > **🚧 Planned — MVP-30378, not yet implemented.** A `base` row's advance is still never a
+        > decision. A *pinned* claim that upstream has moved past gets an optional
+        > `accept-source-revision`: take the candidate's revision, keep everything else. A
+        > tracking claim's move is flagged with `revisionAdvances` on its `claim-*` entry.
+        > [assumes A-30378-3, A-30378-4]
 
         ### Pins are judged against the tree *after* the pull (MVP-30357)
 
@@ -1264,6 +1360,12 @@ paths:
         A pinned claim whose line upstream re-revs is reported as `claim-retained` with
         `retargeted: true`: the candidate would resolve the line to a newer revision, and the pin
         wins. The commit leaves the pin in place.
+
+        > **🚧 Planned — MVP-30378, not yet implemented.** Unless the commit carries an
+        > `accept-source-revision` decision for it. Then the pin moves to the candidate's
+        > revision, equals the post-pull source line's, and stops rendering a pinned structure,
+        > so edits it hid render again. The next pull that moves the line reports
+        > `retargeted: true` again. [assumes A-30378-3]
 
         ### Why upstream re-pointing an edge at a *different item* is two entries
 
@@ -1319,6 +1421,9 @@ paths:
                 truncated:
                   summary: Informational entries capped; the required one survives
                   $ref: '#/components/examples/PullPreviewTruncated'
+                revisionMoves:
+                  summary: '🚧 MVP-30378 (planned) — accept-source-revision offered; revisionAdvances flagged'
+                  $ref: '#/components/examples/PullPreviewRevisionMoves'
         '400':
           description: |
             `INVALID_REQUEST` — `entriesLimit` was not a positive integer. Present-but-unusable is a
@@ -1383,6 +1488,23 @@ paths:
         | `convert-to-native` | Severs the provenance link, keeping the branch-owned quantity and find number, which then resolve on the **branch** clock. **Requires exactly one of** `childItemRevisionId` (stamped onto the native row — send the entry's own `current.detail.childItemRevisionId` to keep what it shows) and `trackChildRevision: true` (float at the read clock); neither or both is `422 REVISION_CHOICE_REQUIRED`, checked with the other decision checks before anything is written. Runs through the ordinary `convert-to-native` delta operation — every invariant that batch enforces applies unchanged, including `REVISION_ITEM_MISMATCH`. |
         | `remove` | Appends an **exclude** delta (a deletion marker). **Nothing is hard-deleted.** |
 
+        > **🚧 Planned — MVP-30378, not yet implemented.** An optional decision on a
+        > `claim-retained` entry with `retargeted: true`:
+        >
+        > | action | Effect |
+        > |---|---|
+        > | `accept-source-revision` | Pins the claim to the **candidate's** child revision (`candidate.detail.childItemRevisionId`) through a `set-revision` operation, and keeps the branch's quantity and find number. It never becomes an `update`, which cannot change a revision. The row stays pinned. Its pin now equals the post-pull source line's revision, so no pinned structure renders beneath it. The next pull that moves the line reports `retargeted: true` again. `childItemRevisionId` / `trackChildRevision` are ignored on this decision. |
+        >
+        > These change in the Decisions table above:
+        >
+        > - "A decision naming any other kind → 400" becomes "a decision whose action the entry does
+        >   not offer in `availableActions` → `400 INVALID_REQUEST`".
+        > - A `claim-retained` with no decision still commits: it is optional, and only
+        >   `claim-orphaned` blocks.
+        >
+        > The `convert-to-native` revision-choice check is unchanged.
+        > [assumes A-30378-3, A-30378-10, A-30378-11]
+
         ## Claim reconciliation: reported, never persisted
 
         For every existing claimed/replaced field, the commit compares the claim's current value
@@ -1395,6 +1517,10 @@ paths:
         - **Matches** → reported as `claim-superseded`. Also **never deleted and never written**.
           Retiring it would mean a branch that once happened to agree with upstream would silently
           start accepting upstream changes from then on.
+
+        > **🚧 Planned — MVP-30378, not yet implemented.** Nothing is persisted *unless the caller
+        > decided*. An `accept-source-revision` decision writes one new payload revision for its
+        > row. [assumes A-30378-3]
 
         `Edge_Key__c` and `Alias__c` are likewise **never re-stamped**. They keep meaning "the
         upstream line this edge was originally minted against", independent of the correlation key a
@@ -1461,6 +1587,15 @@ paths:
                     - entryId: f4880c6b3e1a9d75
                       action: convert-to-native
                       trackChildRevision: true
+              acceptSourceRevision:
+                summary: '🚧 MVP-30378 (planned) — take the newer revision on a pinned claim, keep its quantity'
+                x-planned: { ticket: MVP-30378, assumptions: [A-30378-3, A-30378-11] }
+                value:
+                  candidateRootRevisionId: a0Ag8000000Ab02EAC
+                  diffFingerprint: 'sha256:4c0d9e72b1a83f56'
+                  decisions:
+                    - entryId: '8a3e5f09c2d71b64'
+                      action: accept-source-revision
               removeOrphan:
                 summary: Let the orphaned claim go
                 value:
@@ -1487,10 +1622,17 @@ paths:
                 alreadyCurrent:
                   summary: Committing the revision already accepted
                   $ref: '#/components/examples/PullCommitAlreadyCurrent'
+                acceptedSourceRevision:
+                  summary: '🚧 MVP-30378 (planned) — an accept-source-revision decision applied'
+                  $ref: '#/components/examples/PullCommitAcceptedSourceRevision'
         '400':
           description: |
             `INVALID_REQUEST` — the body could not be read; a decision names an entry that is not
             `claim-orphaned`; or `action` is not one of `convert-to-native` / `remove`.
+
+            > **🚧 Planned — MVP-30378, not yet implemented.** It becomes: a decision whose `action`
+            > is not in its entry's `availableActions`, so `accept-source-revision` on a
+            > `claim-retained` entry with `retargeted: false` is refused. [assumes A-30378-11]
           content:
             application/json:
               schema: { $ref: '#/components/schemas/RestError' }
@@ -2292,6 +2434,10 @@ components:
               where it describes the tree **after** the commit. A revision cannot be changed in place
               this release, so the remedy is to `revert` the pinned claim and claim the line again —
               tracking, or pinned to the source line's own revision — in a later request.
+              **🚧 Planned — MVP-30378, not yet implemented:** the remedy becomes `set-revision` on
+              the pinned row. Clear it with `trackChildRevision: true`, or pin it to the source
+              line's own revision. Either keeps the row's quantity and find number, and the hidden
+              edits render again. [assumes A-30378-2]
             - `MEMBER_ADD_COLLISION` — one BOM position was asserted by **both** the branch and its
               source, and the branch's content won. The two rows render as one, carrying
               `isCollapsedCollision: true`. Not raised once a pull has retired a *converged* local
@@ -2395,8 +2541,14 @@ components:
       properties:
         op:
           type: string
-          enum: [claim, update, add, exclude, restore, replace, revert, convert-to-native]
-          description: Matched case-insensitively. An unknown value is a **per-operation** validation failure (`INVALID_REQUEST`), not an exception — one mistyped name in a batch of 200 must not read as a server fault.
+          enum: [claim, update, add, exclude, restore, replace, revert, convert-to-native, set-revision]
+          description: |
+            Matched case-insensitively. An unknown value is a **per-operation** validation failure (`INVALID_REQUEST`), not an exception — one mistyped name in a batch of 200 must not read as a server fault.
+
+            | Value | Status |
+            |---|---|
+            | `claim`, `update`, `add`, `exclude`, `restore`, `replace`, `revert`, `convert-to-native` | ✅ shipped |
+            | `set-revision` | 🚧 MVP-30378 — today it answers `INVALID_REQUEST` (unknown op) |
         clientRef:
           type: string
           description: |
@@ -2407,7 +2559,11 @@ components:
           examples: ['row-motor']
         ebomAssemblyId:
           allOf: [{ $ref: '#/components/schemas/SalesforceId' }]
-          description: 'The legacy `Assembly__c` line. Used by: `claim`, `exclude`, `update` (the `CLAIM_REQUIRED` path), `revert` (the second-revert path).'
+          description: |
+            The legacy `Assembly__c` line. Used by: `claim`, `exclude`, `update` (the `CLAIM_REQUIRED` path), `revert` (the second-revert path).
+
+            **🚧 Planned — MVP-30378, not yet implemented:** also `set-revision`, whose `base`-row
+            answer is `CLAIM_REQUIRED`. [assumes A-30378-1]
         assemblyCiId:
           allOf: [{ $ref: '#/components/schemas/SalesforceId' }]
           description: |
@@ -2417,6 +2573,10 @@ components:
             Not an oversight: a request is deserialized into a flat Apex type whose field names
             are the wire names, and the operation an id belongs to is known only after `op` is
             read — so a request field cannot be enveloped per CI type the way a response can.
+
+            > **🚧 Planned — MVP-30378, not yet implemented.** Also addresses `set-revision`. For
+            > `update` and `set-revision` it also finds a row hidden behind a pin, which
+            > `ebomAssemblyId` never does. [assumes A-30378-1, A-30378-5]
         ciId:
           allOf: [{ $ref: '#/components/schemas/SalesforceId' }]
           description: 'A `CI__c` to `exclude`, `restore`, `revert` or `convert-to-native`.'
@@ -2464,6 +2624,12 @@ components:
             > `autoClaim: true`. On a `base` edge it pins the claim the update performs. On an owned
             > edge it must equal the stored revision, or the update answers `400 INVALID_REQUEST`
             > naming `set-revision`. [assumes A-30377-1]
+
+            > **🚧 Planned — MVP-30378, not yet implemented.** It is the payload of `set-revision`:
+            > the revision to pin, validated against the row's own child item. Clearing is
+            > `trackChildRevision: true`, not a null here. A plain `update` that sends a non-null
+            > value is refused with `400 INVALID_REQUEST` naming `set-revision`, instead of being
+            > silently ignored as today. [assumes A-30378-2, A-30378-6]
           examples: ['a0Ag8000000Ab31EAC']
         trackChildRevision:
           oneOf: [{ type: boolean }, { type: 'null' }]
@@ -2485,6 +2651,11 @@ components:
             > **🚧 Planned — MVP-30377, not yet implemented.** It is also read by `update` sent with
             > `autoClaim: true`, which makes the same exactly-one choice. See `autoClaim`.
             > [assumes A-30377-1]
+
+            > **🚧 Planned — MVP-30378, not yet implemented.** On `set-revision`, `true` **clears**
+            > the stored revision, with the same exactly-one rule. A cleared claim follows its
+            > source line at T_R. A cleared `new` row or substitute floats at the read clock.
+            > [assumes A-30378-2]
         autoClaim:
           oneOf: [{ type: boolean }, { type: 'null' }]
           x-planned: { ticket: MVP-30377, assumptions: [A-30377-1, A-30377-4] }
@@ -2712,6 +2883,11 @@ components:
         third, optional-but-defaultable tier. The only decision point anywhere in a pull is disposing
         an orphaned claim; everything else, including new, removed and colliding upstream content,
         applies automatically.
+
+        > **🚧 Planned — MVP-30378, not yet implemented.** Still two values. An `informational`
+        > entry may now **offer** an optional action in `availableActions`, and the default when
+        > none is sent is today's outcome. `required` still means `claim-orphaned` only: a pull
+        > has exactly one required kind. [assumes A-30378-10]
       enum: [informational, required]
 
     Action:
@@ -2724,7 +2900,21 @@ components:
           content, which then resolves on the branch clock. ("Native" is the framework's existing
           term for branch-owned content with no upstream provenance.)
         - `remove` — append a deletion marker (an exclude delta). Nothing is hard-deleted.
-      enum: [convert-to-native, remove]
+        - `accept-source-revision` — **🚧 Planned — MVP-30378, not yet implemented.** Offered
+          only on `claim-retained` with `retargeted: true`, and optional. The commit pins the
+          claim to the **candidate's** revision through a `set-revision`, never an `update`. The
+          claim keeps its quantity and find number, and stays pinned. The decision carries
+          nothing but `entryId` and `action`. [assumes A-30378-3, A-30378-11]
+
+        | Value | Status |
+        |---|---|
+        | `convert-to-native`, `remove` | ✅ shipped — `claim-orphaned` only |
+        | `accept-source-revision` | 🚧 MVP-30378 — today it answers `INVALID_REQUEST` |
+
+        > **🚧 Planned — MVP-30378, not yet implemented.** A decision is valid when its entry
+        > **offers** its action in `availableActions`, instead of only on `claim-orphaned`.
+        > [assumes A-30378-11]
+      enum: [convert-to-native, remove, accept-source-revision]
 
     PullPreview:
       type: object
@@ -2853,7 +3043,12 @@ components:
         decision: { $ref: '#/components/schemas/Decision' }
         availableActions:
           type: array
-          description: Empty except on `claim-orphaned`, whose two dispositions are the only actions this API offers anywhere.
+          description: |
+            Empty except on `claim-orphaned`, whose two dispositions are the only actions this API offers anywhere.
+
+            **🚧 Planned — MVP-30378, not yet implemented:** also `[accept-source-revision]` on a
+            `claim-retained` entry with `retargeted: true`. It is optional: the entry's `decision`
+            stays `informational`. [assumes A-30378-3, A-30378-10]
           items: { $ref: '#/components/schemas/Action' }
         retargeted:
           oneOf: [{ type: boolean }, { type: 'null' }]
@@ -2870,6 +3065,27 @@ components:
             on — without parsing `message`.
 
             The child *revision*, not the child *item*: see the endpoint description.
+
+            **🚧 Planned — MVP-30378, not yet implemented:** a `true` here is what makes the entry
+            offer `accept-source-revision`. [assumes A-30378-3]
+        revisionAdvances:
+          oneOf: [{ type: boolean }, { type: 'null' }]
+          x-planned: { ticket: MVP-30378, assumptions: [A-30378-4] }
+          description: |
+            **🚧 Planned — MVP-30378, not yet implemented.** Present on `claim-retained` and
+            `claim-superseded`, and `null` on every other kind, deliberately not defaulted, like
+            `retargeted`.
+
+            `true` when this is a **tracking** claim, one that stores no revision, and the revision
+            it renders moves with this pull: after the commit it renders the candidate's line
+            revision. The entry's kind is still judged on quantity and find number alone. The
+            move is otherwise visible only by comparing `current.detail.childItemRevisionId` with
+            `candidate.detail.childItemRevisionId`.
+
+            **Never true together with `retargeted`.** `retargeted` is about a *pinned* claim that
+            upstream moved away from. A pin does not move, so its `revisionAdvances` is `false`.
+            A tracking claim is never retargeted. The value is covered by `diffFingerprint`.
+            A `base` row's advance is still `member-version-advance`, unchanged.
         claimKind:
           oneOf: [{ type: string, enum: [claim, replace] }, { type: 'null' }]
           description: |
@@ -3036,6 +3252,11 @@ components:
             One entry per `claim-orphaned` entry from the preview. **Every one must appear**, or
             the commit is rejected with `DISPOSITION_REQUIRED`; naming any other kind is rejected
             with `INVALID_REQUEST`. Send `[]` (or omit) when the preview had no required entries.
+
+            > **🚧 Planned — MVP-30378, not yet implemented.** It may also carry **optional**
+            > decisions: `accept-source-revision` on a retargeted `claim-retained` entry. These are
+            > never required, and an entry left undecided keeps today's outcome.
+            > `DISPOSITION_REQUIRED` still keys on `claim-orphaned` alone. [assumes A-30378-10]
           items:
             type: object
             required: [entryId, action]
@@ -3059,7 +3280,9 @@ components:
                   row floats at the read clock like an `add`. A `convert-to-native` decision carries
                   **exactly one** of this and `childItemRevisionId`, or the commit answers
                   `422 REVISION_CHOICE_REQUIRED` before any delta or acceptance is written. Ignored
-                  on `remove`.
+                  on `remove`. **🚧 Planned — MVP-30378, not yet implemented:** also ignored on
+                  `accept-source-revision`, whose revision is always the candidate's.
+                  [assumes A-30378-11]
 
     PullCommitResult:
       type: object
@@ -3107,6 +3330,9 @@ components:
             - `retired` — on `member-add-converged`. The commit appended a `Revert` delta dropping
               the branch's now-redundant local assertion. No decision is accepted for this kind.
             - `null` — on `claim-retained` and `claim-superseded`, where nothing was written.
+            - `accept-source-revision` — **🚧 Planned — MVP-30378, not yet implemented.** On a
+              `claim-retained` entry that took that optional decision. The claim is now pinned to
+              the candidate's revision. [assumes A-30378-11]
         edgeId:
           oneOf: [{ $ref: '#/components/schemas/SalesforceId' }, { type: 'null' }]
           description: The branch-owned `Assembly_CI__c` this entry's target names, if any.
@@ -4021,6 +4247,30 @@ components:
             forked: null
             claimed: true
 
+    DeltaBatchRevisionSet:
+      summary: '🚧 MVP-30378 (planned) — set-revision on a claiming edge'
+      description: |
+        **🚧 Planned — MVP-30378, not yet implemented.** A new payload revision was appended, with
+        the row's quantity and find number carried forward. `forked` is null because
+        `set-revision` never edits in place, so there is no in-place alternative to report against.
+      x-planned: { ticket: MVP-30378, assumptions: [A-30378-1, A-30378-8] }
+      value:
+        branchId: a1Bg8000000AbCdEAK
+        atomic: true
+        asOf: '2026-04-06T15:10:00.000Z'
+        applied: 1
+        failed: 0
+        results:
+          - index: 0
+            clientRef: take-rev-2
+            op: set-revision
+            success: true
+            errorCode: null
+            message: null
+            ciId: a1Gg8000000AbF1EAK
+            edgeId: a1Eg8000000AbD1EAK
+            forked: null
+
     DeltaBatchAtomicFailure:
       value:
         code: CLAIM_REQUIRED
@@ -4417,6 +4667,159 @@ components:
         diffFingerprint: 'sha256:9f2c41ab7e08d3b6'
         generatedAt: '2026-04-05T17:22:03.518Z'
 
+    PullPreviewRevisionMoves:
+      summary: '🚧 MVP-30378 (planned) — a pinned claim offered accept-source-revision, and a tracking claim flagged revisionAdvances'
+      description: |
+        **🚧 Planned — MVP-30378, not yet implemented.** Assy-100 moves from rev-1 to rev-2, and
+        upstream re-revs two lines the branch claimed:
+
+        - **Motor-002**, claimed *pinned* to rev-1. The candidate would resolve rev-2, so the entry
+          is `claim-retained` with `retargeted: true`, and it offers the optional
+          `accept-source-revision`. `decision` stays `informational`.
+        - **Bracket-005**, claimed *tracking* with its quantity unchanged. It is
+          `claim-superseded`, since only quantity and find number decide that. It carries
+          `revisionAdvances: true` because after the commit it renders rev-4.
+
+        `candidate` is the raw upstream line.
+      x-planned: { ticket: MVP-30378, assumptions: [A-30378-3, A-30378-4, A-30378-10] }
+      value:
+        sourceId: a1Cg8000000AbCeEAK
+        branchId: a1Bg8000000AbCdEAK
+        branchLabel: MBOM-GDL
+        sourceType: Ebom
+        currentSourceVersion:
+          sourceRevisionId: a1Dg8000000AbCfEAK
+          rootItemRevisionId: a0Ag8000000Ab01EAC
+          rootItemNumber: Assy-100
+          rootRevisionLabel: rev-1
+          resolutionTimestamp: '2026-01-15T00:00:00.000Z'
+          acceptedAt: '2026-01-15T09:12:44.000Z'
+        candidateSourceVersion:
+          sourceRevisionId: null
+          rootItemRevisionId: a0Ag8000000Ab02EAC
+          rootItemNumber: Assy-100
+          rootRevisionLabel: rev-2
+          resolutionTimestamp: '2026-04-02T00:00:00.000Z'
+          acceptedAt: null
+        hasChanges: true
+        summary:
+          total: 3
+          informational: 3
+          required: 0
+          byKind:
+            source-version-advance: 1
+            claim-retained: 1
+            claim-superseded: 1
+        entries:
+          - entryId: '5c1e0a77f9b34d20'
+            kind: source-version-advance
+            decision: informational
+            availableActions: []
+            retargeted: null
+            revisionAdvances: null
+            claimKind: null
+            message: 'The source assembly moves to a newer released revision.'
+            target:
+              ciKind: source
+              edgeId: null
+              edgeKey: null
+              label: Assy-100
+              path:
+                - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
+            current: null
+            candidate: null
+          - entryId: '8a3e5f09c2d71b64'
+            kind: claim-retained
+            decision: informational
+            availableActions: [accept-source-revision]
+            retargeted: true
+            revisionAdvances: false
+            claimKind: claim
+            message: "Your change to this member is kept, and the newer revision's version of it is suppressed."
+            target:
+              ciKind: assembly-edge
+              edgeId: a1Eg8000000AbD1EAK
+              edgeKey: a0Bg8000000Ab10EAC
+              label: Motor-002
+              path:
+                - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
+            current:
+              provenance: claiming
+              governingClock: branch
+              governingTimestamp: '2026-04-05T17:22:03.518Z'
+              detail:
+                ciKind: assembly-edge
+                parentItemId: a02g8000000Ab01EAC
+                parentItemNumber: Assy-100
+                childItemId: a02g8000000Ab20EAC
+                childItemNumber: Motor-002
+                childItemRevisionId: a0Ag8000000Ab41EAC
+                childRevisionLabel: rev-1
+                quantity: 4
+                findNumber: 10
+            candidate:
+              provenance: base
+              governingClock: source
+              governingTimestamp: '2026-04-02T00:00:00.000Z'
+              detail:
+                ciKind: assembly-edge
+                parentItemId: a02g8000000Ab01EAC
+                parentItemNumber: Assy-100
+                childItemId: a02g8000000Ab20EAC
+                childItemNumber: Motor-002
+                childItemRevisionId: a0Ag8000000Ab42EAC
+                childRevisionLabel: rev-2
+                quantity: 4
+                findNumber: 10
+          - entryId: '3b91c7e0d5a2f846'
+            kind: claim-superseded
+            decision: informational
+            availableActions: []
+            retargeted: null
+            revisionAdvances: true
+            claimKind: claim
+            message: 'The newer revision now matches your change to this member, so your change no longer alters anything.'
+            target:
+              ciKind: assembly-edge
+              edgeId: a1Eg8000000AbD2EAK
+              edgeKey: a0Bg8000000Ab11EAC
+              label: Bracket-005
+              path:
+                - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
+            current:
+              provenance: claiming
+              governingClock: branch
+              governingTimestamp: '2026-04-05T17:22:03.518Z'
+              detail:
+                ciKind: assembly-edge
+                parentItemId: a02g8000000Ab01EAC
+                parentItemNumber: Assy-100
+                childItemId: a02g8000000Ab21EAC
+                childItemNumber: Bracket-005
+                childItemRevisionId: a0Ag8000000Ab31EAC
+                childRevisionLabel: rev-3
+                quantity: 2
+                findNumber: 20
+            candidate:
+              provenance: base
+              governingClock: source
+              governingTimestamp: '2026-04-02T00:00:00.000Z'
+              detail:
+                ciKind: assembly-edge
+                parentItemId: a02g8000000Ab01EAC
+                parentItemNumber: Assy-100
+                childItemId: a02g8000000Ab21EAC
+                childItemNumber: Bracket-005
+                childItemRevisionId: a0Ag8000000Ab32EAC
+                childRevisionLabel: rev-4
+                quantity: 2
+                findNumber: 20
+        warnings: []
+        truncated: false
+        entriesLimit: 200
+        diffFingerprint: 'sha256:4c0d9e72b1a83f56'
+        generatedAt: '2026-04-05T17:22:03.518Z'
+
     PullPreviewNoChanges:
       value:
         sourceId: a1Cg8000000AbCeEAK
@@ -4523,6 +4926,29 @@ components:
             kind: member-add-converged
             action: retired
             edgeId: a1Eg8000000AbD5EAK
+
+    PullCommitAcceptedSourceRevision:
+      summary: '🚧 MVP-30378 (planned) — the pinned claim now holds the candidate revision'
+      description: |
+        **🚧 Planned — MVP-30378, not yet implemented.** The commit that follows
+        `PullPreviewRevisionMoves` with one `accept-source-revision` decision. The superseded
+        tracking claim reports `action: null` as today. Nothing was written for it, and it renders
+        rev-4 because it follows T_R.
+      x-planned: { ticket: MVP-30378, assumptions: [A-30378-11] }
+      value:
+        sourceId: a1Cg8000000AbCeEAK
+        newSourceRevisionId: a1Dg8000000AbChEAK
+        acceptedRootRevisionId: a0Ag8000000Ab02EAC
+        acceptedAt: '2026-04-06T14:02:51.317Z'
+        applied:
+          - entryId: '8a3e5f09c2d71b64'
+            kind: claim-retained
+            action: accept-source-revision
+            edgeId: a1Eg8000000AbD1EAK
+          - entryId: '3b91c7e0d5a2f846'
+            kind: claim-superseded
+            action: null
+            edgeId: a1Eg8000000AbD2EAK
 
     PullCommitAlreadyCurrent:
       value:
