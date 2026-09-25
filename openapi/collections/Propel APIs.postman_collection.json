@@ -8161,6 +8161,264 @@
 									"uid": "46943044-b12cfdbc-3300-48c0-8171-8dd1a1e10f01"
 								},
 								{
+									"name": "🚧 MVP-30377 — update with autoClaim — claim and revise in one operation",
+									"protocolProfileBehavior": {
+										"disableBodyPruning": true
+									},
+									"request": {
+										"method": "POST",
+										"header": [
+											{
+												"key": "Content-Type",
+												"value": "application/json"
+											},
+											{
+												"key": "Accept",
+												"value": "application/json"
+											}
+										],
+										"body": {
+											"mode": "raw",
+											"raw": "{\n  \"operations\": [\n    {\n      \"op\": \"update\",\n      \"clientRef\": \"qty-in-one\",\n      \"ebomAssemblyId\": \"{{mbomEbomAssemblyId}}\",\n      \"quantity\": 3,\n      \"autoClaim\": true,\n      \"trackChildRevision\": true\n    }\n  ]\n}",
+											"options": {
+												"raw": {
+													"language": "json"
+												}
+											}
+										},
+										"url": {
+											"raw": "{{propelApiUrl}}/v4/mbom/branches/:branchId/deltas",
+											"host": [
+												"{{propelApiUrl}}"
+											],
+											"path": [
+												"v4",
+												"mbom",
+												"branches",
+												":branchId",
+												"deltas"
+											],
+											"variable": [
+												{
+													"key": "branchId",
+													"value": "{{mbomBranchId}}"
+												}
+											]
+										},
+										"description": "**🚧 Planned — MVP-30377, not yet implemented.**\n\n`update` on a `base` edge answers `CLAIM_REQUIRED` today. Claiming first cannot be folded into the same batch, because every operation validates against one pre-batch snapshot. So \"change this line's quantity\" is two requests. With `autoClaim: true` it is one.\n\n## Fields (in addition to `update`'s own)\n\n| Field | Required | Description |\n| --- | --- | --- |\n| `autoClaim` | | `true` claims a `base` edge and revises it in one operation. `false` or omitted keeps today's `CLAIM_REQUIRED`, which still carries the eBOM line. |\n| `trackChildRevision` | **exactly one of these two** whenever `autoClaim` is `true` | `true` means the claimed row keeps following its source line. This is the expected case. |\n| `childItemRevisionId` | | Claims **and pins** this revision. It must belong to the line's child item, or `REVISION_ITEM_MISMATCH` (422). |\n\n## What to assert\n\n- **Base edge:** 200. `results[0].claimed` is `true`, and `forked` is null [assumes A-30377-2, A-30377-3]. With `trackChildRevision: true`, the row stores no revision and renders exactly what it rendered before.\n- **Neither or both choice fields:** `422 REVISION_CHOICE_REQUIRED`, whatever state the row is in, and nothing is claimed.\n- **Edge the branch already owns:** a no-op claim. The update applies, and `claimed` is **null** (never `false`). A `childItemRevisionId` different from the stored one is `400 INVALID_REQUEST` naming `set-revision` [assumes A-30377-1].\n- **No guard is bypassed.** These all still refuse the operation:\n  - `NOT_EDITABLE` (nested row), `NOT_SUPPLIED` (excluded row), `STALE_REVISION`\n  - a non-positive quantity, or a second operation on the same edge in the batch\n  - a past `asOf` on a base edge (`INVALID_REQUEST`), and `REVISION_ITEM_MISMATCH`\n  - `[replace(L, X), update(L, autoClaim)]` in one batch, as `[replace(L, X), claim(L)]` is refused\n- **Hidden row:** a row hidden behind a pin answers `NOT_FOUND`.\n\n**Today:** `autoClaim` is an unknown key and is silently ignored. `trackChildRevision` is ignored on `update`. The operation answers **409 `CLAIM_REQUIRED`**."
+									},
+									"response": [
+										{
+											"name": "🚧 expected once MVP-30377 ships",
+											"originalRequest": {
+												"method": "POST",
+												"header": [
+													{
+														"key": "Content-Type",
+														"value": "application/json"
+													}
+												],
+												"body": {
+													"mode": "raw",
+													"raw": "{\n  \"operations\": [\n    {\n      \"op\": \"update\",\n      \"clientRef\": \"qty-in-one\",\n      \"ebomAssemblyId\": \"a0Bg8000000Ab11EAC\",\n      \"quantity\": 3,\n      \"autoClaim\": true,\n      \"trackChildRevision\": true\n    }\n  ]\n}",
+													"options": {
+														"raw": {
+															"language": "json"
+														}
+													}
+												},
+												"url": {
+													"raw": "{{propelApiUrl}}/v4/mbom/branches/:branchId/deltas",
+													"host": [
+														"{{propelApiUrl}}"
+													],
+													"path": [
+														"v4",
+														"mbom",
+														"branches",
+														":branchId",
+														"deltas"
+													],
+													"variable": [
+														{
+															"key": "branchId",
+															"value": "a1Bg8000000AbCdEAK"
+														}
+													]
+												}
+											},
+											"status": "OK",
+											"code": 200,
+											"_postman_previewlanguage": "json",
+											"header": [
+												{
+													"key": "Content-Type",
+													"value": "application/json"
+												}
+											],
+											"cookie": [],
+											"responseTime": null,
+											"body": "{\n  \"branchId\": \"a1Bg8000000AbCdEAK\",\n  \"atomic\": true,\n  \"asOf\": \"2026-04-05T17:24:40.220Z\",\n  \"applied\": 1,\n  \"failed\": 0,\n  \"results\": [\n    {\n      \"index\": 0,\n      \"clientRef\": \"qty-in-one\",\n      \"op\": \"update\",\n      \"success\": true,\n      \"errorCode\": null,\n      \"message\": null,\n      \"ciId\": \"a1Gg8000000AbF2EAK\",\n      \"edgeId\": \"a1Eg8000000AbD2EAK\",\n      \"forked\": null,\n      \"claimed\": true\n    }\n  ]\n}"
+										},
+										{
+											"name": "🚧 expected once MVP-30377 ships — no revision choice",
+											"originalRequest": {
+												"method": "POST",
+												"header": [
+													{
+														"key": "Content-Type",
+														"value": "application/json"
+													}
+												],
+												"body": {
+													"mode": "raw",
+													"raw": "{\n  \"operations\": [\n    {\n      \"op\": \"update\",\n      \"clientRef\": \"qty-in-one\",\n      \"quantity\": 3,\n      \"autoClaim\": true,\n      \"ebomAssemblyId\": \"a0Bg8000000Ab11EAC\"\n    }\n  ]\n}",
+													"options": {
+														"raw": {
+															"language": "json"
+														}
+													}
+												},
+												"url": {
+													"raw": "{{propelApiUrl}}/v4/mbom/branches/:branchId/deltas",
+													"host": [
+														"{{propelApiUrl}}"
+													],
+													"path": [
+														"v4",
+														"mbom",
+														"branches",
+														":branchId",
+														"deltas"
+													],
+													"variable": [
+														{
+															"key": "branchId",
+															"value": "a1Bg8000000AbCdEAK"
+														}
+													]
+												}
+											},
+											"status": "Unprocessable Entity",
+											"code": 422,
+											"_postman_previewlanguage": "json",
+											"header": [
+												{
+													"key": "Content-Type",
+													"value": "application/json"
+												}
+											],
+											"cookie": [],
+											"responseTime": null,
+											"body": "{\n  \"code\": \"REVISION_CHOICE_REQUIRED\",\n  \"message\": \"Choose how this line's part revision behaves: pick a specific revision to hold, or leave it to follow the timepoint in effect. (1 of 1 operations failed validation)\",\n  \"failures\": [\n    {\n      \"index\": 0,\n      \"clientRef\": \"qty-in-one\",\n      \"op\": \"update\",\n      \"success\": false,\n      \"errorCode\": \"REVISION_CHOICE_REQUIRED\",\n      \"message\": \"Choose how this line's part revision behaves: pick a specific revision to hold, or leave it to follow the timepoint in effect. (update with autoClaim requires childItemRevisionId or trackChildRevision: true)\",\n      \"ciId\": null,\n      \"edgeId\": null,\n      \"forked\": null,\n      \"claimed\": null\n    }\n  ]\n}"
+										},
+										{
+											"name": "🚧 expected once MVP-30377 ships — owned edge, different revision",
+											"originalRequest": {
+												"method": "POST",
+												"header": [
+													{
+														"key": "Content-Type",
+														"value": "application/json"
+													}
+												],
+												"body": {
+													"mode": "raw",
+													"raw": "{\n  \"operations\": [\n    {\n      \"op\": \"update\",\n      \"clientRef\": \"qty-in-one\",\n      \"assemblyCiId\": \"a1Eg8000000AbD1EAK\",\n      \"quantity\": 3,\n      \"autoClaim\": true,\n      \"childItemRevisionId\": \"a0Ag8000000Ab42EAC\"\n    }\n  ]\n}",
+													"options": {
+														"raw": {
+															"language": "json"
+														}
+													}
+												},
+												"url": {
+													"raw": "{{propelApiUrl}}/v4/mbom/branches/:branchId/deltas",
+													"host": [
+														"{{propelApiUrl}}"
+													],
+													"path": [
+														"v4",
+														"mbom",
+														"branches",
+														":branchId",
+														"deltas"
+													],
+													"variable": [
+														{
+															"key": "branchId",
+															"value": "a1Bg8000000AbCdEAK"
+														}
+													]
+												}
+											},
+											"status": "Bad Request",
+											"code": 400,
+											"_postman_previewlanguage": "json",
+											"header": [
+												{
+													"key": "Content-Type",
+													"value": "application/json"
+												}
+											],
+											"cookie": [],
+											"responseTime": null,
+											"body": "{\n  \"code\": \"INVALID_REQUEST\",\n  \"message\": \"That request could not be read. Check that the body is valid JSON and that every required value is supplied. (1 of 1 operations failed validation)\",\n  \"failures\": [\n    {\n      \"index\": 0,\n      \"clientRef\": \"qty-in-one\",\n      \"op\": \"update\",\n      \"success\": false,\n      \"errorCode\": \"INVALID_REQUEST\",\n      \"message\": \"That request could not be read. Check that the body is valid JSON and that every required value is supplied. (the edge is already owned; update does not change its revision -- use set-revision)\",\n      \"ciId\": null,\n      \"edgeId\": null,\n      \"forked\": null,\n      \"claimed\": null\n    }\n  ]\n}"
+										},
+										{
+											"name": "Today — autoClaim is ignored and the base row is refused",
+											"originalRequest": {
+												"method": "POST",
+												"header": [
+													{
+														"key": "Content-Type",
+														"value": "application/json"
+													}
+												],
+												"body": {
+													"mode": "raw",
+													"raw": "{\n  \"operations\": [\n    {\n      \"op\": \"update\",\n      \"clientRef\": \"qty-in-one\",\n      \"ebomAssemblyId\": \"a0Bg8000000Ab11EAC\",\n      \"quantity\": 3,\n      \"autoClaim\": true,\n      \"trackChildRevision\": true\n    }\n  ]\n}",
+													"options": {
+														"raw": {
+															"language": "json"
+														}
+													}
+												},
+												"url": {
+													"raw": "{{propelApiUrl}}/v4/mbom/branches/:branchId/deltas",
+													"host": [
+														"{{propelApiUrl}}"
+													],
+													"path": [
+														"v4",
+														"mbom",
+														"branches",
+														":branchId",
+														"deltas"
+													],
+													"variable": [
+														{
+															"key": "branchId",
+															"value": "a1Bg8000000AbCdEAK"
+														}
+													]
+												}
+											},
+											"status": "Conflict",
+											"code": 409,
+											"_postman_previewlanguage": "json",
+											"header": [
+												{
+													"key": "Content-Type",
+													"value": "application/json"
+												}
+											],
+											"cookie": [],
+											"responseTime": null,
+											"body": "{\n  \"code\": \"CLAIM_REQUIRED\",\n  \"message\": \"This row is supplied by the source and read-only. Claim it before editing. (1 of 1 operations failed validation)\",\n  \"failures\": [\n    {\n      \"index\": 0,\n      \"clientRef\": \"qty-in-one\",\n      \"op\": \"update\",\n      \"success\": false,\n      \"errorCode\": \"CLAIM_REQUIRED\",\n      \"message\": \"This row is supplied by the source and read-only. Claim it before editing. (edge a0Bg8000000Ab11EAC)\",\n      \"ciId\": null,\n      \"edgeId\": null,\n      \"forked\": null\n    }\n  ]\n}"
+										}
+									]
+								},
+								{
 									"name": "add — a part the eBOM never supplied",
 									"id": "c68af51b-b9af-4f6f-920f-d1f4b2c04516",
 									"protocolProfileBehavior": {

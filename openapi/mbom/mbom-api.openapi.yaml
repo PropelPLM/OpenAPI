@@ -83,6 +83,8 @@ info:
 
     A `base` row is read-only. Editing it is refused with `CLAIM_REQUIRED`, carrying the eBOM
     line id so the client can offer the claim. Divergence from upstream is always an explicit act.
+    (**🚧 Planned — MVP-30377, not yet implemented:** `update` with `autoClaim: true` claims and
+    revises in one operation. It is still explicit, and the result reports `claimed: true`.)
 
     ### 6. Nothing is ever deleted
 
@@ -176,6 +178,7 @@ info:
     | [MVP-30214](https://propelplm.atlassian.net/browse/MVP-30214) | **No wire change.** A `replace` substitute no longer absorbs an unrelated line that shares its child item. Each occurrence of an item rendered at two revisions gets its own pinned structure. `AMBIGUOUS_CORRELATION` is narrowed to genuine duplicates. |
     | [MVP-30375](https://propelplm.atlassian.net/browse/MVP-30375) | `TreeRow.isPinned` and `TreeRow.wasClaimed` on every tree read. `TreeRow.pinnedById` / `pinnedAt` on baseline rows. A `BASELINE_PIN_DRIFT` warning on the baseline read. |
     | [MVP-30376](https://propelplm.atlassian.net/browse/MVP-30376) | A `STORED_REVISION_RETIRED` warning on the branch tree read, one per row whose chosen revision is now Cancelled or Expired. The revision still renders. |
+    | [MVP-30377](https://propelplm.atlassian.net/browse/MVP-30377) | `DeltaOperation.autoClaim` on `update`, which claims and revises a `base` edge in one operation and carries the same revision choice as `claim`. `DeltaResult.claimed` reports it. |
 
   contact:
     name: Propel PLM Engineering
@@ -198,6 +201,7 @@ info:
     perOccurrencePins: MVP-30214
     overrideDisclosure: MVP-30375
     retiredStoredRevision: MVP-30376
+    autoClaim: MVP-30377
   x-design-doc: docs/architecture/mbom/mbom-pull-api.md
   x-demo-plan: docs/architecture/mbom/mbom-demo-test-plan.md
 
@@ -585,6 +589,12 @@ paths:
 
         > **Dependent edits are two requests, not two operations.**
 
+        > **🚧 Planned — MVP-30377, not yet implemented.** The most common dependent pair, claim then
+        > change a quantity, becomes **one** operation:
+        > `{"op": "update", "ebomAssemblyId": "…", "quantity": 3, "autoClaim": true, "trackChildRevision": true}`.
+        > The batch still does not sequence, so `[claim(L), update(L)]` still answers
+        > `CLAIM_REQUIRED`. [assumes A-30377-1]
+
         ## `atomic` — the failure contract is yours to choose
 
         | `atomic` | Behaviour |
@@ -627,6 +637,12 @@ paths:
         | `revert` | `ciId` **or** `ebomAssemblyId` | Discards the branch's claim so the row falls back to what its source supplies. Nothing on disk is touched — a `Revert` marker is appended and the fold drops it entirely. |
         | `convert-to-native` | `ciId`, and **exactly one of** `childItemRevisionId` \| `trackChildRevision: true` | Severs a claiming edge's link to the source it claims: same quantity and find number, but now branch-owned in its own right (`provenance` flips `claiming` → `new`). Appends an `Add` with `Claims_Source__c` null; the child revision is the caller's choice — a chosen revision is stamped on, `trackChildRevision: true` floats at `asOf`. |
 
+        > **🚧 Planned — MVP-30377, not yet implemented.** `update` gains an optional
+        > `autoClaim: true`. With it, the operation also needs **exactly one of**
+        > `childItemRevisionId` | `trackChildRevision: true`, and an update of a `base` edge claims
+        > and revises in one operation instead of answering `CLAIM_REQUIRED`. The result says so
+        > with `claimed: true`. See `DeltaOperation.autoClaim`. [assumes A-30377-1, A-30377-2]
+
         ### Choosing a child revision (MVP-30357)
 
         A stored revision must always mean somebody chose it, so the operations that create or take
@@ -637,7 +653,12 @@ paths:
         | `claim` | **pins** the claimed row to it | row **tracks** the source line — the revision its unclaimed self would render, at T_R, moving when a pull accepts a newer source | `422 REVISION_CHOICE_REQUIRED` | `422 REVISION_CHOICE_REQUIRED` |
         | `convert-to-native` | **stamped** onto the native row | nothing stored; the native row **floats** at `asOf`, like an `add` | `422 REVISION_CHOICE_REQUIRED` | `422 REVISION_CHOICE_REQUIRED` |
         | `add`, `replace` | **pins** the new row / substitute | ignored — blank already means track | the row **floats** at `asOf` (the default) | pins; the flag is ignored |
+        | 🚧 MVP-30377: `update` with `autoClaim: true`, on a `base` edge | claims and **pins** | claims and **tracks** | `422 REVISION_CHOICE_REQUIRED` | `422 REVISION_CHOICE_REQUIRED` |
+        | 🚧 MVP-30377: `update` with `autoClaim: true`, on an owned edge | accepted if equal to the stored revision, else `400 INVALID_REQUEST` naming `set-revision` | ignored | `422 REVISION_CHOICE_REQUIRED` | `422 REVISION_CHOICE_REQUIRED` |
         | every other op | ignored | ignored | — | — |
+
+        > **🚧 Planned — MVP-30377, not yet implemented.** The two `update` rows above are
+        > planned. [assumes A-30377-1]
 
         - **There is no server-side "pin what I see".** To pin the revision the tree is showing, or
           to have a convert "keep what it shows", send back that row's own
@@ -723,6 +744,17 @@ paths:
                       assemblyCiId: a1Eg8000000AbD1EAK
                       quantity: 4
                       findNumber: 10
+              updateAutoClaim:
+                summary: '🚧 MVP-30377 (planned) — claim a base line and change its quantity in one operation'
+                x-planned: { ticket: MVP-30377, assumptions: [A-30377-1] }
+                value:
+                  operations:
+                    - op: update
+                      clientRef: qty-in-one
+                      ebomAssemblyId: a0Bg8000000Ab11EAC
+                      quantity: 3
+                      autoClaim: true
+                      trackChildRevision: true
               addLocal:
                 summary: Add a part the eBOM never supplied
                 value:
@@ -796,6 +828,9 @@ paths:
                 forked:
                   summary: An update that had to fork a frozen revision
                   $ref: '#/components/examples/DeltaBatchForked'
+                autoClaimed:
+                  summary: '🚧 MVP-30377 (planned) — an update that claimed a base line'
+                  $ref: '#/components/examples/DeltaBatchAutoClaimed'
         '400':
           description: |
             `INVALID_REQUEST` — the body could not be read; or (under `atomic: true`) an operation
@@ -803,6 +838,12 @@ paths:
             an operation that refuses a past `asOf`.
 
             `ASOF_INVALID` / `ASOF_IN_FUTURE` — the batch's own `asOf`.
+
+            > **🚧 Planned — MVP-30377, not yet implemented.** Also `INVALID_REQUEST`: an `update`
+            > with `autoClaim: true` on an edge the branch already owns, sending a
+            > `childItemRevisionId` different from the stored one. Use `set-revision` to change it.
+            > An `update` with `autoClaim` on a `base` edge at a past `asOf` is refused too, as a
+            > `claim` is. [assumes A-30377-1]
           content:
             application/json:
               schema: { $ref: '#/components/schemas/RestError' }
@@ -823,7 +864,7 @@ paths:
 
             | code | Cause | Remedy |
             |---|---|---|
-            | `CLAIM_REQUIRED` | a write targeted a `base` row | `claim` it first |
+            | `CLAIM_REQUIRED` | a write targeted a `base` row | `claim` it first — or, 🚧 once MVP-30377 ships, send the `update` with `autoClaim: true` [assumes A-30377-1] |
             | `ALREADY_CLAIMED` | `claim` on a row this branch already owns | edit it directly |
             | `ALREADY_EXCLUDED` | `exclude` on a tombstoned row; or `convert-to-native` of one, which has no content to retain | `restore` it first |
             | `NOT_EXCLUDED` | `restore` on a row that is not excluded | nothing to restore — your view is stale |
@@ -2418,6 +2459,11 @@ components:
 
             There is no server-side "pin current". To pin what the tree shows, or to have a convert
             keep what it shows, send back that row's `detail.childItemRevisionId`.
+
+            > **🚧 Planned — MVP-30377, not yet implemented.** Also read by `update` sent with
+            > `autoClaim: true`. On a `base` edge it pins the claim the update performs. On an owned
+            > edge it must equal the stored revision, or the update answers `400 INVALID_REQUEST`
+            > naming `set-revision`. [assumes A-30377-1]
           examples: ['a0Ag8000000Ab31EAC']
         trackChildRevision:
           oneOf: [{ type: boolean }, { type: 'null' }]
@@ -2435,6 +2481,44 @@ components:
             neither, or both, is `422 REVISION_CHOICE_REQUIRED`. **Ignored, not refused, on every
             other operation** — `add` and `replace` already track when `childItemRevisionId` is
             blank, and refusing it would make one shared client payload shape invalid for them.
+
+            > **🚧 Planned — MVP-30377, not yet implemented.** It is also read by `update` sent with
+            > `autoClaim: true`, which makes the same exactly-one choice. See `autoClaim`.
+            > [assumes A-30377-1]
+        autoClaim:
+          oneOf: [{ type: boolean }, { type: 'null' }]
+          x-planned: { ticket: MVP-30377, assumptions: [A-30377-1, A-30377-4] }
+          description: |
+            **🚧 Planned — MVP-30377, not yet implemented.** `update` only. When `true`, an update
+            of a `base` edge **claims it and revises it in one operation**, instead of answering
+            `409 CLAIM_REQUIRED`. Today that needs two requests, because a batch validates every
+            operation against one pre-batch snapshot.
+
+            - **The implicit claim makes the same revision choice `claim` does.** Whenever
+              `autoClaim` is `true`, send exactly one of `trackChildRevision: true` or
+              `childItemRevisionId`. `trackChildRevision: true` is the expected case: the row keeps
+              following its source line. `childItemRevisionId` claims and pins. Neither, or both,
+              answers `422 REVISION_CHOICE_REQUIRED`, whatever state the row is in, and nothing is
+              claimed. There is no default, for the reason `claim` has none.
+            - **The result reports the claim.** `DeltaResult.claimed` is `true`. `CLAIM_REQUIRED`
+              would have disclosed the eBOM line before the fact; this discloses it after.
+            - **On an edge the branch already owns**, the flag is a no-op claim, and the update
+              proceeds normally with `claimed` left null. `trackChildRevision` is ignored there. A
+              `childItemRevisionId` equal to the stored one is accepted. A **different** one is
+              refused with `400 INVALID_REQUEST` naming `set-revision`, rather than being silently
+              dropped.
+            - **It bypasses no other guard.** These all still refuse the operation:
+              - `NOT_EDITABLE` on a nested row, `NOT_SUPPLIED` on an excluded one, `STALE_REVISION`
+              - a non-positive quantity, or a second operation on the same edge in the batch
+              - every guard `claim` applies: a past `asOf` on a `base` edge (`INVALID_REQUEST`),
+                `REVISION_ITEM_MISMATCH`, and a membership change on the same row earlier in the
+                batch. So `[replace(L, X), update(L, autoClaim)]` is refused, as
+                `[replace(L, X), claim(L)]` is.
+            - A row hidden behind a pin answers `NOT_FOUND`, as plain `update` does today.
+
+            `false` and null both mean off: today's `CLAIM_REQUIRED`, still carrying the eBOM line.
+            Ignored, not refused, on every other operation. [assumes A-30377-1, A-30377-4]
+          examples: [true]
 
     DeltaBatchResponse:
       type: object
@@ -2507,6 +2591,22 @@ components:
             (there was nothing to fork on a `claim` or an `exclude`); `false` means *this write could
             have forked and did not*. A client must treat them differently, so the field must be able
             to say both.
+
+            > **🚧 Planned — MVP-30377, not yet implemented.** `null` on an `update` that
+            > auto-claimed (`claimed: true`). It minted a claim's first revision, exactly as `claim`
+            > does, so there was nothing to fork. [assumes A-30377-3]
+        claimed:
+          oneOf: [{ type: boolean }, { type: 'null' }]
+          x-planned: { ticket: MVP-30377, assumptions: [A-30377-2] }
+          description: |
+            **🚧 Planned — MVP-30377, not yet implemented.** `true` when this operation took
+            ownership of a `base` edge on the caller's behalf, which only an `update` sent with
+            `autoClaim: true` can do. Nothing else in the response would say so: `edgeId` is
+            populated either way.
+
+            **Never `false`.** It is `null` whenever no claim was performed: `autoClaim` off, an
+            `autoClaim` on an edge the branch already owned, a failure, and every other operation.
+            [assumes A-30377-2]
 
     # -------------------------------------------------- baselines
 
@@ -3895,6 +3995,31 @@ components:
             ciId: a1Gg8000000AbF1EAK
             edgeId: a1Eg8000000AbD1EAK
             forked: true
+
+    DeltaBatchAutoClaimed:
+      summary: '🚧 MVP-30377 (planned) — update with autoClaim on a base line'
+      description: |
+        **🚧 Planned — MVP-30377, not yet implemented.** One operation claimed the line and revised
+        its quantity. `claimed: true` is the after-the-fact disclosure. `forked` is null because
+        nothing was forked: a claim mints its first revision.
+      x-planned: { ticket: MVP-30377, assumptions: [A-30377-2, A-30377-3] }
+      value:
+        branchId: a1Bg8000000AbCdEAK
+        atomic: true
+        asOf: '2026-04-05T17:24:40.220Z'
+        applied: 1
+        failed: 0
+        results:
+          - index: 0
+            clientRef: qty-in-one
+            op: update
+            success: true
+            errorCode: null
+            message: null
+            ciId: a1Gg8000000AbF2EAK
+            edgeId: a1Eg8000000AbD2EAK
+            forked: null
+            claimed: true
 
     DeltaBatchAtomicFailure:
       value:
