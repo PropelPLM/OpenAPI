@@ -25,7 +25,7 @@ info:
 
     When an MBOM is created (or a pull is committed), the accepted root revision's
     **release date** is stamped once as `Source_TimePoint__c`. That timestamp is **T_R**, and every
-    inherited row resolves against it: a child item renders at whichever revision was released as
+    `base` row resolves against it: a child item renders at whichever revision was released as
     of T_R.
 
     T_R is *stamped, then read* — never re-derived. So when engineering releases `Assy-100` rev-2,
@@ -42,24 +42,27 @@ info:
 
     | Row kind | Governing clock |
     |---|---|
-    | `inherited` — supplied by the source, untouched | **T_R** (`source`) |
-    | `claimed` — the branch took copy-on-write ownership | **T_R** for the child revision it pins |
-    | `local` — branch-owned, no upstream provenance | **`asOf`** (`branch`) |
+    | `base` — supplied by the source, untouched | **T_R** (`source`) |
+    | `claiming` — the branch took copy-on-write ownership of a source row | **`asOf`** (`branch`) for its quantity and find number |
+    | `new` — branch-owned, no upstream provenance | **`asOf`** (`branch`) |
     | a *substitute* (from `replace`) | **`asOf`** — its child floats |
 
     A direct consequence is that **one item can render at two different revisions in the same
-    tree**. That is expected, not a fault, and is reported as a `mixed-revision` warning beside the
+    tree**. That is expected, not a fault, and is reported as a `MIXED_REVISION` warning beside the
     data rather than an error instead of it.
 
-    ### 4. Provenance: `inherited` / `claimed` / `local`
+    ### 4. Provenance: `base` / `claiming` / `new`
 
-    Derived at read time, never stored. `claimed` and `local` differ by exactly one field on the
-    winning delta row (`Overrides_Source__c` set vs. null), and that difference is what makes
-    "what did I change relative to upstream?" answerable.
+    Derived at read time, never stored. `claiming` and `new` differ by exactly one field on the
+    winning delta row (`Claims_Source__c` set vs. null), and that difference is what makes
+    "what did I change relative to upstream?" answerable. A fourth value, `nested`, marks the
+    read-only rows beneath a locally added or substituted assembly.
+
+    *Renamed in MVP-30309 — these were `inherited` / `claimed` / `local` before.*
 
     ### 5. Copy-on-write: you must `claim` before you can edit
 
-    An inherited row is read-only. Editing it is refused with `CLAIM_REQUIRED`, carrying the eBOM
+    A `base` row is read-only. Editing it is refused with `CLAIM_REQUIRED`, carrying the eBOM
     line id so the client can offer the claim. Divergence from upstream is always an explicit act.
 
     ### 6. Nothing is ever deleted
@@ -73,7 +76,7 @@ info:
     Cutting a baseline records one timestamp and freezes the revisions it resolved to. Reading it
     **re-resolves** the branch at that timestamp. Two stored counts act as canaries if something the
     resolution depends on has moved since — `BASELINE_COUNT_DRIFT` for the row count, and
-    `BASELINE_PROVENANCE_DRIFT` for how many of those rows are the branch's own overrides.
+    `BASELINE_PROVENANCE_DRIFT` for how many of those rows are the branch's own claims.
 
     ### 8. "Pull", not "merge"
 
@@ -118,7 +121,7 @@ info:
 
     MBOM is the first application of a general branch / baseline / configuration-item framework. The
     path is namespaced under `/mbom` so MBOM-only rules have somewhere to live, but the nouns below
-    that segment — **branch**, **source**, **member**, **override**, **baseline** — are framework
+    that segment — **branch**, **source**, **member**, **claim**, **baseline** — are framework
     concepts, not MBOM concepts. Everything MBOM-specific is confined to a single discriminated
     schema, `AssemblyEdgeDetail`, reached through `MemberState.detail` and keyed by `ciKind`. A
     second configuration-item type adds a sibling schema there and touches nothing else.
@@ -143,6 +146,7 @@ info:
     pullPreview: MVP-30076
     pullCommit: MVP-30077
     comparison: MVP-30296
+    vocabularyRename: MVP-30309
   x-design-doc: docs/architecture/mbom/mbom-pull-api.md
   x-demo-plan: docs/architecture/mbom/mbom-demo-test-plan.md
 
@@ -213,7 +217,7 @@ paths:
 
         ## The root revision must be Released
 
-        Its `Released_Date_Time__c` becomes **T_R**, the timepoint every inherited row is pinned at.
+        Its `Released_Date_Time__c` becomes **T_R**, the timepoint every `base` row resolves at.
         An unreleased revision has no such date, so there is nothing to pin to.
 
         Four shapes are refused with `NOT_RELEASED` (409, not 400 — releasing the revision makes the
@@ -225,7 +229,7 @@ paths:
 
         | Field | Value | Why it matters |
         |---|---|---|
-        | `Source_TimePoint__c` (**T_R**) | the root revision's release date | what inherited rows resolve at, forever |
+        | `Source_TimePoint__c` (**T_R**) | the root revision's release date | what `base` rows resolve at, forever |
         | `Accepted_At__c` | the **wall clock**, now | which acceptance governs a given `asOf` |
 
         A consequence worth knowing before you write a test: because `Accepted_At__c` is the wall
@@ -373,7 +377,7 @@ paths:
               schema: { $ref: '#/components/schemas/StructureTree' }
               examples:
                 flat:
-                  summary: Flat (default) — inherited, claimed, local and excluded rows
+                  summary: Flat (default) — base, claiming, new and excluded rows
                   $ref: '#/components/examples/BranchTreeFlat'
                 nested:
                   summary: Nested (`flat=false`)
@@ -414,7 +418,7 @@ paths:
         branch's claims, excludes and replaces deliberately **not** overlaid.
 
         Use it to answer "what did I change relative to upstream?" by diffing this against
-        `GET /mbom/branches/{branchId}/tree`. Every row comes back `provenance: inherited`.
+        `GET /mbom/branches/{branchId}/tree`. Every row comes back `provenance: base`.
 
         ## Why there is no `flat` parameter
 
@@ -517,25 +521,25 @@ paths:
 
         | `op` | Required fields | What it does |
         |---|---|---|
-        | `claim` | `ebomAssemblyId` | Takes one live eBOM line into the branch as a copy-on-write override, so the branch can diverge from it. Copies the values as they stand. Writes 5 records. |
+        | `claim` | `ebomAssemblyId` | Takes one live eBOM line into the branch as a copy-on-write claim, so the branch can diverge from it. Copies the values as they stand. Writes 5 records. |
         | `update` | `assemblyCiId` **or** `ebomAssemblyId`; `quantity` and/or `findNumber` | Revises a branch-owned edge. Edits its `CI_Rev__c` in place while Draft; otherwise allocates a new revision, freezes the old one, and returns `forked: true`. Membership is not touched. |
-        | `add` | `parentItemId`, `childItemId`, `quantity`, `findNumber` | Adds a part the eBOM never supplied — packaging, fixtures, consumables. Branch-**local**: `Overrides_Source__c` stays null, and the child **floats** at `asOf`. |
+        | `add` | `parentItemId`, `childItemId`, `quantity`, `findNumber` | Adds a part the eBOM never supplied — packaging, fixtures, consumables. Provenance `new`: `Claims_Source__c` stays null, and the child **floats** at `asOf`. |
         | `exclude` | `ebomAssemblyId` **or** `ciId` | Tombstones a row. **No cascade is written** — the descendant prune is computed at read time, because a descendant still supplied through another path must survive. |
-        | `restore` | `ciId` | Lifts an exclusion. Appends `Add` when the branch holds content for the row, or `Revert` when it does not (an inherited row excluded straight from a stub) — appending `Add` blindly would break the next read. |
+        | `restore` | `ciId` | Lifts an exclusion. Appends `Add` when the branch holds content for the row, or `Revert` when it does not (a `base` row excluded straight from a stub) — appending `Add` blindly would break the next read. |
         | `replace` | `replacedEbomAssemblyId`, `newChildItemId`, `quantity`, `findNumber` | Substitutes a different child for the one an eBOM line supplies, **recording that it is a substitution** (`Replaces__c`), so the pair does not read as an unrelated removal plus an unrelated addition. |
-        | `revert` | `ciId` **or** `ebomAssemblyId` | Discards the branch's override so the row falls back to what its source supplies. Nothing on disk is touched — a `Revert` marker is appended and the fold drops it entirely. |
-        | `convert-to-native` | `ciId` | Severs a claimed edge's link to the source it overrides: same content, but now branch-owned in its own right (`provenance` flips `claimed` → `local`). Appends an `Add` with `Overrides_Source__c` null. |
+        | `revert` | `ciId` **or** `ebomAssemblyId` | Discards the branch's claim so the row falls back to what its source supplies. Nothing on disk is touched — a `Revert` marker is appended and the fold drops it entirely. |
+        | `convert-to-native` | `ciId` | Severs a claiming edge's link to the source it claims: same content, but now branch-owned in its own right (`provenance` flips `claiming` → `new`). Appends an `Add` with `Claims_Source__c` null. |
 
         ### Addressing quirks worth knowing
 
-        - `update` accepts `ebomAssemblyId` **and has to**: an inherited row has no edge record, so
+        - `update` accepts `ebomAssemblyId` **and has to**: a `base` row has no edge record, so
           that is the only id a client holds for the row whose update must come back
           `CLAIM_REQUIRED`. Without it the rejection could never be reached.
         - `revert` accepts `ebomAssemblyId` for the mirror reason: a reverted row renders with no
-          `CI__c` at all, so a *second* revert — which must answer `NO_OVERRIDE` — cannot be
+          `CI__c` at all, so a *second* revert — which must answer `NO_CLAIM` — cannot be
           addressed any other way.
-        - `replace` only works on eBOM-derived rows. A branch-**local** row has a synthetic
-          `local-…` edge key and no `Assembly__c` line, so replacing local content is `update`, or
+        - `replace` only works on eBOM-derived rows. A `new` row has a synthetic `new-…` edge
+          key and no `Assembly__c` line, so replacing branch-added content is `update`, or
           `exclude` plus `add`.
 
         ## Access
@@ -572,7 +576,7 @@ paths:
                       clientRef: row-bracket
                       ebomAssemblyId: a0Bg8000000Ab11EAC
               update:
-                summary: Revise quantity and find number on a claimed edge
+                summary: Revise quantity and find number on a claiming edge
                 value:
                   operations:
                     - op: update
@@ -660,20 +664,28 @@ paths:
 
             | code | Cause | Remedy |
             |---|---|---|
-            | `CLAIM_REQUIRED` | a write targeted an inherited row | `claim` it first |
+            | `CLAIM_REQUIRED` | a write targeted a `base` row | `claim` it first |
             | `ALREADY_CLAIMED` | `claim` on a row this branch already owns | edit it directly |
-            | `ALREADY_EXCLUDED` | `exclude` on a tombstoned row | `restore` it first |
+            | `ALREADY_EXCLUDED` | `exclude` on a tombstoned row; or `convert-to-native` of one, which has no content to retain | `restore` it first |
+            | `NOT_EXCLUDED` | `restore` on a row that is not excluded | nothing to restore — your view is stale |
             | `ALREADY_PRESENT` | `add` of a (parent, child) the branch already carries locally; or an op on a **replaced** row | edit the existing row; or act on the substitute |
-            | `NO_OVERRIDE` | `restore`/`revert`/`convert-to-native` on a row the branch asserts nothing about | nothing to undo |
+            | `NO_CLAIM` | `revert` on a row the branch asserts nothing about; `convert-to-native` on a row that is already `new` | nothing to undo or sever |
             | `NOT_SUPPLIED` | `revert` on a row no source supplies — falling back would make it vanish | `exclude` instead |
             | `STALE_REVISION` | `update` against a revision superseded since your view | reload and retry |
             | `NOT_EDITABLE` | the target is inside the subtree of a locally added or substituted assembly | only source-supplied content is editable |
+            | `CONCURRENT_WRITE` | another transaction holds this branch's write lock | send the same request again |
+
+            *`NO_CLAIM` was `NO_OVERRIDE` before MVP-30309; `restore` of a row that is not excluded
+            answered it too, and now has its own code — a row can be claiming and not excluded at
+            once, so "no claim" would be false for exactly that row.*
           content:
             application/json:
               schema: { $ref: '#/components/schemas/RestError' }
               examples:
                 claimRequired:
                   $ref: '#/components/examples/DeltaBatchAtomicFailure'
+                concurrentWrite:
+                  $ref: '#/components/examples/ConcurrentWrite'
         '413':
           description: '`BATCH_TOO_LARGE` — more than 200 operations. Split the change.'
           content:
@@ -808,6 +820,17 @@ paths:
                     message: 'A timepoint cannot be in the future. Use now or an earlier moment. (2027-01-01T00:00:00Z)'
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFoundPath' }
+        '409':
+          description: |
+            `CONCURRENT_WRITE` — another transaction holds this branch's write lock (a delta batch or
+            a pull commit in flight). The cut claims its log position under the same lock, so it
+            waits for nobody; send the same request again.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RestError' }
+              examples:
+                concurrentWrite:
+                  $ref: '#/components/examples/ConcurrentWrite'
         '422':
           description: '`EBOM_CYCLE` — the source eBOM contains a cycle, so nothing can be resolved to cut.'
           content:
@@ -850,14 +873,14 @@ paths:
         | warningCode | What moved |
         |---|---|
         | `BASELINE_COUNT_DRIFT` | the baseline re-derived a **different number of rows** than its cut recorded — a corrected release date, an edit to an already-released BOM |
-        | `BASELINE_PROVENANCE_DRIFT` | the same rows came back with a **different number of them claimed** — an override severed or added since the cut. The row count cannot see this, because severing one moves no row |
+        | `BASELINE_PROVENANCE_DRIFT` | the same rows came back with a **different number of them `claiming`** — a claim severed or added since the cut. The row count cannot see this, because severing one moves no row |
 
         Both **warn rather than throw**: the rows returned are still the honest answer for the
         stored timepoint. Each comparison is skipped when the cut never recorded its counter, so a
         baseline taken before a counter existed does not warn on every read.
 
         Neither is complete, and the response does not pretend otherwise. A same-second revision of
-        a claimed row's quantity moves no count on either axis, and an edit to an inherited line's
+        a claiming row's quantity moves no count on either axis, and an edit to a `base` line's
         own fields moves none either. Both gaps have one cause — a whole-second `Datetime` used as
         the fold's boundary — and closing it needs a monotonic log position rather than a third
         counter.
@@ -908,7 +931,7 @@ paths:
         org returns identical output, including identical `entryId` values.
 
         **Not every entry is a decision.** Most are informational: the caller is being told what will
-        happen, not asked. Only `override-orphaned` blocks a commit.
+        happen, not asked. Only `claim-orphaned` blocks a commit.
 
         **Already current is not an error.** If the branch already resolves against the newest
         released root revision, this returns `200` with `hasChanges: false` and an empty `entries`
@@ -938,7 +961,7 @@ paths:
         Overlaying the branch onto the candidate side would match nothing (the deltas are keyed on
         line ids that do not exist under the new root) and would append every delta as an unmatched
         local edge — which **resurrects the orphans**, correlating a claim on a removed line with the
-        branch's own edge so `override-orphaned` is never raised. That entry is the only required
+        branch's own edge so `claim-orphaned` is never raised. That entry is the only required
         decision in the entire feature; silently losing it would make a commit that should block
         succeed.
 
@@ -950,17 +973,20 @@ paths:
         | `member-version-advance` | informational | — | An edge's child resolves to a newer released revision because T_R moved. |
         | `member-added` | informational | — | The candidate adds an edge the branch has no native edge on. Enters automatically. |
         | `member-removed` | informational | — | The candidate removes an edge the branch never claimed or replaced. Applies automatically. |
-        | `override-retained` | informational | — | The branch's override still differs from upstream; the branch wins and upstream is suppressed. `retargeted` distinguishes a suppressed **field value** from a suppressed **re-target**. |
-        | `override-superseded` | informational | — | The branch's override now *matches* what the candidate would natively produce. |
-        | `override-orphaned` | **required** | `convert-to-native`, `remove` | The candidate removes an edge the branch **claimed or replaced**. **Blocks the commit.** |
+        | `claim-retained` | informational | — | The branch's claim still differs from upstream; the branch wins and upstream is suppressed. `retargeted` distinguishes a suppressed **field value** from a suppressed **re-target**. |
+        | `claim-superseded` | informational | — | The branch's claim now *matches* what the candidate would natively produce. |
+        | `claim-orphaned` | **required** | `convert-to-native`, `remove` | The candidate removes an edge the branch **claimed or replaced**. **Blocks the commit.** |
         | `member-add-collision` | informational | — | The candidate adds an edge whose correlation key coincides with a branch-**native** edge, and the two **differ**. The branch's content wins automatically and is left untouched. |
-        | `member-add-converged` | informational | — | The same collision, except the candidate's quantity, find number **and** resolved child revision are all identical to the branch's own. The commit retires the branch's now-redundant local edge (`action: "retired"`); the position becomes ordinary inherited content. |
+        | `member-add-converged` | informational | — | The same collision, except the candidate's quantity, find number **and** resolved child revision are all identical to the branch's own. The commit retires the branch's now-redundant local edge (`action: "retired"`); the position becomes ordinary `base` content. |
 
         `member-add-collision` and `member-add-converged` are the same coincidence resolving two
         ways. Converged requires all three of quantity, find number and resolved child revision to
         match; any difference makes it a plain collision. Neither is ever a decision: on a
         collision nothing is written and the branch's row stands, and on a converged entry the
-        commit retires the branch's local edge. An `override-superseded` override is never retired.
+        commit retires the branch's local edge. A `claim-superseded` claim is never retired.
+
+        *The three `claim-*` kinds were `override-retained` / `override-superseded` /
+        `override-orphaned` before MVP-30309.*
 
         ### Why a revision advance is never a decision
 
@@ -972,7 +998,7 @@ paths:
         ### Why upstream re-pointing an edge at a *different item* is two entries
 
         The correlation key includes the child item, so it never correlates as one matched pair. It
-        decomposes into an independent `member-removed` (or `override-orphaned`) and an independent
+        decomposes into an independent `member-removed` (or `claim-orphaned`) and an independent
         `member-added`. `retargeted: true` therefore means a different child **revision**, not a
         different child item.
 
@@ -1057,7 +1083,7 @@ paths:
       summary: Commit a previewed pull, advancing T_R
       description: |
         Accepts a newer eBOM root revision into the branch: appends a new `Branch_Source_Rev__c`
-        advancing T_R, advances the source's root pointer, applies the caller's `override-orphaned`
+        advancing T_R, advances the source's root pointer, applies the caller's `claim-orphaned`
         dispositions, and retires any `member-add-converged` local edge — **all under one savepoint**.
 
         Returns **`201 Created`**, not 200: a new acceptance record genuinely exists.
@@ -1077,7 +1103,7 @@ paths:
 
         | Situation | Result |
         |---|---|
-        | An `override-orphaned` entry with **no** decision | `409 DISPOSITION_REQUIRED` — the whole commit is rejected. There is no default-accept tier. |
+        | An `claim-orphaned` entry with **no** decision | `409 DISPOSITION_REQUIRED` — the whole commit is rejected. There is no default-accept tier. |
         | A decision naming any **other** kind | `400 INVALID_REQUEST` — no other kind is ever actionable. |
         | An unrecognised `action` | `400 INVALID_REQUEST`. |
 
@@ -1086,16 +1112,16 @@ paths:
         | `convert-to-native` | Severs the provenance link, keeping the branch-owned content, which then resolves on the **branch** clock. Runs through the ordinary `convert-to-native` delta operation — every invariant that batch enforces applies unchanged. |
         | `remove` | Appends an **exclude** delta (a deletion marker). **Nothing is hard-deleted.** |
 
-        ## Override reconciliation: reported, never persisted
+        ## Claim reconciliation: reported, never persisted
 
-        For every existing claimed/replaced field, the commit compares the override's current value
+        For every existing claimed/replaced field, the commit compares the claim's current value
         against what the candidate traversal would natively produce:
 
-        - **Differs** → reported as `override-retained` / **reaffirmed**. It stays active and
+        - **Differs** → reported as `claim-retained` / **reaffirmed**. It stays active and
           continues to govern future pulls. **Nothing new is persisted** — the comparison is
           reconstructed from the accepted source version on every pull, so a "reaffirmation" record
           would change no rendered value.
-        - **Matches** → reported as `override-superseded`. Also **never deleted and never written**.
+        - **Matches** → reported as `claim-superseded`. Also **never deleted and never written**.
           Retiring it would mean a branch that once happened to agree with upstream would silently
           start accepting upstream changes from then on.
 
@@ -1106,9 +1132,9 @@ paths:
         ## Retiring a converged local add
 
         A `member-add-converged` entry is retired without a decision. "Retired" means **one appended
-        `Branch_Member__c` row of `Delta_Type__c = 'Revert'`**, with `Overrides_Source__c` null —
+        `Branch_Member__c` row of `Delta_Type__c = 'Revert'`**, with `Claims_Source__c` null —
         nothing is deleted, and a read dated before this commit still renders the local add. The
-        position becomes ordinary inherited content pinned at the new T_R, so it follows the source
+        position becomes ordinary `base` content resolved at the new T_R, so it follows the source
         from then on.
 
         Reported in `applied[]` as `{"kind": "member-add-converged", "action": "retired"}`, inside
@@ -1118,7 +1144,7 @@ paths:
 
         One outer savepoint around both the disposition batch and the acceptance insert, rolled back
         on any exception from either. A failure part way leaves the prior accepted revision and T_R
-        in place, with no orphaned claim, exclude or override-status records.
+        in place, with no orphaned claim, exclude or claim-status records.
 
         ## The already-current commit
 
@@ -1183,7 +1209,7 @@ paths:
         '400':
           description: |
             `INVALID_REQUEST` — the body could not be read; a decision names an entry that is not
-            `override-orphaned`; or `action` is not one of `convert-to-native` / `remove`.
+            `claim-orphaned`; or `action` is not one of `convert-to-native` / `remove`.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/RestError' }
@@ -1279,7 +1305,7 @@ paths:
         ### Provenance is reported, never classified
 
         Each entry's `left` / `right` state carries `provenance` and `governingClock`, so a
-        claimed-versus-inherited difference is visible without a kind of its own. A provenance-only
+        claiming-versus-base difference is visible without a kind of its own. A provenance-only
         difference is **not** a content difference and produces no entry: the same part at the same
         quantity in the same position is the same member however each side came to hold it. A
         branch that claimed a member without changing it therefore reads as unchanged against its
@@ -1288,7 +1314,7 @@ paths:
         ## What a comparison deliberately does not have
 
         - **No decision tier and no actions.** A comparison initiates nothing, so `decision`,
-          `availableActions`, `retargeted` and `overrideKind` are **absent** from an entry rather
+          `availableActions`, `retargeted` and `claimKind` are **absent** from an entry rather
           than defaulted — a consumer cannot read a default as an answer. That is also why
           `CompareEntry` is not the pull's `DiffEntry`, whose `current` / `candidate` naming would
           be a lie on a symmetric pair.
@@ -1537,8 +1563,8 @@ components:
         is `ASOF_IN_FUTURE` (400).
 
         Governs the branch's own deltas, local content and substitutes. It does **not** govern
-        inherited content, which always resolves at T_R — that is the two-clock model, and passing
-        `asOf` to the inherited traversal is the single change that would quietly make a pinned MBOM
+        `base` content, which always resolves at T_R — that is the two-clock model, and passing
+        `asOf` to the source traversal is the single change that would quietly make a pinned MBOM
         float.
 
         Accepts ISO-8601 (`2026-02-01T00:00:00Z`, `2026-02-01T00:00:00+05:30`) and the
@@ -1675,20 +1701,34 @@ components:
     Provenance:
       type: string
       description: |
-        Where a rendered row comes from. **Derived at read time, never stored** — `claimed` and
-        `local` differ by exactly one field on the winning delta row.
+        Where a rendered row comes from. **Derived at read time, never stored** — `claiming` and
+        `new` differ by exactly one field on the winning delta row (`Claims_Source__c`).
 
-        - `inherited` — supplied by the source; no branch-owned record exists.
-        - `claimed` — the branch took copy-on-write ownership of a source-supplied member.
-        - `local` — branch-owned with no upstream provenance ("native").
+        The taxonomy has two axes — whether a record exists upstream, and whether the branch has
+        taken it over:
+
+        | | exists upstream (*source*) | has a branch CI (*native*) |
+        |---|---|---|
+        | untouched | `base` | — |
+        | taken over | — | `claiming` |
+        | branch only | — | `new` |
+
+        - `base` — supplied by the source; no branch-owned record exists.
+        - `claiming` — a branch row that takes over a source row (copy-on-write ownership).
+        - `new` — branch-owned with no upstream counterpart ("native").
         - `nested` — a descendant of a locally added or substituted assembly, rendered from that
           item's own eBOM. Read-only: every row in such a subtree carries `isEditable: false`, and
           the pull diff excludes them entirely. Appears on tree rows only, never in a diff entry's
           `MemberState`.
 
         There is no `excluded` value: exclusion is tracked as a separate boolean alongside
-        provenance, never as a value of it.
-      enum: [inherited, claimed, local, nested]
+        provenance, never as a value of it. Nor is there a `claimed` value for a source row some
+        branch has taken over: that answer is branch-relative, so a source read with no branch
+        could not give it.
+
+        **Renamed in MVP-30309 (breaking).** `inherited` → `base`, `claimed` → `claiming`,
+        `local` → `new`; `nested` is unchanged.
+      enum: [base, claiming, new, nested]
 
     GoverningClock:
       type: string
@@ -1774,7 +1814,7 @@ components:
         sourceTimePoint:
           type: string
           format: date-time
-          description: '**T_R** — the source timepoint inherited rows are pinned at.'
+          description: '**T_R** — the source timepoint `base` rows resolve at.'
         rows:
           type: array
           description: Always present; empty rather than absent.
@@ -1795,13 +1835,18 @@ components:
       properties:
         edgeId:
           oneOf: [{ $ref: '#/components/schemas/SalesforceId' }, { type: 'null' }]
-          description: The `Assembly_CI__c` edge. **Null for a purely inherited row** that no branch has claimed. Suppressed on baseline rows.
+          description: The `Assembly_CI__c` edge. **Null for a `base` row** that no branch has claimed. Suppressed on baseline rows.
         edgeKey:
           oneOf: [{ type: string }, { type: 'null' }]
           description: |
             The legacy `Assembly__c` line id, or a synthetic key for branch-local content:
-            `local-{branchId}-{parentItemId}-{childItemId}` for an `add`, or
-            `replaces-{branchId}-{supersededEdgeKey}` for a substitute. Suppressed on baseline rows.
+            `new-{branchId}-{parentItemId}-{childItemId}` for an `add`, or
+            `replaces-{branchId}-{supersededEdgeKey}-{newChildItemId}` for a substitute. Suppressed
+            on baseline rows.
+
+            The `add` prefix was `local-` before MVP-30309. Keys minted before the rename keep the
+            old prefix — an edge key is identity and is never re-stamped — so treat the key as
+            opaque and never parse the prefix.
           examples: ['a0Bg8000000Ab10EAC']
         detail:
           $ref: '#/components/schemas/AssemblyEdgeDetail'
@@ -1809,7 +1854,11 @@ components:
         governingTimestamp:
           oneOf: [{ type: string, format: date-time }, { type: 'null' }]
           description: |
-            T_R for an inherited row, `asOf` for a local or substituted one.
+            T_R for a `base` row; `asOf` for every other row — `claiming`, `new` and `nested`.
+
+            A `claiming` row answers to `asOf` because this one field also governs the branch's own
+            quantity and find number, so it does not always name the clock that chose the row's
+            child revision (see `AssemblyEdgeDetail.childItemRevisionId`).
 
             **On a baseline row it is collapsed, not suppressed:** every row carries the baseline's
             own `resolutionTimePoint`. A frozen record honours exactly one timepoint, so a per-row
@@ -1867,9 +1916,9 @@ components:
               because two clocks are in play. Legal and expected; warned, never blocked.
             - `BASELINE_COUNT_DRIFT` — a baseline re-derived a different **row count** than its cut
               recorded.
-            - `BASELINE_PROVENANCE_DRIFT` — a baseline re-derived a different number of **claimed**
-              rows than its cut recorded. Separate from the count drift because severing an override
-              moves no row: the same rows come back, one of them no longer an override. Narrow —
+            - `BASELINE_PROVENANCE_DRIFT` — a baseline re-derived a different number of **`claiming`**
+              rows than its cut recorded. Separate from the count drift because severing a claim
+              moves no row: the same rows come back, one of them no longer a claim. Narrow —
               only reachable when the severing delta lands in the same whole second as the cut,
               since a saved `Datetime` has second precision.
             - `NESTED_CYCLE_PRUNED` — the subtree of a locally added assembly was dropped because
@@ -2034,6 +2083,10 @@ components:
           description: |
             The error code on failure, null on success. Note the key is **`errorCode`** here, inside
             a per-operation result — the top-level *error body* uses `code`.
+
+            The values are `RestError.code`'s vocabulary — that enum is the complete list. Left a
+            plain string here so a code added to the vocabulary never makes a batch result fail
+            validation in an older client.
         message:
           oneOf: [{ type: string }, { type: 'null' }]
           description: Human-readable, from a Custom Label. Never parsed.
@@ -2101,7 +2154,7 @@ components:
             How many rows the cut resolved, **excluding tombstones**. This is the count of what the
             configuration *contains*, not the count of rows the tree endpoint renders. Also the
             canary behind `BASELINE_COUNT_DRIFT`; `BASELINE_PROVENANCE_DRIFT` is fed by the
-            claimed-row count recorded alongside it.
+            `claiming`-row count recorded alongside it.
 
     BaselineTree:
       type: object
@@ -2133,16 +2186,16 @@ components:
       type: string
       description: |
         What kind of change the diff found. Deliberately framed in generic framework terms (source /
-        member / override) rather than MBOM terms, so the taxonomy survives a second
+        member / claim) rather than MBOM terms, so the taxonomy survives a second
         configuration-item type. See the preview endpoint's table for the full catalog.
       enum:
         - source-version-advance
         - member-version-advance
         - member-added
         - member-removed
-        - override-retained
-        - override-superseded
-        - override-orphaned
+        - claim-retained
+        - claim-superseded
+        - claim-orphaned
         - member-add-collision
         - member-add-converged
 
@@ -2151,17 +2204,17 @@ components:
       description: |
         Whether this entry needs the caller to decide anything. **Only two values** — there is no
         third, optional-but-defaultable tier. The only decision point anywhere in a pull is disposing
-        an orphaned override; everything else, including new, removed and colliding upstream content,
+        an orphaned claim; everything else, including new, removed and colliding upstream content,
         applies automatically.
       enum: [informational, required]
 
     Action:
       type: string
       description: |
-        An action the commit endpoint can apply. Both values only ever apply to `override-orphaned`;
+        An action the commit endpoint can apply. Both values only ever apply to `claim-orphaned`;
         a decision naming any other kind is rejected with `INVALID_REQUEST`.
 
-        - `convert-to-native` — sever the override's provenance link, keeping its branch-owned
+        - `convert-to-native` — sever the claim's provenance link, keeping its branch-owned
           content, which then resolves on the branch clock. ("Native" is the framework's existing
           term for branch-owned content with no upstream provenance.)
         - `remove` — append a deletion marker (an exclude delta). Nothing is hard-deleted.
@@ -2219,7 +2272,7 @@ components:
             (not the truncated page). Echo it back on commit; a mismatch means the world moved in
             between and fails fast with `STALE_REVISION`.
 
-            It covers a **clock-free** projection of the entries, because a claimed row's
+            It covers a **clock-free** projection of the entries, because a claiming row's
             `governingTimestamp` *is* the read clock — folding it in would make every commit stale on
             arrival.
           examples: ['sha256:9f2c41ab7e08d3b6']
@@ -2268,7 +2321,7 @@ components:
         required:
           type: integer
           minimum: 0
-          description: Entries that will block a commit until given an explicit decision. Only `override-orphaned` counts here.
+          description: Entries that will block a commit until given an explicit decision. Only `claim-orphaned` counts here.
         byKind:
           type: object
           description: Count per `EntryKind`, keyed by kind. Kinds with no entries are omitted.
@@ -2290,28 +2343,30 @@ components:
         decision: { $ref: '#/components/schemas/Decision' }
         availableActions:
           type: array
-          description: Empty except on `override-orphaned`, whose two dispositions are the only actions this API offers anywhere.
+          description: Empty except on `claim-orphaned`, whose two dispositions are the only actions this API offers anywhere.
           items: { $ref: '#/components/schemas/Action' }
         retargeted:
           oneOf: [{ type: boolean }, { type: 'null' }]
           description: |
-            **Present only on `override-retained`; `null` on every other kind** (deliberately not
+            **Present only on `claim-retained`; `null` on every other kind** (deliberately not
             defaulted — a `false` would assert something about a kind for which the question is
             meaningless).
 
             True when the suppressed upstream change was a **re-target**: the candidate would resolve
-            this edge to a different child *revision* than the override pins. False when only field
+            this edge to a different child *revision* than the claim renders. False when only field
             values (quantity, find number) were suppressed. Lets a caller filter for the
             higher-stakes case — a branch silently keeping a superseded revision after upstream moved
             on — without parsing `message`.
 
             The child *revision*, not the child *item*: see the endpoint description.
-        overrideKind:
+        claimKind:
           oneOf: [{ type: string, enum: [claim, replace] }, { type: 'null' }]
           description: |
-            Present on `override-*` kinds; null elsewhere. Distinguishes an override created by
+            Present on `claim-*` kinds; null elsewhere. Distinguishes a claim created by
             **claiming** an upstream edge from one created by **replacing** it. Both dispose
             identically; this exists so the UI can explain what is being orphaned.
+
+            *Was `overrideKind` before MVP-30309 (breaking).*
         message:
           type: string
           description: Human-readable, already-localized summary. Never parse it — switch on `kind`.
@@ -2321,7 +2376,7 @@ components:
           description: How the branch renders this member today. **Null for `member-added`.**
         candidate:
           oneOf: [{ $ref: '#/components/schemas/MemberState' }, { type: 'null' }]
-          description: How it would render after the pull. **Null for `member-removed`**, and for an `override-orphaned` resolved by `remove`.
+          description: How it would render after the pull. **Null for `member-removed`**, and for an `claim-orphaned` resolved by `remove`.
 
     MemberTarget:
       type: object
@@ -2331,7 +2386,7 @@ components:
         ciKind: { $ref: '#/components/schemas/CiKind' }
         edgeId:
           oneOf: [{ $ref: '#/components/schemas/SalesforceId' }, { type: 'null' }]
-          description: The `Assembly_CI__c` for this member. Null for purely inherited content, which has no branch-owned record until something claims it.
+          description: The `Assembly_CI__c` for this member. Null for `base` content, which has no branch-owned record until something claims it.
         edgeKey:
           oneOf: [{ type: string }, { type: 'null' }]
           description: |
@@ -2450,7 +2505,7 @@ components:
         decisions:
           type: array
           description: |
-            One entry per `override-orphaned` entry from the preview. **Every one must appear**, or
+            One entry per `claim-orphaned` entry from the preview. **Every one must appear**, or
             the commit is rejected with `DISPOSITION_REQUIRED`; naming any other kind is rejected
             with `INVALID_REQUEST`. Send `[]` (or omit) when the preview had no required entries.
           items:
@@ -2475,8 +2530,8 @@ components:
         applied:
           type: array
           description: |
-            Every entry that took an explicit decision, plus every `override-retained`,
-            `override-superseded` and `member-add-converged` outcome — the set a caller needs to
+            Every entry that took an explicit decision, plus every `claim-retained`,
+            `claim-superseded` and `member-add-converged` outcome — the set a caller needs to
             reconcile its held preview against what actually happened. (Re-previewing immediately
             after a commit is always `hasChanges: false`, so this is the only place to learn it.)
 
@@ -2487,8 +2542,8 @@ components:
       type: object
       description: |
         One outcome the commit is reporting back. Four kinds appear here and no others:
-        `override-orphaned` (the decision you supplied), `override-retained` and
-        `override-superseded` (informational), and `member-add-converged` (retired by the commit).
+        `claim-orphaned` (the decision you supplied), `claim-retained` and
+        `claim-superseded` (informational), and `member-add-converged` (retired by the commit).
 
         A re-preview straight after a commit is always `hasChanges: false`, so this array is the
         only place the retained and superseded outcomes can be read.
@@ -2497,17 +2552,17 @@ components:
         entryId: { type: string }
         kind:
           type: string
-          enum: [override-orphaned, override-retained, override-superseded, member-add-converged]
+          enum: [claim-orphaned, claim-retained, claim-superseded, member-add-converged]
         action:
           oneOf: [{ type: string }, { type: 'null' }]
           description: |
             What was done:
 
-            - `convert-to-native` or `remove` — the decision supplied for an `override-orphaned`
+            - `convert-to-native` or `remove` — the decision supplied for an `claim-orphaned`
               entry.
             - `retired` — on `member-add-converged`. The commit appended a `Revert` delta dropping
               the branch's now-redundant local assertion. No decision is accepted for this kind.
-            - `null` — on `override-retained` and `override-superseded`, where nothing was written.
+            - `null` — on `claim-retained` and `claim-superseded`, where nothing was written.
         edgeId:
           oneOf: [{ $ref: '#/components/schemas/SalesforceId' }, { type: 'null' }]
           description: The branch-owned `Assembly_CI__c` this entry's target names, if any.
@@ -2653,7 +2708,7 @@ components:
         sourceTimePoint:
           oneOf: [{ type: string, format: date-time }, { type: 'null' }]
           description: |
-            **T_R** — the timepoint this side's *inherited* content is pinned at. Separate from
+            **T_R** — the timepoint this side's `base` content resolves at. Separate from
             `asOf` because that is the whole model: a side reporting one number could not explain
             its own rows.
 
@@ -2776,8 +2831,9 @@ components:
             The stable error code. Every value below is a client error; a 500 carries
             `INTERNAL_ERROR`, which is listed here for completeness but is not a code to branch on.
           enum:
-            [CLAIM_REQUIRED, ALREADY_CLAIMED, ALREADY_EXCLUDED, NOT_SUPPLIED, NO_OVERRIDE,
-             HARD_DELETE_BLOCKED, IMMUTABLE_FIELD, NOT_RELEASED, STALE_REVISION, ALREADY_PRESENT,
+            [CLAIM_REQUIRED, ALREADY_CLAIMED, ALREADY_EXCLUDED, NOT_EXCLUDED, NOT_SUPPLIED, NO_CLAIM,
+             HARD_DELETE_BLOCKED, IMMUTABLE_FIELD, NOT_RELEASED, STALE_REVISION, CONCURRENT_WRITE,
+             ALREADY_PRESENT,
              CANDIDATE_NOT_NEWER, DISPOSITION_REQUIRED, CYCLE_DETECTED, EBOM_CYCLE,
              PARENT_NOT_IN_BRANCH, UNSUPPORTED_CI_TYPE, CI_IDENTITY_UNRESOLVED,
              CI_IDENTITY_COLLISION, PROVENANCE_INVALID, CANDIDATE_ROOT_MISMATCH,
@@ -2860,8 +2916,9 @@ components:
         | code | Cause | Remedy |
         |---|---|---|
         | `STALE_REVISION` | `diffFingerprint` mismatch, or an `entryId` that no longer names an entry in the freshly re-resolved diff | re-run `pull-preview` and resubmit |
-        | `DISPOSITION_REQUIRED` | an `override-orphaned` entry has no decision | supply one for every required entry |
+        | `DISPOSITION_REQUIRED` | an `claim-orphaned` entry has no decision | supply one for every required entry |
         | `NOT_RELEASED` / `CANDIDATE_NOT_NEWER` | revalidated at commit time and no longer qualifies | pick another candidate |
+        | `CONCURRENT_WRITE` | another transaction holds the branch's write lock — a delta batch, a baseline cut or another commit | send the same request again |
       content:
         application/json:
           schema: { $ref: '#/components/schemas/RestError' }
@@ -2873,7 +2930,7 @@ components:
             dispositionRequired:
               value:
                 code: DISPOSITION_REQUIRED
-                message: 'This pull orphans an override you made. Choose to keep it as branch-owned content or remove it before committing. (f4880c6b3e1a9d75, Harness-011)'
+                message: 'This pull orphans a claim you made. Choose to keep it as branch-owned content or remove it before committing. (f4880c6b3e1a9d75, Harness-011)'
 
     PullUnprocessable:
       description: |
@@ -2984,8 +3041,8 @@ components:
               childItemRevisionId: a0Ag8000000Ab41EAC
               quantity: 4
               findNumber: 10
-            provenance: claimed
-            governingTimestamp: '2026-01-15T00:00:00.000Z'
+            provenance: claiming
+            governingTimestamp: '2026-04-05T17:22:03.518Z'
             sourceId: a1Cg8000000AbCeEAK
             isClaimed: true
             isExcluded: false
@@ -3001,7 +3058,7 @@ components:
               childItemRevisionId: a0Ag8000000Ab31EAC
               quantity: 2
               findNumber: 20
-            provenance: inherited
+            provenance: base
             governingTimestamp: '2026-01-15T00:00:00.000Z'
             sourceId: a1Cg8000000AbCeEAK
             isClaimed: false
@@ -3018,8 +3075,8 @@ components:
               childItemRevisionId: a0Ag8000000Ab61EAC
               quantity: 3
               findNumber: 30
-            provenance: claimed
-            governingTimestamp: '2026-01-15T00:00:00.000Z'
+            provenance: claiming
+            governingTimestamp: '2026-04-05T17:22:03.518Z'
             sourceId: a1Cg8000000AbCeEAK
             isClaimed: true
             isExcluded: true
@@ -3027,7 +3084,7 @@ components:
             isEditable: true
             childRows: []
           - edgeId: a1Eg8000000AbD9EAK
-            edgeKey: 'local-a1Bg8000000AbCdEAK-a02g8000000Ab01EAC-a02g8000000Ab90EAC'
+            edgeKey: 'new-a1Bg8000000AbCdEAK-a02g8000000Ab01EAC-a02g8000000Ab90EAC'
             detail:
               ciKind: assembly-edge
               parentItemId: a02g8000000Ab01EAC
@@ -3035,7 +3092,7 @@ components:
               childItemRevisionId: a0Ag8000000Ab95EAC
               quantity: 1
               findNumber: 90
-            provenance: local
+            provenance: new
             governingTimestamp: '2026-04-05T17:22:03.518Z'
             sourceId: null
             isClaimed: false
@@ -3060,7 +3117,7 @@ components:
               childItemRevisionId: a0Ag8000000Ab72EAC
               quantity: 4
               findNumber: 10
-            provenance: inherited
+            provenance: base
             governingTimestamp: '2026-01-15T00:00:00.000Z'
             sourceId: a1Cg8000000AbCeEAK
             isClaimed: false
@@ -3070,7 +3127,7 @@ components:
             childRows:
               - edgeId: null
                 edgeKey: a0Bg8000000Ab15EAC
-                provenance: inherited
+                provenance: base
                 governingTimestamp: '2026-01-15T00:00:00.000Z'
                 sourceId: a1Cg8000000AbCeEAK
                 isClaimed: false
@@ -3088,7 +3145,7 @@ components:
         rows: []
         warnings:
           - warningCode: MIXED_REVISION
-            message: 'This item appears at more than one revision in the same tree, because inherited rows are pinned to the source timepoint while claimed and local rows follow the as-of date. This is expected and does not block anything.'
+            message: 'This item appears at more than one revision in the same tree, because rows follow different timepoints: rows from the source follow the source timepoint, added and substituted rows follow the as-of date, and a row can hold a chosen revision. This is expected and does not block anything.'
             itemId: a02g8000000Ab21EAC
             itemRevisionIds: [a0Ag8000000Ab31EAC, a0Ag8000000Ab32EAC]
             governingTimestamps: ['2026-01-15T00:00:00.000Z', '2026-04-05T17:22:03.518Z']
@@ -3108,7 +3165,7 @@ components:
               childItemRevisionId: a0Ag8000000Ab41EAC
               quantity: 1
               findNumber: 10
-            provenance: inherited
+            provenance: base
             governingTimestamp: '2026-01-15T00:00:00.000Z'
             sourceId: a1Cg8000000AbCeEAK
             isClaimed: false
@@ -3167,7 +3224,7 @@ components:
             op: update
             success: false
             errorCode: CLAIM_REQUIRED
-            message: 'This row is inherited and read-only. Claim it before editing. (edge a0Bg8000000Ab12EAC)'
+            message: 'This row is supplied by the source and read-only. Claim it before editing. (edge a0Bg8000000Ab12EAC)'
             ciId: null
             edgeId: null
             forked: null
@@ -3193,14 +3250,14 @@ components:
     DeltaBatchAtomicFailure:
       value:
         code: CLAIM_REQUIRED
-        message: 'This row is inherited and read-only. Claim it before editing. (2 of 3 operations failed validation)'
+        message: 'This row is supplied by the source and read-only. Claim it before editing. (2 of 3 operations failed validation)'
         failures:
           - index: 1
             clientRef: will-fail
             op: update
             success: false
             errorCode: CLAIM_REQUIRED
-            message: 'This row is inherited and read-only. Claim it before editing. (edge a0Bg8000000Ab12EAC)'
+            message: 'This row is supplied by the source and read-only. Claim it before editing. (edge a0Bg8000000Ab12EAC)'
             ciId: null
             edgeId: null
             forked: null
@@ -3213,6 +3270,12 @@ components:
             ciId: null
             edgeId: null
             forked: null
+
+    ConcurrentWrite:
+      summary: Another transaction holds the branch's write lock
+      value:
+        code: CONCURRENT_WRITE
+        message: 'Another change to this branch is in progress. Wait a moment and send the request again. (another transaction is writing branch a1Bg8000000AbCdEAK)'
 
     DeltaBatchUnknownOp:
       value:
@@ -3244,7 +3307,7 @@ components:
               childItemRevisionId: a0Ag8000000Ab41EAC
               quantity: 4
               findNumber: 10
-            provenance: claimed
+            provenance: claiming
             governingTimestamp: '2026-04-06T14:31:02.000Z'
             sourceId: a1Cg8000000AbCeEAK
             isClaimed: true
@@ -3262,7 +3325,7 @@ components:
         rows: []
         warnings:
           - warningCode: BASELINE_COUNT_DRIFT
-            message: 'This baseline now resolves a different number of rows than when it was cut. The stored timepoint has not moved; something it depends on has.'
+            message: 'This baseline now resolves to a different number of rows than when it was cut. Something it depends on has changed.'
             itemId: null
             itemRevisionIds: []
             governingTimestamps: []
@@ -3295,9 +3358,9 @@ components:
           byKind:
             source-version-advance: 1
             member-version-advance: 1
-            override-retained: 1
+            claim-retained: 1
             member-added: 1
-            override-orphaned: 1
+            claim-orphaned: 1
             member-add-converged: 1
         entries:
           - entryId: '5c1e0a77f9b34d20'
@@ -3305,7 +3368,7 @@ components:
             decision: informational
             availableActions: []
             retargeted: null
-            overrideKind: null
+            claimKind: null
             message: 'The source assembly moves to a newer released revision.'
             target:
               ciKind: source
@@ -3322,7 +3385,7 @@ components:
             decision: informational
             availableActions: []
             retargeted: null
-            overrideKind: null
+            claimKind: null
             message: 'This member resolves differently at the newer source timepoint. Nothing to decide: a revision is an outcome of the timepoint, not a value you can set.'
             target:
               ciKind: assembly-edge
@@ -3332,7 +3395,7 @@ components:
               path:
                 - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
             current:
-              provenance: inherited
+              provenance: base
               governingClock: source
               governingTimestamp: '2026-01-15T00:00:00.000Z'
               detail:
@@ -3346,7 +3409,7 @@ components:
                 quantity: 2
                 findNumber: 20
             candidate:
-              provenance: inherited
+              provenance: base
               governingClock: source
               governingTimestamp: '2026-04-02T00:00:00.000Z'
               detail:
@@ -3361,11 +3424,11 @@ components:
                 findNumber: 20
 
           - entryId: 'e3f19a4c8b2d6071'
-            kind: override-retained
+            kind: claim-retained
             decision: informational
             availableActions: []
             retargeted: false
-            overrideKind: claim
+            claimKind: claim
             message: "Your change to this member is kept, and the newer revision's version of it is suppressed."
             target:
               ciKind: assembly-edge
@@ -3375,9 +3438,9 @@ components:
               path:
                 - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
             current:
-              provenance: claimed
-              governingClock: source
-              governingTimestamp: '2026-01-15T00:00:00.000Z'
+              provenance: claiming
+              governingClock: branch
+              governingTimestamp: '2026-04-05T17:22:03.518Z'
               detail:
                 ciKind: assembly-edge
                 parentItemId: a02g8000000Ab01EAC
@@ -3389,9 +3452,9 @@ components:
                 quantity: 4
                 findNumber: 10
             candidate:
-              provenance: claimed
-              governingClock: source
-              governingTimestamp: '2026-04-02T00:00:00.000Z'
+              provenance: claiming
+              governingClock: branch
+              governingTimestamp: '2026-04-05T17:22:03.518Z'
               detail:
                 ciKind: assembly-edge
                 parentItemId: a02g8000000Ab01EAC
@@ -3408,7 +3471,7 @@ components:
             decision: informational
             availableActions: []
             retargeted: null
-            overrideKind: null
+            claimKind: null
             message: 'The newer revision adds this member. It comes in automatically.'
             target:
               ciKind: assembly-edge
@@ -3419,7 +3482,7 @@ components:
                 - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
             current: null
             candidate:
-              provenance: inherited
+              provenance: base
               governingClock: source
               governingTimestamp: '2026-04-02T00:00:00.000Z'
               detail:
@@ -3434,11 +3497,11 @@ components:
                 findNumber: 40
 
           - entryId: 'f4880c6b3e1a9d75'
-            kind: override-orphaned
+            kind: claim-orphaned
             decision: required
             availableActions: [convert-to-native, remove]
             retargeted: null
-            overrideKind: claim
+            claimKind: claim
             message: 'The newer revision removes a member you changed. Choose whether to keep it as your own content or remove it.'
             target:
               ciKind: assembly-edge
@@ -3448,9 +3511,9 @@ components:
               path:
                 - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
             current:
-              provenance: claimed
-              governingClock: source
-              governingTimestamp: '2026-01-15T00:00:00.000Z'
+              provenance: claiming
+              governingClock: branch
+              governingTimestamp: '2026-04-05T17:22:03.518Z'
               detail:
                 ciKind: assembly-edge
                 parentItemId: a02g8000000Ab01EAC
@@ -3468,17 +3531,17 @@ components:
             decision: informational
             availableActions: []
             retargeted: null
-            overrideKind: null
-            message: 'The newer revision now supplies this member exactly as you added it. Your local copy is retired and the position becomes inherited content.'
+            claimKind: null
+            message: 'The newer revision now supplies exactly what you added locally, so your local addition is retired automatically.'
             target:
               ciKind: assembly-edge
               edgeId: a1Eg8000000AbD5EAK
-              edgeKey: 'local-a1Bg8000000AbCdEAK-a02g8000000Ab01EAC-a02g8000000Ab24EAC'
+              edgeKey: 'new-a1Bg8000000AbCdEAK-a02g8000000Ab01EAC-a02g8000000Ab24EAC'
               label: Label-400
               path:
                 - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
             current:
-              provenance: local
+              provenance: new
               governingClock: branch
               governingTimestamp: '2026-04-05T17:22:03.518Z'
               detail:
@@ -3492,7 +3555,7 @@ components:
                 quantity: 1
                 findNumber: 60
             candidate:
-              provenance: inherited
+              provenance: base
               governingClock: source
               governingTimestamp: '2026-04-02T00:00:00.000Z'
               detail:
@@ -3567,9 +3630,9 @@ components:
           byKind:
             source-version-advance: 1
             member-version-advance: 1
-            override-retained: 1
+            claim-retained: 1
             member-added: 1
-            override-orphaned: 1
+            claim-orphaned: 1
         entries:
           - entryId: '5c1e0a77f9b34d20'
             kind: source-version-advance
@@ -3581,10 +3644,10 @@ components:
               label: Assy-100
               path: [{ ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }]
           - entryId: 'f4880c6b3e1a9d75'
-            kind: override-orphaned
+            kind: claim-orphaned
             decision: required
             availableActions: [convert-to-native, remove]
-            overrideKind: claim
+            claimKind: claim
             message: 'The newer revision removes a member you changed. Choose whether to keep it as your own content or remove it.'
             target:
               ciKind: assembly-edge
@@ -3606,11 +3669,11 @@ components:
         acceptedAt: '2026-04-06T14:02:51.317Z'
         applied:
           - entryId: 'f4880c6b3e1a9d75'
-            kind: override-orphaned
+            kind: claim-orphaned
             action: convert-to-native
             edgeId: a1Eg8000000AbD3EAK
           - entryId: 'e3f19a4c8b2d6071'
-            kind: override-retained
+            kind: claim-retained
             action: null
             edgeId: a1Eg8000000AbD1EAK
           - entryId: '2d6be1470f83a9c5'
@@ -3729,7 +3792,7 @@ components:
               path:
                 - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
             left:
-              provenance: inherited
+              provenance: base
               governingClock: source
               governingTimestamp: '2026-01-15T00:00:00.000Z'
               detail:
@@ -3743,7 +3806,7 @@ components:
                 quantity: null
                 findNumber: null
             right:
-              provenance: inherited
+              provenance: base
               governingClock: source
               governingTimestamp: '2026-04-02T00:00:00.000Z'
               detail:
@@ -3771,7 +3834,7 @@ components:
             left:
               # Claimed, so the branch has spoken about this edge and it answers to the BRANCH
               # clock from then on — which is what `governingClock: branch` states here.
-              provenance: claimed
+              provenance: claiming
               governingClock: branch
               governingTimestamp: '2026-04-05T17:22:03.518Z'
               detail:
@@ -3785,7 +3848,7 @@ components:
                 quantity: 4
                 findNumber: 10
             right:
-              provenance: inherited
+              provenance: base
               governingClock: source
               governingTimestamp: '2026-04-02T00:00:00.000Z'
               detail:
@@ -3811,7 +3874,7 @@ components:
               path:
                 - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
             left:
-              provenance: inherited
+              provenance: base
               governingClock: source
               governingTimestamp: '2026-01-15T00:00:00.000Z'
               detail:
@@ -3839,7 +3902,7 @@ components:
                 - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
             left: null
             right:
-              provenance: inherited
+              provenance: base
               governingClock: source
               governingTimestamp: '2026-04-02T00:00:00.000Z'
               detail:
@@ -3911,7 +3974,7 @@ components:
               path:
                 - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
             left:
-              provenance: inherited
+              provenance: base
               governingClock: source
               governingTimestamp: '2026-01-15T00:00:00.000Z'
               detail:
@@ -3925,7 +3988,7 @@ components:
                 quantity: null
                 findNumber: null
             right:
-              provenance: inherited
+              provenance: base
               governingClock: source
               governingTimestamp: '2026-04-02T00:00:00.000Z'
               detail:
@@ -3951,7 +4014,7 @@ components:
               path:
                 - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
             left:
-              provenance: claimed
+              provenance: claiming
               governingClock: branch
               governingTimestamp: '2026-04-05T17:22:03.518Z'
               detail:
@@ -3965,7 +4028,7 @@ components:
                 quantity: 4
                 findNumber: 10
             right:
-              provenance: inherited
+              provenance: base
               governingClock: source
               governingTimestamp: '2026-04-02T00:00:00.000Z'
               detail:
@@ -3994,7 +4057,7 @@ components:
               path:
                 - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
             left:
-              provenance: inherited
+              provenance: base
               governingClock: source
               governingTimestamp: '2026-01-15T00:00:00.000Z'
               detail:
@@ -4008,7 +4071,7 @@ components:
                 quantity: 2
                 findNumber: 20
             right:
-              provenance: inherited
+              provenance: base
               governingClock: source
               governingTimestamp: '2026-04-02T00:00:00.000Z'
               detail:
@@ -4034,7 +4097,7 @@ components:
               path:
                 - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
             left:
-              provenance: inherited
+              provenance: base
               governingClock: source
               governingTimestamp: '2026-01-15T00:00:00.000Z'
               detail:
@@ -4062,7 +4125,7 @@ components:
                 - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
             left: null
             right:
-              provenance: inherited
+              provenance: base
               governingClock: source
               governingTimestamp: '2026-04-02T00:00:00.000Z'
               detail:
@@ -4132,7 +4195,7 @@ components:
               path:
                 - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
             left:
-              provenance: inherited
+              provenance: base
               governingClock: source
               governingTimestamp: '2026-01-15T00:00:00.000Z'
               detail:
@@ -4146,7 +4209,7 @@ components:
                 quantity: null
                 findNumber: null
             right:
-              provenance: inherited
+              provenance: base
               governingClock: source
               governingTimestamp: '2026-04-02T00:00:00.000Z'
               detail:
@@ -4172,7 +4235,7 @@ components:
               path:
                 - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
             left:
-              provenance: claimed
+              provenance: claiming
               governingClock: branch
               governingTimestamp: '2026-04-05T17:22:03.518Z'
               detail:
@@ -4186,7 +4249,7 @@ components:
                 quantity: 4
                 findNumber: 10
             right:
-              provenance: inherited
+              provenance: base
               governingClock: source
               governingTimestamp: '2026-04-02T00:00:00.000Z'
               detail:
