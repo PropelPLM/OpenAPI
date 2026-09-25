@@ -6956,6 +6956,163 @@
 									]
 								},
 								{
+									"name": "🚧 MVP-30376 — Read a Branch's Effective Structure (a chosen revision was cancelled)",
+									"protocolProfileBehavior": {
+										"disableBodyPruning": true
+									},
+									"request": {
+										"method": "GET",
+										"header": [
+											{
+												"key": "Content-Type",
+												"value": "application/json"
+											},
+											{
+												"key": "Accept",
+												"value": "application/json"
+											}
+										],
+										"url": {
+											"raw": "{{propelApiUrl}}/v4/mbom/branches/:branchId/tree?flat=true&asOf=",
+											"host": [
+												"{{propelApiUrl}}"
+											],
+											"path": [
+												"v4",
+												"mbom",
+												"branches",
+												":branchId",
+												"tree"
+											],
+											"query": [
+												{
+													"key": "flat",
+													"value": "true"
+												},
+												{
+													"key": "asOf",
+													"value": ""
+												}
+											],
+											"variable": [
+												{
+													"key": "branchId",
+													"value": "{{mbomBranchId}}"
+												}
+											]
+										},
+										"description": "**🚧 Planned — MVP-30376, not yet implemented.** Same request as *Read a Branch's Effective Structure*.\n\n## Setup\n\n1. Claim a line **pinned** to a released revision: `{\"op\": \"claim\", \"ebomAssemblyId\": \"…\", \"childItemRevisionId\": \"<rev>\"}`.\n2. Cancel or expire that revision on the Item Revision record.\n\nThen read the tree.\n\n## What to assert\n\n| | Once MVP-30376 ships | Today |\n| --- | --- | --- |\n| The row's `detail.childItemRevisionId` | still the dead revision (never substituted) | the same |\n| `warnings` | one `STORED_REVISION_RETIRED`, `itemId` = the row's child item, `itemRevisionIds` = [the dead revision] | empty |\n\nThese cases never warn:\n\n- A row that stores **no** revision, such as a tracking claim, or an `add` sent without `childItemRevisionId`. It resolves through a query that already skips Cancelled and Expired revisions.\n- A tombstone.\n- An edit hidden behind another pin.\n\nOther rules:\n\n- A `convert-to-native` that **stamped** a revision warns the same way when that revision dies. One that tracked warns nothing.\n- Warnings come one per row, never deduplicated by item.\n- The warning appears on the branch tree read only. The baseline read and the pull preview do not raise it [assumes A-30376-1, A-30376-2, A-30376-3]."
+									},
+									"response": [
+										{
+											"name": "🚧 expected once MVP-30376 ships",
+											"originalRequest": {
+												"method": "GET",
+												"header": [
+													{
+														"key": "Content-Type",
+														"value": "application/json"
+													}
+												],
+												"url": {
+													"raw": "{{propelApiUrl}}/v4/mbom/branches/:branchId/tree?flat=true&asOf=",
+													"host": [
+														"{{propelApiUrl}}"
+													],
+													"path": [
+														"v4",
+														"mbom",
+														"branches",
+														":branchId",
+														"tree"
+													],
+													"query": [
+														{
+															"key": "flat",
+															"value": "true"
+														},
+														{
+															"key": "asOf",
+															"value": ""
+														}
+													],
+													"variable": [
+														{
+															"key": "branchId",
+															"value": "a1Bg8000000AbCdEAK"
+														}
+													]
+												}
+											},
+											"status": "OK",
+											"code": 200,
+											"_postman_previewlanguage": "json",
+											"header": [
+												{
+													"key": "Content-Type",
+													"value": "application/json"
+												}
+											],
+											"cookie": [],
+											"responseTime": null,
+											"body": "{\n  \"asOf\": \"2026-04-05T17:22:03.518Z\",\n  \"rootRevisionId\": \"a0Ag8000000Ab01EAC\",\n  \"sourceTimePoint\": \"2026-01-15T00:00:00.000Z\",\n  \"rows\": [\n    {\n      \"edgeId\": \"a1Eg8000000AbD1EAK\",\n      \"edgeKey\": \"a0Bg8000000Ab10EAC\",\n      \"detail\": {\n        \"ciKind\": \"assembly-edge\",\n        \"parentItemId\": \"a02g8000000Ab01EAC\",\n        \"childItemId\": \"a02g8000000Ab20EAC\",\n        \"childItemRevisionId\": \"a0Ag8000000Ab41EAC\",\n        \"quantity\": 4,\n        \"findNumber\": 10\n      },\n      \"provenance\": \"claiming\",\n      \"governingTimestamp\": \"2026-04-05T17:22:03.518Z\",\n      \"sourceId\": \"a1Cg8000000AbCeEAK\",\n      \"isClaimed\": true,\n      \"isExcluded\": false,\n      \"isReplaced\": false,\n      \"isEditable\": true,\n      \"childRows\": []\n    }\n  ],\n  \"warnings\": [\n    {\n      \"warningCode\": \"STORED_REVISION_RETIRED\",\n      \"message\": \"This line is set to a specific revision that has since been cancelled or expired. It is still shown, because nobody chose to replace it — review whether it should now point at a different revision.\",\n      \"itemId\": \"a02g8000000Ab20EAC\",\n      \"itemRevisionIds\": [\n        \"a0Ag8000000Ab41EAC\"\n      ],\n      \"governingTimestamps\": []\n    }\n  ]\n}"
+										},
+										{
+											"name": "Today — the dead revision renders silently",
+											"originalRequest": {
+												"method": "GET",
+												"header": [
+													{
+														"key": "Content-Type",
+														"value": "application/json"
+													}
+												],
+												"url": {
+													"raw": "{{propelApiUrl}}/v4/mbom/branches/:branchId/tree?flat=true&asOf=",
+													"host": [
+														"{{propelApiUrl}}"
+													],
+													"path": [
+														"v4",
+														"mbom",
+														"branches",
+														":branchId",
+														"tree"
+													],
+													"query": [
+														{
+															"key": "flat",
+															"value": "true"
+														},
+														{
+															"key": "asOf",
+															"value": ""
+														}
+													],
+													"variable": [
+														{
+															"key": "branchId",
+															"value": "a1Bg8000000AbCdEAK"
+														}
+													]
+												}
+											},
+											"status": "OK",
+											"code": 200,
+											"_postman_previewlanguage": "json",
+											"header": [
+												{
+													"key": "Content-Type",
+													"value": "application/json"
+												}
+											],
+											"cookie": [],
+											"responseTime": null,
+											"body": "{\n  \"asOf\": \"2026-04-05T17:22:03.518Z\",\n  \"rootRevisionId\": \"a0Ag8000000Ab01EAC\",\n  \"sourceTimePoint\": \"2026-01-15T00:00:00.000Z\",\n  \"rows\": [\n    {\n      \"edgeId\": \"a1Eg8000000AbD1EAK\",\n      \"edgeKey\": \"a0Bg8000000Ab10EAC\",\n      \"detail\": {\n        \"ciKind\": \"assembly-edge\",\n        \"parentItemId\": \"a02g8000000Ab01EAC\",\n        \"childItemId\": \"a02g8000000Ab20EAC\",\n        \"childItemRevisionId\": \"a0Ag8000000Ab41EAC\",\n        \"quantity\": 4,\n        \"findNumber\": 10\n      },\n      \"provenance\": \"claiming\",\n      \"governingTimestamp\": \"2026-04-05T17:22:03.518Z\",\n      \"sourceId\": \"a1Cg8000000AbCeEAK\",\n      \"isClaimed\": true,\n      \"isExcluded\": false,\n      \"isReplaced\": false,\n      \"isEditable\": true,\n      \"childRows\": []\n    }\n  ],\n  \"warnings\": []\n}"
+										}
+									]
+								},
+								{
 									"name": "Read What a Source Supplies",
 									"id": "45f6dbcb-16f8-4f06-8c8f-218bd1cd433e",
 									"protocolProfileBehavior": {

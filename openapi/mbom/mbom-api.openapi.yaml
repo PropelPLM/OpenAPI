@@ -175,6 +175,7 @@ info:
     |---|---|
     | [MVP-30214](https://propelplm.atlassian.net/browse/MVP-30214) | **No wire change.** A `replace` substitute no longer absorbs an unrelated line that shares its child item. Each occurrence of an item rendered at two revisions gets its own pinned structure. `AMBIGUOUS_CORRELATION` is narrowed to genuine duplicates. |
     | [MVP-30375](https://propelplm.atlassian.net/browse/MVP-30375) | `TreeRow.isPinned` and `TreeRow.wasClaimed` on every tree read. `TreeRow.pinnedById` / `pinnedAt` on baseline rows. A `BASELINE_PIN_DRIFT` warning on the baseline read. |
+    | [MVP-30376](https://propelplm.atlassian.net/browse/MVP-30376) | A `STORED_REVISION_RETIRED` warning on the branch tree read, one per row whose chosen revision is now Cancelled or Expired. The revision still renders. |
 
   contact:
     name: Propel PLM Engineering
@@ -196,6 +197,7 @@ info:
     # 🚧 planned, not yet implemented; see info.description "Planned changes".
     perOccurrencePins: MVP-30214
     overrideDisclosure: MVP-30375
+    retiredStoredRevision: MVP-30376
   x-design-doc: docs/architecture/mbom/mbom-pull-api.md
   x-demo-plan: docs/architecture/mbom/mbom-demo-test-plan.md
 
@@ -423,6 +425,10 @@ paths:
           clock-resolved row that happens to resolve to the same revision is `false`. `wasClaimed`
           marks a `new` row that `convert-to-native` flipped from `claiming`. Both follow the
           explicit decision, not the structural pin above. [assumes A-30375-1, A-30375-2]
+        - **🚧 Planned — MVP-30376, not yet implemented: a dead chosen revision is warned about,
+          never replaced.** A row whose stored `childItemRevisionId` has since been Cancelled or
+          Expired still renders that revision, and the read raises one `STORED_REVISION_RETIRED`
+          per such row. This read is the only one that raises it. [assumes A-30376-2, A-30376-3]
         - **Unreachable rows are dropped.** A delta can name a parent item that is not in the tree —
           a subassembly whose item had nothing released at T_R drops out, and a claim beneath it
           survives the overlay as a row with an absent parent. This read walks down from the root and
@@ -473,6 +479,9 @@ paths:
                 overrideBadges:
                   summary: '🚧 MVP-30375 (planned) — isPinned / wasClaimed badges'
                   $ref: '#/components/examples/BranchTreeOverrideBadges'
+                retiredStoredRevision:
+                  summary: '🚧 MVP-30376 (planned) — STORED_REVISION_RETIRED on a pinned row'
+                  $ref: '#/components/examples/BranchTreeRetiredStoredRevision'
         '400':
           description: |
             `ASOF_INVALID` — `asOf` could not be parsed. `ASOF_IN_FUTURE` — `asOf` is later than now;
@@ -639,6 +648,9 @@ paths:
           Otherwise `422 REVISION_ITEM_MISMATCH`. A revision you cannot see answers the same code
           as one that does not exist, so the check is not an existence oracle. Lifecycle
           (Cancelled / Expired) is **not** screened at write time.
+          **🚧 Planned — MVP-30376, not yet implemented:** it is not screened at write time then
+          either, because a revision can be cancelled long after it was chosen. The branch tree
+          read warns about it instead (`STORED_REVISION_RETIRED`). [assumes A-30376-2]
         - **Why `claim` no longer defaults.** Claiming a line to change its quantity used to pin its
           revision as a side effect, which silently also meant "never accept a new revision of
           this part" — two decisions, one of them invisible at the call site.
@@ -2200,7 +2212,7 @@ components:
       properties:
         warningCode:
           type: string
-          enum: [MIXED_REVISION, BASELINE_COUNT_DRIFT, BASELINE_PROVENANCE_DRIFT, NESTED_CYCLE_PRUNED, PINNED_SUBTREE_HIDES_EDITS, MEMBER_ADD_COLLISION, COMPARE_ROOTS_DIFFER, BASELINE_PIN_DRIFT]
+          enum: [MIXED_REVISION, BASELINE_COUNT_DRIFT, BASELINE_PROVENANCE_DRIFT, NESTED_CYCLE_PRUNED, PINNED_SUBTREE_HIDES_EDITS, MEMBER_ADD_COLLISION, COMPARE_ROOTS_DIFFER, BASELINE_PIN_DRIFT, STORED_REVISION_RETIRED]
           description: |
             The complete vocabulary.
 
@@ -2214,6 +2226,7 @@ components:
             | `MEMBER_ADD_COLLISION` | ✅ shipped |
             | `COMPARE_ROOTS_DIFFER` | ✅ shipped |
             | `BASELINE_PIN_DRIFT` | 🚧 MVP-30375 |
+            | `STORED_REVISION_RETIRED` | 🚧 MVP-30376 |
 
             - `MIXED_REVISION` — one item rendered at more than one revision in the same tree,
               because two clocks are in play. Legal and expected; warned, never blocked.
@@ -2257,6 +2270,18 @@ components:
               or claim count moved. Baseline reads only. It carries no `itemId` and empty arrays,
               like the other drift codes. A baseline cut before the ticket has no count and never
               raises it. [assumes A-30375-5]
+            - `STORED_REVISION_RETIRED` — **🚧 Planned — MVP-30376, not yet implemented.** A row
+              holds a chosen child revision that has since been **Cancelled or Expired**. The row
+              still renders that revision: nothing is substituted, and the read does not fail.
+              Nobody chose a replacement, and a read must not break because a revision was
+              cancelled elsewhere in the org.
+
+              One warning per row, not deduplicated by item. `itemId` is the row's child item and
+              `itemRevisionIds` is the stored revision. It is never raised by a row that stores no
+              revision: a tracking claim or a floating row already resolves through a query that
+              skips dead revisions. It is not raised by a tombstone, or by an edit hidden behind a
+              pin. On a dead pin with nested structure, it names the pinned row, not the rows
+              beneath it. Branch tree read only. [assumes A-30376-1, A-30376-2, A-30376-3]
         message:
           type: string
           description: Human-readable, from a Custom Label. Translated; never parse it.
@@ -2267,6 +2292,8 @@ components:
             `MEMBER_ADD_COLLISION`, naming the child item whose position collapsed, and on
             `PINNED_SUBTREE_HIDES_EDITS`, naming the child item of the edited line a pinned
             revision's structure replaced (or, on a pull preview, will replace).
+            **🚧 Planned — MVP-30376, not yet implemented:** also on `STORED_REVISION_RETIRED`,
+            naming the child item of the row holding the dead revision. [assumes A-30376-3]
         itemRevisionIds:
           type: array
           description: |
@@ -2274,6 +2301,9 @@ components:
             `PINNED_SUBTREE_HIDES_EDITS`, where it lists the pinned revisions whose structure hid
             the edit (each is the `detail.childItemRevisionId` of a pinned row), with
             `governingTimestamps` left empty. Every other code leaves it empty.
+            **🚧 Planned — MVP-30376, not yet implemented:** also on `STORED_REVISION_RETIRED`,
+            where it holds exactly one id, the Cancelled or Expired stored revision, with
+            `governingTimestamps` left empty. [assumes A-30376-3]
           items: { $ref: '#/components/schemas/SalesforceId' }
         governingTimestamps:
           type: array
@@ -2551,6 +2581,9 @@ components:
 
             > **🚧 Planned — MVP-30375, not yet implemented.** A third drift code,
             > `BASELINE_PIN_DRIFT`. [assumes A-30375-5]
+
+            > **🚧 Planned — MVP-30376, not yet implemented.** `STORED_REVISION_RETIRED` is **not**
+            > forwarded here: it is advice about the branch, not drift. [assumes A-30376-2]
           items: { $ref: '#/components/schemas/TreeWarning' }
 
     # -------------------------------------------------- pull
@@ -2626,7 +2659,11 @@ components:
           items: { $ref: '#/components/schemas/DiffEntry' }
         warnings:
           type: array
-          description: Non-blocking conditions about what would render *after* the pull — typically `MIXED_REVISION`, and `PINNED_SUBTREE_HIDES_EDITS` for a branch edit a post-pull pin will hide. Always present; empty rather than absent.
+          description: |
+            Non-blocking conditions about what would render *after* the pull — typically `MIXED_REVISION`, and `PINNED_SUBTREE_HIDES_EDITS` for a branch edit a post-pull pin will hide. Always present; empty rather than absent.
+
+            **🚧 Planned — MVP-30376, not yet implemented:** `STORED_REVISION_RETIRED` is not
+            raised here. The branch tree read is the one that raises it. [assumes A-30376-2]
           items: { $ref: '#/components/schemas/TreeWarning' }
         truncated:
           type: boolean
@@ -3725,6 +3762,42 @@ components:
             pinnedAt: null
             childRows: []
         warnings: []
+
+    BranchTreeRetiredStoredRevision:
+      summary: '🚧 MVP-30376 (planned) — a pinned claim whose chosen revision was cancelled'
+      description: |
+        **🚧 Planned — MVP-30376, not yet implemented.** The claim was pinned to Motor-002 rev-1,
+        and rev-1 was later cancelled. The row still renders rev-1. The warning names the row's
+        child item and the dead revision.
+      x-planned: { ticket: MVP-30376, assumptions: [A-30376-1, A-30376-3] }
+      value:
+        asOf: '2026-04-05T17:22:03.518Z'
+        rootRevisionId: a0Ag8000000Ab01EAC
+        sourceTimePoint: '2026-01-15T00:00:00.000Z'
+        rows:
+          - edgeId: a1Eg8000000AbD1EAK
+            edgeKey: a0Bg8000000Ab10EAC
+            detail:
+              ciKind: assembly-edge
+              parentItemId: a02g8000000Ab01EAC
+              childItemId: a02g8000000Ab20EAC
+              childItemRevisionId: a0Ag8000000Ab41EAC
+              quantity: 4
+              findNumber: 10
+            provenance: claiming
+            governingTimestamp: '2026-04-05T17:22:03.518Z'
+            sourceId: a1Cg8000000AbCeEAK
+            isClaimed: true
+            isExcluded: false
+            isReplaced: false
+            isEditable: true
+            childRows: []
+        warnings:
+          - warningCode: STORED_REVISION_RETIRED
+            message: 'This line is set to a specific revision that has since been cancelled or expired. It is still shown, because nobody chose to replace it — review whether it should now point at a different revision.'
+            itemId: a02g8000000Ab20EAC
+            itemRevisionIds: [a0Ag8000000Ab41EAC]
+            governingTimestamps: []
 
     SourceTree:
       value:
