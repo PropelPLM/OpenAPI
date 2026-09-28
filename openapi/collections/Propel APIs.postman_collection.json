@@ -10110,7 +10110,7 @@
 										],
 										"body": {
 											"mode": "raw",
-											"raw": "{\n  \"atomic\": false,\n  \"operations\": [\n    { \"op\": \"claim\", \"clientRef\": \"ok\", \"ebomAssemblyId\": \"{{mbomEbomAssemblyId}}\" },\n    { \"op\": \"update\", \"clientRef\": \"will-fail\", \"ebomAssemblyId\": \"{{mbomEbomAssemblyId}}\", \"quantity\": 9 }\n  ]\n}",
+											"raw": "{\n  \"atomic\": false,\n  \"operations\": [\n    { \"op\": \"claim\", \"clientRef\": \"ok\", \"ebomAssemblyId\": \"{{mbomEbomAssemblyId}}\", \"trackChildRevision\": true },\n    { \"op\": \"update\", \"clientRef\": \"will-fail\", \"ebomAssemblyId\": \"{{mbomEbomAssemblyId}}\", \"quantity\": 9 }\n  ]\n}",
 											"options": {
 												"raw": {
 													"language": "json"
@@ -10137,7 +10137,7 @@
 												}
 											]
 										},
-										"description": "Demonstrates the two things people get wrong about batches at the same time.\n\n**1. `atomic: false` returns `200` even when operations failed.** Check `failed` and each `results[].success` — not the status code. Under the default `atomic: true`, the identical batch would be a `409` with a `failures[]` array and **nothing applied**.\n\n**2. A later operation cannot see an earlier one's effect.** Both operations here name the same eBOM line: the `claim` succeeds, and the `update` still answers `CLAIM_REQUIRED`, because both validated against the one pre-batch snapshot in which the row was still `base`.\n\n> That is not a bug to work around — it is what makes \"every operation is validated before any is executed\" true, which is what lets the endpoint report *every* fault rather than only the first. **Dependent edits are two requests.**\n\nSwap `atomic` to `true` and re-send to see the same batch rejected wholesale."
+										"description": "Demonstrates the two things people get wrong about batches at the same time.\n\n**1. `atomic: false` returns `200` even when operations failed.** Check `failed` and each `results[].success` — not the status code. Under the default `atomic: true`, the identical batch would be a `409` with a `failures[]` array and **nothing applied**.\n\n**2. A later operation cannot see an earlier one's effect.** Both operations here name the same eBOM line: the `claim` succeeds, and the `update` still answers `CLAIM_REQUIRED`, because both validated against the one pre-batch snapshot in which the row was still `base`.\n\n> That is not a bug to work around — it is what makes \"every operation is validated before any is executed\" true, which is what lets the endpoint report *every* fault rather than only the first. **Dependent edits are two requests.**\n\nThe `claim` carries `trackChildRevision: true` because a claim must choose what its child revision does; without it the claim fails too, with `REVISION_CHOICE_REQUIRED`.\n\nTo see the same batch rejected wholesale, send it with `atomic: true` **first**, on a line that is still `base`. Sent after this one, the `claim` has already landed, and the `atomic: true` re-send fails on `ALREADY_CLAIMED` instead."
 									},
 									"response": [
 										{
@@ -10153,7 +10153,7 @@
 												],
 												"body": {
 													"mode": "raw",
-													"raw": "{\n  \"atomic\": false,\n  \"operations\": [\n    { \"op\": \"claim\", \"clientRef\": \"ok\", \"ebomAssemblyId\": \"a0Bg8000000Ab11EAC\" },\n    { \"op\": \"update\", \"clientRef\": \"will-fail\", \"ebomAssemblyId\": \"a0Bg8000000Ab11EAC\", \"quantity\": 9 }\n  ]\n}",
+													"raw": "{\n  \"atomic\": false,\n  \"operations\": [\n    { \"op\": \"claim\", \"clientRef\": \"ok\", \"ebomAssemblyId\": \"a0Bg8000000Ab11EAC\", \"trackChildRevision\": true },\n    { \"op\": \"update\", \"clientRef\": \"will-fail\", \"ebomAssemblyId\": \"a0Bg8000000Ab11EAC\", \"quantity\": 9 }\n  ]\n}",
 													"options": {
 														"raw": {
 															"language": "json"
