@@ -100,7 +100,7 @@ info:
     **re-resolves** the branch at that timestamp. Two stored counts act as canaries if something the
     resolution depends on has moved since — `BASELINE_COUNT_DRIFT` for the row count, and
     `BASELINE_PROVENANCE_DRIFT` for how many of those rows are the branch's own claims.
-    (**🚧 Planned — MVP-30375, not yet implemented:** a third, `BASELINE_PIN_DRIFT`, for how many
+    (**🚧 Planned — MVP-30375, not yet implemented.** A third, `BASELINE_PIN_DRIFT`, for how many
     rows hold an explicitly chosen revision.)
 
     ### 8. "Pull", not "merge"
@@ -430,7 +430,7 @@ paths:
           > own row with its own `replaces-{branchId}-{supersededEdgeKey}-{newChildItemId}` key,
           > and the unrelated line survives. The ambiguous match is declined rather than refused,
           > so the read never answers `AMBIGUOUS_CORRELATION`. [assumes A-30214-3]
-        - **🚧 Planned — MVP-30375, not yet implemented: every row says whether its revision was a
+        - **🚧 Planned — MVP-30375, not yet implemented.** **Every row says whether its revision was a
           choice.** `isPinned` is true exactly when the row stores a chosen child revision. A
           clock-resolved row that happens to resolve to the same revision is `false`. `wasClaimed`
           marks a `new` row that `convert-to-native` flipped from `claiming`. Both follow the
@@ -1177,7 +1177,7 @@ paths:
           revision's `nested` structure beneath it and the source's lines suppressed, just as the
           branch read rendered it at the cut (MVP-30357). Before that, a baseline recorded the pin
           over the source revision's children.
-        - **🚧 Planned — MVP-30375, not yet implemented: pinned rows name who pinned them.** A row
+        - **🚧 Planned — MVP-30375, not yet implemented.** **Pinned rows name who pinned them.** A row
           with `isPinned: true` carries `pinnedById` and `pinnedAt`, taken from the payload
           revision that carries its current value. The branch read leaves both null.
           [assumes A-30375-4]
