@@ -7087,7 +7087,7 @@
 											],
 											"cookie": [],
 											"responseTime": null,
-											"body": "{\n  \"code\": \"ALREADY_CLAIMED\",\n  \"message\": \"This row has already been claimed by this branch. Edit it directly. (1 of 1 operations failed validation)\",\n  \"failures\": [\n    {\n      \"index\": 0,\n      \"clientRef\": \"dup\",\n      \"op\": \"claim\",\n      \"success\": false,\n      \"errorCode\": \"ALREADY_CLAIMED\",\n      \"message\": \"This row has already been claimed by this branch. Edit it directly. (edge a0Bg8000000Ab10EAC)\",\n      \"ciId\": null,\n      \"edgeId\": null,\n      \"forked\": null\n    }\n  ]\n}",
+											"body": "{\n  \"code\": \"ALREADY_CLAIMED\",\n  \"message\": \"This row has already been claimed by this branch. Edit it directly. (1 of 1 operations failed validation)\",\n  \"failures\": [\n    {\n      \"index\": 0,\n      \"clientRef\": \"dup\",\n      \"op\": \"claim\",\n      \"success\": false,\n      \"errorCode\": \"ALREADY_CLAIMED\",\n      \"message\": \"This row has already been claimed by this branch. Edit it directly. (Assembly__c a0Bg8000000Ab10EAC already has provenance claiming)\",\n      \"ciId\": null,\n      \"edgeId\": null,\n      \"forked\": null\n    }\n  ]\n}",
 											"createdAt": "2026-09-04T13:53:22.000Z",
 											"updatedAt": "2026-09-04T13:53:22.000Z",
 											"uid": "46943044-c8bd7f1b-8cd4-4ad4-82c3-b358ac710d3a"
@@ -7522,7 +7522,7 @@
 											],
 											"cookie": [],
 											"responseTime": null,
-											"body": "{\n  \"code\": \"CLAIM_REQUIRED\",\n  \"message\": \"This row is supplied by the source and read-only. Claim it before editing. (1 of 1 operations failed validation)\",\n  \"failures\": [\n    {\n      \"index\": 0,\n      \"clientRef\": \"nope\",\n      \"op\": \"update\",\n      \"success\": false,\n      \"errorCode\": \"CLAIM_REQUIRED\",\n      \"message\": \"This row is supplied by the source and read-only. Claim it before editing. (edge a0Bg8000000Ab12EAC)\",\n      \"ciId\": null,\n      \"edgeId\": null,\n      \"forked\": null\n    }\n  ]\n}",
+											"body": "{\n  \"code\": \"CLAIM_REQUIRED\",\n  \"message\": \"This row is supplied by the source and read-only. Claim it before editing. (1 of 1 operations failed validation)\",\n  \"failures\": [\n    {\n      \"index\": 0,\n      \"clientRef\": \"nope\",\n      \"op\": \"update\",\n      \"success\": false,\n      \"errorCode\": \"CLAIM_REQUIRED\",\n      \"message\": \"This row is supplied by the source and read-only. Claim it before editing. (claim Assembly__c a0Bg8000000Ab12EAC before revising it)\",\n      \"ciId\": null,\n      \"edgeId\": null,\n      \"forked\": null\n    }\n  ]\n}",
 											"createdAt": "2026-09-04T13:53:22.000Z",
 											"updatedAt": "2026-09-04T13:53:22.000Z",
 											"uid": "46943044-919ee917-8ebc-4941-b7e1-39bed9768216"
@@ -8177,7 +8177,7 @@
 											],
 											"cookie": [],
 											"responseTime": null,
-											"body": "{\n  \"code\": \"NOT_EXCLUDED\",\n  \"message\": \"This row is not excluded from this configuration, so there is nothing to restore. (1 of 1 operations failed validation)\",\n  \"failures\": [\n    {\n      \"index\": 0,\n      \"clientRef\": \"nothing-to-do\",\n      \"op\": \"restore\",\n      \"success\": false,\n      \"errorCode\": \"NOT_EXCLUDED\",\n      \"message\": \"This row is not excluded from this configuration, so there is nothing to restore. (edge a0Bg8000000Ab10EAC is not excluded)\",\n      \"ciId\": null,\n      \"edgeId\": null,\n      \"forked\": null\n    }\n  ]\n}",
+											"body": "{\n  \"code\": \"NOT_EXCLUDED\",\n  \"message\": \"This row is not excluded from this configuration, so there is nothing to restore. (1 of 1 operations failed validation)\",\n  \"failures\": [\n    {\n      \"index\": 0,\n      \"clientRef\": \"nothing-to-do\",\n      \"op\": \"restore\",\n      \"success\": false,\n      \"errorCode\": \"NOT_EXCLUDED\",\n      \"message\": \"This row is not excluded from this configuration, so there is nothing to restore. (edge a0Bg8000000Ab10EAC is not excluded, so there is nothing to restore)\",\n      \"ciId\": null,\n      \"edgeId\": null,\n      \"forked\": null\n    }\n  ]\n}",
 											"createdAt": "2026-09-04T13:53:22.000Z",
 											"updatedAt": "2026-09-04T13:53:22.000Z",
 											"uid": "46943044-a66dcd89-af34-4452-acca-69215a4b16c8"
@@ -8344,7 +8344,7 @@
 											],
 											"cookie": [],
 											"responseTime": null,
-											"body": "{\n  \"code\": \"ALREADY_PRESENT\",\n  \"message\": \"This branch already adds that part under that parent. Edit the existing row instead of adding it again. (1 of 1 operations failed validation)\",\n  \"failures\": [\n    {\n      \"index\": 0,\n      \"clientRef\": \"second-swap\",\n      \"op\": \"replace\",\n      \"success\": false,\n      \"errorCode\": \"ALREADY_PRESENT\",\n      \"message\": \"This branch already adds that part under that parent. Edit the existing row instead of adding it again. (edge a0Bg8000000Ab10EAC already has a live substitute; exclude it first)\",\n      \"ciId\": null,\n      \"edgeId\": null,\n      \"forked\": null\n    }\n  ]\n}",
+											"body": "{\n  \"code\": \"ALREADY_PRESENT\",\n  \"message\": \"This branch already adds that part under that parent. Edit the existing row instead of adding it again. (1 of 1 operations failed validation)\",\n  \"failures\": [\n    {\n      \"index\": 0,\n      \"clientRef\": \"second-swap\",\n      \"op\": \"replace\",\n      \"success\": false,\n      \"errorCode\": \"ALREADY_PRESENT\",\n      \"message\": \"This branch already adds that part under that parent. Edit the existing row instead of adding it again. (edge a0Bg8000000Ab10EAC already has a substitute; exclude that substitute first, then replace the row again)\",\n      \"ciId\": null,\n      \"edgeId\": null,\n      \"forked\": null\n    }\n  ]\n}",
 											"createdAt": "2026-09-04T13:53:22.000Z",
 											"updatedAt": "2026-09-04T13:53:22.000Z",
 											"uid": "46943044-ae130d12-328e-4245-8459-27b76659bc39"
@@ -8511,7 +8511,7 @@
 											],
 											"cookie": [],
 											"responseTime": null,
-											"body": "{\n  \"code\": \"NOT_SUPPLIED\",\n  \"message\": \"No source supplies this row, so there is nothing to revert to. Exclude it instead. (1 of 1 operations failed validation)\",\n  \"failures\": [\n    {\n      \"index\": 0,\n      \"clientRef\": \"new-row\",\n      \"op\": \"revert\",\n      \"success\": false,\n      \"errorCode\": \"NOT_SUPPLIED\",\n      \"message\": \"No source supplies this row, so there is nothing to revert to. Exclude it instead. (edge new-a1Bg8000000AbCdEAK-a02g8000000Ab01EAC-a02g8000000Ab90EAC)\",\n      \"ciId\": null,\n      \"edgeId\": null,\n      \"forked\": null\n    }\n  ]\n}",
+											"body": "{\n  \"code\": \"NOT_SUPPLIED\",\n  \"message\": \"No source supplies this row, so there is nothing to revert to. Exclude it instead. (1 of 1 operations failed validation)\",\n  \"failures\": [\n    {\n      \"index\": 0,\n      \"clientRef\": \"new-row\",\n      \"op\": \"revert\",\n      \"success\": false,\n      \"errorCode\": \"NOT_SUPPLIED\",\n      \"message\": \"No source supplies this row, so there is nothing to revert to. Exclude it instead. (no source supplies edge new-a1Bg8000000AbCdEAK-a02g8000000Ab01EAC-a02g8000000Ab90EAC, so reverting it would remove the row rather than restore it; use exclude)\",\n      \"ciId\": null,\n      \"edgeId\": null,\n      \"forked\": null\n    }\n  ]\n}",
 											"createdAt": "2026-09-04T13:53:22.000Z",
 											"updatedAt": "2026-09-04T13:53:22.000Z",
 											"uid": "46943044-1c080873-1656-4ae5-968e-e31699ce0e15"
@@ -8678,7 +8678,7 @@
 											],
 											"cookie": [],
 											"responseTime": null,
-											"body": "{\n  \"code\": \"NO_CLAIM\",\n  \"message\": \"This row is not claiming anything from a source, so there is no claim to revert or convert. (1 of 1 operations failed validation)\",\n  \"failures\": [\n    {\n      \"index\": 0,\n      \"clientRef\": \"again\",\n      \"op\": \"convert-to-native\",\n      \"success\": false,\n      \"errorCode\": \"NO_CLAIM\",\n      \"message\": \"This row is not claiming anything from a source, so there is no claim to revert or convert. (edge new-a1Bg8000000AbCdEAK-a02g8000000Ab01EAC-a02g8000000Ab90EAC is already branch-native)\",\n      \"ciId\": null,\n      \"edgeId\": null,\n      \"forked\": null\n    }\n  ]\n}",
+											"body": "{\n  \"code\": \"NO_CLAIM\",\n  \"message\": \"This row is not claiming anything from a source, so there is no claim to revert or convert. (1 of 1 operations failed validation)\",\n  \"failures\": [\n    {\n      \"index\": 0,\n      \"clientRef\": \"again\",\n      \"op\": \"convert-to-native\",\n      \"success\": false,\n      \"errorCode\": \"NO_CLAIM\",\n      \"message\": \"This row is not claiming anything from a source, so there is no claim to revert or convert. (edge new-a1Bg8000000AbCdEAK-a02g8000000Ab01EAC-a02g8000000Ab90EAC is already branch-native; there is no source claim to sever)\",\n      \"ciId\": null,\n      \"edgeId\": null,\n      \"forked\": null\n    }\n  ]\n}",
 											"createdAt": "2026-09-04T13:53:22.000Z",
 											"updatedAt": "2026-09-04T13:53:22.000Z",
 											"uid": "46943044-be21b3a5-7d72-482e-ad9c-ed232717c80f"
@@ -8841,7 +8841,7 @@
 											],
 											"cookie": [],
 											"responseTime": null,
-											"body": "{\n  \"branchId\": \"a1Bg8000000AbCdEAK\",\n  \"atomic\": false,\n  \"asOf\": \"2026-04-05T17:25:11.004Z\",\n  \"applied\": 1,\n  \"failed\": 1,\n  \"results\": [\n    {\n      \"index\": 0,\n      \"clientRef\": \"ok\",\n      \"op\": \"claim\",\n      \"success\": true,\n      \"errorCode\": null,\n      \"message\": null,\n      \"ciId\": \"a1Gg8000000AbF2EAK\",\n      \"edgeId\": \"a1Eg8000000AbD2EAK\",\n      \"forked\": null\n    },\n    {\n      \"index\": 1,\n      \"clientRef\": \"will-fail\",\n      \"op\": \"update\",\n      \"success\": false,\n      \"errorCode\": \"CLAIM_REQUIRED\",\n      \"message\": \"This row is supplied by the source and read-only. Claim it before editing. (edge a0Bg8000000Ab11EAC)\",\n      \"ciId\": null,\n      \"edgeId\": null,\n      \"forked\": null\n    }\n  ]\n}",
+											"body": "{\n  \"branchId\": \"a1Bg8000000AbCdEAK\",\n  \"atomic\": false,\n  \"asOf\": \"2026-04-05T17:25:11.004Z\",\n  \"applied\": 1,\n  \"failed\": 1,\n  \"results\": [\n    {\n      \"index\": 0,\n      \"clientRef\": \"ok\",\n      \"op\": \"claim\",\n      \"success\": true,\n      \"errorCode\": null,\n      \"message\": null,\n      \"ciId\": \"a1Gg8000000AbF2EAK\",\n      \"edgeId\": \"a1Eg8000000AbD2EAK\",\n      \"forked\": null\n    },\n    {\n      \"index\": 1,\n      \"clientRef\": \"will-fail\",\n      \"op\": \"update\",\n      \"success\": false,\n      \"errorCode\": \"CLAIM_REQUIRED\",\n      \"message\": \"This row is supplied by the source and read-only. Claim it before editing. (claim Assembly__c a0Bg8000000Ab11EAC before revising it)\",\n      \"ciId\": null,\n      \"edgeId\": null,\n      \"forked\": null\n    }\n  ]\n}",
 											"createdAt": "2026-09-04T13:53:22.000Z",
 											"updatedAt": "2026-09-04T13:53:22.000Z",
 											"uid": "46943044-69dac6f2-4bcc-453e-98e5-0cf3fff1b53e"
@@ -10030,7 +10030,7 @@
 											],
 											"cookie": [],
 											"responseTime": null,
-											"body": "{\n  \"code\": \"INVALID_REQUEST\",\n  \"message\": \"That request could not be read. Check that the body is valid JSON and that every required value is supplied. (entryId b7204de9a1c6f358 is member-added, which is never actionable)\"\n}",
+											"body": "{\n  \"code\": \"INVALID_REQUEST\",\n  \"message\": \"That request could not be read. Check that the body is valid JSON and that every required value is supplied. (entryId b7204de9a1c6f358 is member-added, which offers no accept/reject decision)\"\n}",
 											"createdAt": "2026-09-04T13:53:22.000Z",
 											"updatedAt": "2026-09-04T13:53:22.000Z",
 											"uid": "46943044-71119788-4791-4dc1-a037-1682655589b0"
@@ -10086,7 +10086,7 @@
 											],
 											"cookie": [],
 											"responseTime": null,
-											"body": "{\n  \"code\": \"STALE_REVISION\",\n  \"message\": \"This row has been revised since the view you are working from. Reload it and try again. (diffFingerprint sha256:9f2c41ab7e08d3b6 no longer matches the current diff; re-run pull-preview and resubmit)\"\n}",
+											"body": "{\n  \"code\": \"STALE_REVISION\",\n  \"message\": \"This row has been revised since the view you are working from. Reload it and try again. (the diff has changed since this fingerprint was generated; re-preview and retry)\"\n}",
 											"createdAt": "2026-09-04T13:53:22.000Z",
 											"updatedAt": "2026-09-04T13:53:22.000Z",
 											"uid": "46943044-73a1fd46-5f23-4d79-a5d6-c53e234af3d3"

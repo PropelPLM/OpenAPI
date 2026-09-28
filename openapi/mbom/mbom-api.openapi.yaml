@@ -1364,7 +1364,7 @@ paths:
                 notActionable:
                   value:
                     code: INVALID_REQUEST
-                    message: 'That request could not be read. Check that the body is valid JSON and that every required value is supplied. (entryId b7204de9a1c6f358 is member-added, which is never actionable)'
+                    message: 'That request could not be read. Check that the body is valid JSON and that every required value is supplied. (entryId b7204de9a1c6f358 is member-added, which offers no accept/reject decision)'
         '403': { $ref: '#/components/responses/Forbidden' }
         '404':
           description: '`NOT_FOUND` — the source, or the candidate revision, does not exist.'
@@ -3165,7 +3165,7 @@ components:
             stale:
               value:
                 code: STALE_REVISION
-                message: 'This row has been revised since the view you are working from. Reload it and try again. (diffFingerprint sha256:9f2c41ab7e08d3b6 no longer matches; re-run pull-preview and resubmit)'
+                message: 'This row has been revised since the view you are working from. Reload it and try again. (the diff has changed since this fingerprint was generated; re-preview and retry)'
             dispositionRequired:
               value:
                 code: DISPOSITION_REQUIRED
@@ -3520,7 +3520,7 @@ components:
             op: update
             success: false
             errorCode: CLAIM_REQUIRED
-            message: 'This row is supplied by the source and read-only. Claim it before editing. (edge a0Bg8000000Ab12EAC)'
+            message: 'This row is supplied by the source and read-only. Claim it before editing. (claim Assembly__c a0Bg8000000Ab12EAC before revising it)'
             ciId: null
             edgeId: null
             forked: null
@@ -3553,7 +3553,7 @@ components:
             op: update
             success: false
             errorCode: CLAIM_REQUIRED
-            message: 'This row is supplied by the source and read-only. Claim it before editing. (edge a0Bg8000000Ab12EAC)'
+            message: 'This row is supplied by the source and read-only. Claim it before editing. (claim Assembly__c a0Bg8000000Ab12EAC before revising it)'
             ciId: null
             edgeId: null
             forked: null
