@@ -435,7 +435,7 @@ paths:
           clock-resolved row that happens to resolve to the same revision is `false`. `wasClaimed`
           marks a `new` row that `convert-to-native` flipped from `claiming`. Both follow the
           explicit decision, not the structural pin above. [assumes A-30375-1, A-30375-2]
-        - **🚧 Planned — MVP-30376, not yet implemented: a dead chosen revision is warned about,
+        - **🚧 Planned — MVP-30376, not yet implemented.** **A dead chosen revision is warned about,
           never replaced.** A row whose stored `childItemRevisionId` has since been Cancelled or
           Expired still renders that revision, and the read raises one `STORED_REVISION_RETIRED`
           per such row. This read is the only one that raises it. [assumes A-30376-2, A-30376-3]
@@ -711,7 +711,7 @@ paths:
           Otherwise `422 REVISION_ITEM_MISMATCH`. A revision you cannot see answers the same code
           as one that does not exist, so the check is not an existence oracle. Lifecycle
           (Cancelled / Expired) is **not** screened at write time.
-          **🚧 Planned — MVP-30376, not yet implemented:** it is not screened at write time then
+          **🚧 Planned — MVP-30376, not yet implemented.** It is not screened at write time then
           either, because a revision can be cancelled long after it was chosen. The branch tree
           read warns about it instead (`STORED_REVISION_RETIRED`). [assumes A-30376-2]
         - **Why `claim` no longer defaults.** Claiming a line to change its quantity used to pin its
@@ -2550,7 +2550,7 @@ components:
             `MEMBER_ADD_COLLISION`, naming the child item whose position collapsed, and on
             `PINNED_SUBTREE_HIDES_EDITS`, naming the child item of the edited line a pinned
             revision's structure replaced (or, on a pull preview, will replace).
-            **🚧 Planned — MVP-30376, not yet implemented:** also on `STORED_REVISION_RETIRED`,
+            **🚧 Planned — MVP-30376, not yet implemented.** Also on `STORED_REVISION_RETIRED`,
             naming the child item of the row holding the dead revision. [assumes A-30376-3]
         itemRevisionIds:
           type: array
@@ -2559,7 +2559,7 @@ components:
             `PINNED_SUBTREE_HIDES_EDITS`, where it lists the pinned revisions whose structure hid
             the edit (each is the `detail.childItemRevisionId` of a pinned row), with
             `governingTimestamps` left empty. Every other code leaves it empty.
-            **🚧 Planned — MVP-30376, not yet implemented:** also on `STORED_REVISION_RETIRED`,
+            **🚧 Planned — MVP-30376, not yet implemented.** Also on `STORED_REVISION_RETIRED`,
             where it holds exactly one id, the Cancelled or Expired stored revision, with
             `governingTimestamps` left empty. [assumes A-30376-3]
           items: { $ref: '#/components/schemas/SalesforceId' }
@@ -3050,7 +3050,7 @@ components:
           description: |
             Non-blocking conditions about what would render *after* the pull — typically `MIXED_REVISION`, and `PINNED_SUBTREE_HIDES_EDITS` for a branch edit a post-pull pin will hide. Always present; empty rather than absent.
 
-            **🚧 Planned — MVP-30376, not yet implemented:** `STORED_REVISION_RETIRED` is not
+            **🚧 Planned — MVP-30376, not yet implemented.** `STORED_REVISION_RETIRED` is not
             raised here. The branch tree read is the one that raises it. [assumes A-30376-2]
           items: { $ref: '#/components/schemas/TreeWarning' }
         truncated:
