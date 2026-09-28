@@ -1175,9 +1175,10 @@ paths:
 
         - **Excluded rows are filtered out.** A tree read renders a tombstone so the editor can see
           what was removed; a baseline is the record of what the branch *contained*.
-        - **`edgeId`, `edgeKey` and the per-row governing clock are suppressed** — a baseline row
-          does not pretend to answer questions it cannot. `isReplaced` **is** populated: leaving it
-          null would render a substituted part identically to an ordinary one.
+        - **`edgeId` and `edgeKey` are suppressed, and the per-row governing clock is collapsed** —
+          every row's `governingTimestamp` is the baseline's own `resolutionTimePoint`, never null. A
+          baseline row does not pretend to answer questions it cannot. `isReplaced` **is**
+          populated: leaving it null would render a substituted part identically to an ordinary one.
         - **`warnings` carries drift only.** A `MIXED_REVISION` or `PINNED_SUBTREE_HIDES_EDITS`
           warning is advice about a branch someone is still editing; a baseline is a record of a
           decision already taken, so neither is forwarded.
@@ -1257,7 +1258,9 @@ paths:
 
         **This call is pure.** It creates and modifies nothing — no `Branch_Member__c`, no
         `CI_Rev__c`, no source revision. Calling it twice with the same inputs against an unchanged
-        org returns identical output, including identical `entryId` values.
+        org returns identical entries, including identical `entryId` values and an identical
+        `diffFingerprint`. Only the read clock moves: `generatedAt`, and the `governingTimestamp` of
+        every state that answers to `asOf`.
 
         **Not every entry is a decision.** Most are informational: the caller is being told what will
         happen, not asked. Only `claim-orphaned` blocks a commit.
@@ -1754,7 +1757,9 @@ paths:
         MBOM-against-its-own-baseline rather than three.
 
         **This call is pure.** No DML anywhere behind it. Two calls with the same inputs against an
-        unchanged org return identical output, `entryId` values included.
+        unchanged org return identical entries, `entryId` values included. Only the read clock moves:
+        `generatedAt`, each side's `asOf` when the caller sent none, and the `governingTimestamp` of
+        every state that answers to `asOf`.
 
         ## The right-hand side
 
