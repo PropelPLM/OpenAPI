@@ -85,7 +85,7 @@ info:
 
     A `base` row is read-only. Editing it is refused with `CLAIM_REQUIRED`, carrying the eBOM
     line id so the client can offer the claim. Divergence from upstream is always an explicit act.
-    (**🚧 Planned — MVP-30377, not yet implemented:** `update` with `autoClaim: true` claims and
+    (**🚧 Planned — MVP-30377, not yet implemented.** `update` with `autoClaim: true` claims and
     revises in one operation. It is still explicit, and the result reports `claimed: true`.)
 
     ### 6. Nothing is ever deleted
@@ -917,7 +917,8 @@ paths:
             > with `autoClaim: true` on an edge the branch already owns, sending a
             > `childItemRevisionId` different from the stored one. Use `set-revision` to change it.
             > An `update` with `autoClaim` on a `base` edge at a past `asOf` is refused too, as a
-            > `claim` is. [assumes A-30377-1]
+            > `claim` is. On an owned edge a past `asOf` stays tolerated. [assumes A-30377-1,
+            > A-30377-5]
           content:
             application/json:
               schema: { $ref: '#/components/schemas/RestError' }
@@ -2737,7 +2738,7 @@ components:
             > [assumes A-30378-2]
         autoClaim:
           oneOf: [{ type: boolean }, { type: 'null' }]
-          x-planned: { ticket: MVP-30377, assumptions: [A-30377-1, A-30377-4] }
+          x-planned: { ticket: MVP-30377, assumptions: [A-30377-1, A-30377-4, A-30377-5] }
           description: |
             **🚧 Planned — MVP-30377, not yet implemented.** `update` only. When `true`, an update
             of a `base` edge **claims it and revises it in one operation**, instead of answering
@@ -2764,10 +2765,15 @@ components:
                 `REVISION_ITEM_MISMATCH`, and a membership change on the same row earlier in the
                 batch. So `[replace(L, X), update(L, autoClaim)]` is refused, as
                 `[replace(L, X), claim(L)]` is.
-            - A row hidden behind a pin answers `NOT_FOUND`, as plain `update` does today.
+              - On an edge the branch already owns, no claim happens, so a past `asOf` stays
+                tolerated as on plain `update`.
+            - A row hidden behind a pin, addressed by `ebomAssemblyId`, answers `NOT_FOUND`, as
+              plain `update` does today. `autoClaim` does not change how a row is found; reaching
+              one by `assemblyCiId` is MVP-30378's concern (A-30378-5).
 
             `false` and null both mean off: today's `CLAIM_REQUIRED`, still carrying the eBOM line.
-            Ignored, not refused, on every other operation. [assumes A-30377-1, A-30377-4]
+            Ignored, not refused, on every other operation. [assumes A-30377-1, A-30377-4,
+            A-30377-5]
           examples: [true]
 
     DeltaBatchResponse:
