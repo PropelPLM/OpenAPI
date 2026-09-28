@@ -2484,7 +2484,7 @@ components:
 
             - `MIXED_REVISION` — one item rendered at more than one revision in the same tree,
               because two clocks are in play. Legal and expected; warned, never blocked.
-              **🚧 Planned — MVP-30214, not yet implemented:** still raised, and still never
+              **🚧 Planned — MVP-30214, not yet implemented.** Still raised, and still never
               blocking, once each occurrence renders its own pinned structure. [assumes A-30214-1]
             - `BASELINE_COUNT_DRIFT` — a baseline re-derived a different **row count** than its cut
               recorded.
