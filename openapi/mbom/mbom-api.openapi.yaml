@@ -173,6 +173,10 @@ info:
     - Where a ticket left a design question open, the answer assumed here is recorded in the
       assumptions ledger, `docs/architecture/cm/cm-api-planned-assumptions.md` (PLM repo), under
       an ID like `A-30378-2`. Each passage that depends on an answer cites its ID.
+    - Each planned example shows **only its own ticket's surface**. Other tickets' planned fields
+      are left out, so an example still matches its ticket if that ticket ships alone. Once
+      several have shipped, a real response carries all of their fields (for example, a
+      `STORED_REVISION_RETIRED` tree also carries `isPinned`).
 
     When a ticket ships, remove its markers: grep for its key.
 
