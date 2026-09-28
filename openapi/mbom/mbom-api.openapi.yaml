@@ -669,7 +669,9 @@ paths:
         > **🚧 Planned — MVP-30379, not yet implemented.** `set-revision` also takes an optional
         > `quantity` and `findNumber`, applied partially as on `update`. One operation can then
         > change a row's revision and its quantity together, which is what a pull's
-        > `accept-fields` compiles to when it accepts both. [assumes A-30379-5]
+        > `accept-fields` compiles to when it accepts both. Restating the stored revision then
+        > writes nothing only if the quantity and find number are unchanged too (A-30378-8).
+        > [assumes A-30379-5]
 
         > **🚧 Planned — MVP-30377, not yet implemented.** `update` gains an optional
         > `autoClaim: true`. With it, the operation also needs **exactly one of**
@@ -1344,6 +1346,10 @@ paths:
         > **optional**. `decision` stays `informational`, and a preview with hundreds of entries
         > and no `claim-orphaned` still commits with zero decisions.
         >
+        > A field **diverges** when the value the branch holds differs from the candidate's. A
+        > tracking claim holds no revision, so its revision never diverges, even when `current`
+        > and `candidate` render different revisions.
+        >
         > | kind | availableActions |
         > |---|---|
         > | `claim-retained` | `accept-fields`, over the fields that actually diverge. The revision diverges only on a *pinned* claim, exactly when `retargeted`. `accept-source-revision` is also offered when retargeted. |
@@ -1351,7 +1357,10 @@ paths:
         > | `claim-superseded` | `release` |
         >
         > A pull has exactly one **required** kind, `claim-orphaned`, permanently. The other five
-        > kinds are unchanged, and `diffFingerprint` works as before.
+        > kinds are unchanged. `diffFingerprint`'s mechanism is unchanged, but it digests each
+        > entry's `availableActions`, so its value changes with the actions offered: a preview
+        > taken before this ships does not match a commit made after it, and answers
+        > `STALE_REVISION`.
         > [assumes A-30379-3, A-30379-7]
 
         ### Why a revision advance is never a decision
@@ -2670,14 +2679,14 @@ components:
           description: |
             Used by `update`, `add`, `replace`.
 
-            **🚧 Planned — MVP-30379, not yet implemented:** also optional on `set-revision`.
+            **🚧 Planned — MVP-30379, not yet implemented.** Also optional on `set-revision`.
             [assumes A-30379-5]
         findNumber:
           type: number
           description: |
             Used by `update`, `add`, `replace`.
 
-            **🚧 Planned — MVP-30379, not yet implemented:** also optional on `set-revision`.
+            **🚧 Planned — MVP-30379, not yet implemented.** Also optional on `set-revision`.
             [assumes A-30379-5]
         childItemRevisionId:
           oneOf: [{ $ref: '#/components/schemas/SalesforceId' }, { type: 'null' }]
@@ -3155,7 +3164,7 @@ components:
             `claim-retained` entry with `retargeted: true`. It is optional: the entry's `decision`
             stays `informational`. [assumes A-30378-3, A-30378-10]
 
-            **🚧 Planned — MVP-30379, not yet implemented:** optional per-field decisions on three
+            **🚧 Planned — MVP-30379, not yet implemented.** Optional per-field decisions on three
             kinds. `claim-retained` gains `accept-fields`, beside `accept-source-revision` when
             retargeted. `member-add-collision` gains `accept-fields`. `claim-superseded` gains
             `release`. Every other kind is unchanged. [assumes A-30379-7]
@@ -3421,8 +3430,10 @@ components:
                   - any key other than the three below, including `childItem` and the old spelling
                     `childItemRevision`
                   - an empty object
-                  - a field that does not **actually diverge**. A tracking claim's revision never
-                    does, because it renders the source line's by construction.
+                  - a field that does not **actually diverge**, meaning the value the branch holds
+                    does not differ from the candidate's. A tracking claim holds no revision, so
+                    its revision never diverges, even when `current` and `candidate` render
+                    different revisions.
                   - `release` on a value the branch does not hold
                   - `release` on `quantity` or `findNumber`, which have no clock to fall back to.
                     Use `revert`, or `release` on `claim-superseded`.
