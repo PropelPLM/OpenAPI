@@ -56,8 +56,9 @@ info:
     A row's **child revision** can also be the caller's explicit choice rather than any clock's
     output. Every operation that creates or takes over a row (`claim`, `add`, `replace`,
     `convert-to-native`) accepts a `childItemRevisionId`; a row that stores one is **pinned** and
-    renders exactly that revision whatever T_R or `asOf` say. (**🚧 Planned — MVP-30378, not yet
-    implemented:** `set-revision` changes or clears it afterwards.) A row that stores none
+    renders exactly that revision whatever T_R or `asOf` say.
+    (**🚧 Planned — MVP-30378, not yet implemented.** `set-revision` changes or clears it
+    afterwards.) A row that stores none
     **tracks**:
 
     | Row | Stored revision | Child revision it renders |
@@ -568,7 +569,7 @@ paths:
       description: |
         The single write endpoint for editing a branch. Eight operations — `claim`, `update`, `add`,
         `exclude`, `restore`, `replace`, `revert`, `convert-to-native` — arrive in one array and are
-        applied under one envelope. (**🚧 Planned — MVP-30378, not yet implemented:** a ninth,
+        applied under one envelope. (**🚧 Planned — MVP-30378, not yet implemented.** A ninth,
         `set-revision`.)
 
         **Returns `200`, not `201`**, even though rows are created: the response is a *report* on a
@@ -722,7 +723,7 @@ paths:
           [branch tree read](#operation/getBranchTree) and `PINNED_SUBTREE_HIDES_EDITS`.
         - Changing or clearing a revision after the row exists is not an operation this release
           offers.
-          **🚧 Planned — MVP-30378, not yet implemented:** `set-revision` changes or clears it
+          **🚧 Planned — MVP-30378, not yet implemented.** `set-revision` changes or clears it
           and keeps the row's quantity and find number. `convert-to-native` may still stamp **any**
           revision of the child item, or switch to tracking. That is legitimate, and it is the
           severing path. `set-revision` is the non-severing one. [assumes A-30378-1, A-30378-7]
@@ -741,7 +742,7 @@ paths:
         - A row **hidden behind a pin** (see `PINNED_SUBTREE_HIDES_EDITS`) is addressable by
           `ciId` for `exclude`, `restore`, `revert` and `convert-to-native`. `update` and `claim`
           answer `NOT_FOUND` for it.
-          **🚧 Planned — MVP-30378, not yet implemented:** `update` and `set-revision` addressed
+          **🚧 Planned — MVP-30378, not yet implemented.** `update` and `set-revision` addressed
           by `assemblyCiId` find it too. Addressed by `ebomAssemblyId`, they still answer
           `NOT_FOUND`. `claim` of a hidden line keeps answering `NOT_FOUND`: a line that renders
           nowhere has nothing visible to claim. [assumes A-30378-5]
@@ -2506,7 +2507,7 @@ components:
               where it describes the tree **after** the commit. A revision cannot be changed in place
               this release, so the remedy is to `revert` the pinned claim and claim the line again —
               tracking, or pinned to the source line's own revision — in a later request.
-              **🚧 Planned — MVP-30378, not yet implemented:** the remedy becomes `set-revision` on
+              **🚧 Planned — MVP-30378, not yet implemented.** The remedy becomes `set-revision` on
               the pinned row. Clear it with `trackChildRevision: true`, or pin it to the source
               line's own revision. Either keeps the row's quantity and find number, and the hidden
               edits render again. [assumes A-30378-2]
@@ -2634,7 +2635,7 @@ components:
           description: |
             The legacy `Assembly__c` line. Used by: `claim`, `exclude`, `update` (the `CLAIM_REQUIRED` path), `revert` (the second-revert path).
 
-            **🚧 Planned — MVP-30378, not yet implemented:** also `set-revision`, whose `base`-row
+            **🚧 Planned — MVP-30378, not yet implemented.** Also `set-revision`, whose `base`-row
             answer is `CLAIM_REQUIRED`. [assumes A-30378-1]
         assemblyCiId:
           allOf: [{ $ref: '#/components/schemas/SalesforceId' }]
@@ -3150,7 +3151,7 @@ components:
           description: |
             Empty except on `claim-orphaned`, whose two dispositions are the only actions this API offers anywhere.
 
-            **🚧 Planned — MVP-30378, not yet implemented:** also `[accept-source-revision]` on a
+            **🚧 Planned — MVP-30378, not yet implemented.** Also `[accept-source-revision]` on a
             `claim-retained` entry with `retargeted: true`. It is optional: the entry's `decision`
             stays `informational`. [assumes A-30378-3, A-30378-10]
 
@@ -3175,7 +3176,7 @@ components:
 
             The child *revision*, not the child *item*: see the endpoint description.
 
-            **🚧 Planned — MVP-30378, not yet implemented:** a `true` here is what makes the entry
+            **🚧 Planned — MVP-30378, not yet implemented.** A `true` here is what makes the entry
             offer `accept-source-revision`. [assumes A-30378-3]
         revisionAdvances:
           oneOf: [{ type: boolean }, { type: 'null' }]
@@ -3393,7 +3394,7 @@ components:
                   row floats at the read clock like an `add`. A `convert-to-native` decision carries
                   **exactly one** of this and `childItemRevisionId`, or the commit answers
                   `422 REVISION_CHOICE_REQUIRED` before any delta or acceptance is written. Ignored
-                  on `remove`. **🚧 Planned — MVP-30378, not yet implemented:** also ignored on
+                  on `remove`. **🚧 Planned — MVP-30378, not yet implemented.** Also ignored on
                   `accept-source-revision`, whose revision is always the candidate's.
                   [assumes A-30378-11]
               acceptedFields:
