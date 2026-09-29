@@ -1298,7 +1298,8 @@ paths:
         not part of the key: a branch edge and its source counterpart carry different parent
         revisions once the source advances. Across the sides, edges at one key pair by equal
         parent revision first, and then a lone edge left on each side pairs with the other — the
-        source advancing. There is no tie-break on find number.
+        source advancing. A null parent revision never pairs by equality, only as a lone survivor;
+        `nested` rows pair in a second pass and never refuse. There is no tie-break on find number.
 
         A `replace` substitute borrows the key of the line it supersedes. Where it meets a line of
         its new child under the same parent revision, it stands aside rather than colliding: it is
@@ -3900,8 +3901,8 @@ components:
 
     PullUnprocessable:
       description: |
-        422 — well formed, but impossible against the model. Retrying the identical request will
-        never succeed.
+        422 — well formed, but impossible against the model. Retrying the identical request against
+        the same state will never succeed.
 
         | code | Cause |
         |---|---|
@@ -3921,11 +3922,15 @@ components:
         2. **A pairing that would be a guess.** Edges at one key are left on **both** sides under
            different parent revisions, with more than one on a side. Usually data; a branch row in
            the mix can be removed to clear it.
-        3. **Two unpaired edges at one position.** Two or more edges at one key (bar `nested`
-           rows) would be left without a counterpart on **one** side, where the diff could report
-           only one of them. For example, a `replace` substitute beside a claim on a line of the
-           same child that upstream drops, or an orphaned claim beside one. A branch edit clears
-           this: exclude the substitute, or dispose of or remove one of the claims.
+        3. **Two unpaired entries at one position.** Two or more edges at one key would be left
+           without a counterpart on **one** side as the **same kind** of entry, so under one
+           `entryId`, where the diff could report only one of them. Rows that produce no entry
+           (`nested` rows, tombstones, branch-native rows) do not count, and neither do two rows
+           of different kinds. So a `replace` substitute beside a line of the same child that
+           upstream drops completes — the substitute `claim-orphaned`, the line `member-removed`
+           — but with that line **claimed** both are `claim-orphaned`, and the pull refuses. A
+           branch edit clears it: exclude the substitute, or revert the claim on the dropped line,
+           which then reads as `member-removed`.
 
         One parent item rendering at two revisions is **not** one of these: the parent revision
         separates those lines.
@@ -3969,12 +3974,12 @@ components:
 
     ComparisonUnprocessable:
       description: |
-        422 — well formed, but impossible against the model. Retrying the identical request will
-        never succeed.
+        422 — well formed, but impossible against the model. Retrying the identical request against
+        the same state will never succeed.
 
         | code | Cause |
         |---|---|
-        | `AMBIGUOUS_CORRELATION` | the correlation join cannot tell which member on one side corresponds to which on the other. The same three shapes, with the same remedies, as on the pull (see `PullUnprocessable`): two edges on one side sharing a key **and** a parent revision, edges at one key left on both sides under different parent revisions with more than one on a side, or two or more edges at one key left unpaired on one side. One parent item rendering at two revisions is not one of them |
+        | `AMBIGUOUS_CORRELATION` | the correlation join cannot tell which member on one side corresponds to which on the other. The same three shapes as on the pull (see `PullUnprocessable`): two edges on one side sharing a key **and** a parent revision, edges at one key left on both sides under different parent revisions with more than one on a side, or two or more edges at one key left unpaired on one side. A comparison reports every one-sided member on a side as one kind, so for the third shape any two members count — a substitute beside a line of the same child that the other side lacks refuses whether that line is claimed or not — and excluding the substitute clears it, since tombstones are not members. One parent item rendering at two revisions is not one of them |
         | `CYCLE_DETECTED` | a cycle in the eBOM beneath either side's root, so that side cannot be resolved at all |
 
         Both sides are resolved, so either can raise either code. `AMBIGUOUS_CORRELATION`'s detail
