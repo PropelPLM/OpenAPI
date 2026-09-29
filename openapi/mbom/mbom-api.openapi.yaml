@@ -3977,11 +3977,11 @@ components:
         | `AMBIGUOUS_CORRELATION` | the correlation join cannot tell which member on one side corresponds to which on the other. The same three shapes, with the same remedies, as on the pull (see `PullUnprocessable`): two edges on one side sharing a key **and** a parent revision, edges at one key left on both sides under different parent revisions with more than one on a side, or two or more edges at one key left unpaired on one side. One parent item rendering at two revisions is not one of them |
         | `CYCLE_DETECTED` | a cycle in the eBOM beneath either side's root, so that side cannot be resolved at all |
 
-        Both sides are resolved, so either can raise either code. `AMBIGUOUS_CORRELATION`'s message
-        names the offending side in the **join's** vocabulary rather than the comparison's:
-        `current side` is the **left** side and `candidate side` is the **right** one. The message
-        is shared with pull-preview, which is the surface that vocabulary was written for; switch on
-        `code`, and read the ids rather than the nouns.
+        Both sides are resolved, so either can raise either code. `AMBIGUOUS_CORRELATION`'s detail
+        names the offending side in the **comparison's** own vocabulary — `left side`,
+        `right side`, or `right and left sides` — where a pull's says `current` and `candidate`.
+        The label before it is shared with pull-preview; switch on `code`, and read the ids rather
+        than the nouns.
 
         A comparison always reports a cycle as **`CYCLE_DETECTED`**, never as the traversal's own
         `EBOM_CYCLE`: the two mean the same thing to a caller and are both 422, and carrying the
