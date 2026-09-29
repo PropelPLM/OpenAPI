@@ -7210,7 +7210,7 @@
 									"uid": "46943044-45f6dbcb-16f8-4f06-8c8f-218bd1cd433e"
 								},
 								{
-									"name": "🚧 MVP-30214 — Branch tree: a substitute that shares its child with another line",
+									"name": "Branch tree: a substitute that shares its child with another line",
 									"protocolProfileBehavior": {
 										"disableBodyPruning": true
 									},
@@ -7255,11 +7255,11 @@
 												}
 											]
 										},
-										"description": "**🚧 Planned — MVP-30214, not yet implemented.** Behaviour only; the request and response shapes are unchanged.\n\nA `replace` substitute must not absorb an unrelated eBOM line that happens to carry the same child item. This reproduces the absorbed MVP-30320 finding.\n\n## Setup (two requests before this one)\n\n1. The eBOM supplies **Label-400** as its own line under Assy-100 at find **60**, and **Panel-300** at find **40**.\n2. `POST …/deltas` with `{\"op\": \"replace\", \"replacedEbomAssemblyId\": \"<Panel-300's find-40 line>\", \"newChildItemId\": \"<Label-400>\", \"quantity\": 2, \"findNumber\": 40}`.\n\nThen read the tree.\n\n## What to assert\n\n| | Once MVP-30214 ships | Today |\n|---|---|---|\n| Row count on the seed fixture | **9** | 8 |\n| Label-400's own find-60 line | present, `provenance: base` | missing (merged into the substitute) |\n| Substitute's `edgeKey` | its own `replaces-{branchId}-{supersededEdgeKey}-{newChildItemId}` | the find-60 line's id |\n| Status | 200, no error | 200 |\n\nThe read **declines** the ambiguous match rather than refusing. It never answers `AMBIGUOUS_CORRELATION` [assumes A-30214-3]. The saved examples trim `rows` to the Assy-100 lines at issue."
+										"description": "Behaviour only: the request and response are the ordinary branch tree read.\n\nA `replace` substitute never absorbs an unrelated eBOM line that happens to carry the same child item. This reproduces the MVP-30320 finding, which is now fixed.\n\n## Setup (two requests before this one)\n\n1. The eBOM supplies **Label-400** as its own line under Assy-100 at find **60**, and **Panel-300** at find **40**.\n2. `POST …/deltas` with `{\"op\": \"replace\", \"replacedEbomAssemblyId\": \"<Panel-300's find-40 line>\", \"newChildItemId\": \"<Label-400>\", \"quantity\": 2, \"findNumber\": 40}`.\n\nThen read the tree.\n\n## What to assert\n\n| | Expected |\n|---|---|\n| Row count | one more than the absorbing read returned: **9**, not 8, in the ticket's worked case on the seed fixture |\n| Label-400's own find-60 line | present, `provenance: base`, under its own `edgeKey` |\n| Substitute's `edgeKey` | its own `replaces-{branchId}-{supersededEdgeKey}-{newChildItemId}` |\n| Status | 200, no error |\n\nThe read **declines** the ambiguous match rather than refusing, and never answers `AMBIGUOUS_CORRELATION`. A pull or comparison over this branch completes too: the substitute is reported on its own (`claim-orphaned` in a pull preview, a one-sided member in a comparison), and the find-60 line pairs as usual. The one refusal is when the branch has also claimed the find-60 line and upstream then drops it: that answers `AMBIGUOUS_CORRELATION` (422), and excluding the substitute clears it. The saved example trims `rows` to the Assy-100 lines at issue."
 									},
 									"response": [
 										{
-											"name": "🚧 expected once MVP-30214 ships",
+											"name": "Both rows render — the substitute under its own key",
 											"originalRequest": {
 												"method": "GET",
 												"header": [
@@ -7310,64 +7310,11 @@
 											"cookie": [],
 											"responseTime": null,
 											"body": "{\n  \"asOf\": \"2026-04-05T17:22:03.518Z\",\n  \"rootRevisionId\": \"a0Ag8000000Ab01EAC\",\n  \"sourceTimePoint\": \"2026-01-15T00:00:00.000Z\",\n  \"rows\": [\n    {\n      \"edgeId\": \"a1Eg8000000AbD8EAK\",\n      \"edgeKey\": \"replaces-a1Bg8000000AbCdEAK-a0Bg8000000Ab13EAC-a02g8000000Ab24EAC\",\n      \"detail\": {\n        \"ciKind\": \"assembly-edge\",\n        \"parentItemId\": \"a02g8000000Ab01EAC\",\n        \"parentItemNumber\": null,\n        \"childItemId\": \"a02g8000000Ab24EAC\",\n        \"childItemNumber\": null,\n        \"childItemRevisionId\": \"a0Ag8000000Ab71EAC\",\n        \"childRevisionLabel\": null,\n        \"quantity\": 2,\n        \"findNumber\": 40\n      },\n      \"provenance\": \"claiming\",\n      \"governingTimestamp\": \"2026-04-05T17:22:03.518Z\",\n      \"sourceId\": \"a1Cg8000000AbCeEAK\",\n      \"isClaimed\": true,\n      \"isExcluded\": false,\n      \"isReplaced\": true,\n      \"isCollapsedCollision\": false,\n      \"isEditable\": true,\n      \"childRows\": []\n    },\n    {\n      \"edgeId\": null,\n      \"edgeKey\": \"a0Bg8000000Ab17EAC\",\n      \"detail\": {\n        \"ciKind\": \"assembly-edge\",\n        \"parentItemId\": \"a02g8000000Ab01EAC\",\n        \"parentItemNumber\": null,\n        \"childItemId\": \"a02g8000000Ab24EAC\",\n        \"childItemNumber\": null,\n        \"childItemRevisionId\": \"a0Ag8000000Ab71EAC\",\n        \"childRevisionLabel\": null,\n        \"quantity\": 1,\n        \"findNumber\": 60\n      },\n      \"provenance\": \"base\",\n      \"governingTimestamp\": \"2026-01-15T00:00:00.000Z\",\n      \"sourceId\": \"a1Cg8000000AbCeEAK\",\n      \"isClaimed\": false,\n      \"isExcluded\": false,\n      \"isReplaced\": false,\n      \"isCollapsedCollision\": false,\n      \"isEditable\": true,\n      \"childRows\": []\n    }\n  ],\n  \"warnings\": []\n}"
-										},
-										{
-											"name": "Today — the substitute absorbs the find-60 line",
-											"originalRequest": {
-												"method": "GET",
-												"header": [
-													{
-														"key": "Content-Type",
-														"value": "application/json"
-													}
-												],
-												"url": {
-													"raw": "{{propelApiUrl}}/v4/mbom/branches/:branchId/tree?flat=true&asOf=",
-													"host": [
-														"{{propelApiUrl}}"
-													],
-													"path": [
-														"v4",
-														"mbom",
-														"branches",
-														":branchId",
-														"tree"
-													],
-													"query": [
-														{
-															"key": "flat",
-															"value": "true"
-														},
-														{
-															"key": "asOf",
-															"value": ""
-														}
-													],
-													"variable": [
-														{
-															"key": "branchId",
-															"value": "a1Bg8000000AbCdEAK"
-														}
-													]
-												}
-											},
-											"status": "OK",
-											"code": 200,
-											"_postman_previewlanguage": "json",
-											"header": [
-												{
-													"key": "Content-Type",
-													"value": "application/json"
-												}
-											],
-											"cookie": [],
-											"responseTime": null,
-											"body": "{\n  \"asOf\": \"2026-04-05T17:22:03.518Z\",\n  \"rootRevisionId\": \"a0Ag8000000Ab01EAC\",\n  \"sourceTimePoint\": \"2026-01-15T00:00:00.000Z\",\n  \"rows\": [\n    {\n      \"edgeId\": \"a1Eg8000000AbD8EAK\",\n      \"edgeKey\": \"a0Bg8000000Ab17EAC\",\n      \"detail\": {\n        \"ciKind\": \"assembly-edge\",\n        \"parentItemId\": \"a02g8000000Ab01EAC\",\n        \"parentItemNumber\": null,\n        \"childItemId\": \"a02g8000000Ab24EAC\",\n        \"childItemNumber\": null,\n        \"childItemRevisionId\": \"a0Ag8000000Ab71EAC\",\n        \"childRevisionLabel\": null,\n        \"quantity\": 2,\n        \"findNumber\": 40\n      },\n      \"provenance\": \"claiming\",\n      \"governingTimestamp\": \"2026-04-05T17:22:03.518Z\",\n      \"sourceId\": \"a1Cg8000000AbCeEAK\",\n      \"isClaimed\": true,\n      \"isExcluded\": false,\n      \"isReplaced\": true,\n      \"isCollapsedCollision\": false,\n      \"isEditable\": true,\n      \"childRows\": []\n    }\n  ],\n  \"warnings\": []\n}"
 										}
 									]
 								},
 								{
-									"name": "🚧 MVP-30214 — Branch tree: one of two occurrences pinned",
+									"name": "Branch tree: one of two occurrences pinned",
 									"protocolProfileBehavior": {
 										"disableBodyPruning": true
 									},
@@ -7412,11 +7359,11 @@
 												}
 											]
 										},
-										"description": "**🚧 Planned — MVP-30214, not yet implemented.** Behaviour only; the request and response shapes are unchanged. **needs fixture:** a subassembly the eBOM supplies under two different parents.\n\n## Setup\n\n1. The eBOM supplies **Sub-200** under both **Assy-A** and **Assy-B**. At T_R both resolve to Sub-200 **rev-1**, whose one line is Part-31. Sub-200 **rev-2** replaces that line with Part-33.\n2. `POST …/deltas` with `{\"op\": \"claim\", \"ebomAssemblyId\": \"<Sub-200's line under Assy-A>\", \"childItemRevisionId\": \"<Sub-200 rev-2>\"}`.\n\nThen read the tree nested (`flat=false`).\n\n## What to assert\n\n| | Once MVP-30214 ships | Today |\n|---|---|---|\n| Under Assy-A's Sub-200 (pinned rev-2) | rev-2's own line as a read-only `nested` row | rev-1's line (the pin is not rendered) |\n| Under Assy-B's Sub-200 (base, rev-1) | rev-1's line | rev-1's line |\n| `MIXED_REVISION` for Sub-200 | raised | raised |\n| A later pull over this tree | completes | completes (today's guard never puts two revisions' lines under one item) |\n\nOccurrences are told apart by `edgeKey` / `detail.parentItemId`; no field is added [assumes A-30214-1]. A branch `add` under Sub-200 would appear under **both** occurrences [assumes A-30214-4]. The saved examples trim `rows` to the two occurrences."
+										"description": "Behaviour only: the request and response are the ordinary branch tree read. **needs fixture:** a subassembly the eBOM supplies under two different parents.\n\n## Setup\n\n1. The eBOM supplies **Sub-200** under both **Assy-A** and **Assy-B**. At T_R both resolve to Sub-200 **rev-1**, whose one line is Part-31. Sub-200 **rev-2** replaces that line with Part-33.\n2. `POST …/deltas` with `{\"op\": \"claim\", \"ebomAssemblyId\": \"<Sub-200's line under Assy-A>\", \"childItemRevisionId\": \"<Sub-200 rev-2>\"}`.\n\nThen read the tree nested (`flat=false`).\n\n## What to assert\n\n| | Expected |\n|---|---|\n| Under Assy-A's Sub-200 (pinned rev-2) | rev-2's own line as a read-only `nested` row |\n| Under Assy-B's Sub-200 (base, rev-1) | rev-1's line |\n| `MIXED_REVISION` for Sub-200 | raised, never blocking |\n| A later pull over this tree | completes |\n\nEach occurrence renders its own revision's structure. The occurrences themselves are told apart by `edgeKey` / `detail.parentItemId`; no field is added to the row. Read this tree nested: in the flat shape both occurrences' children name Sub-200 as their parent, so re-nesting them by `parentItemId` would hang both revisions' lines under each. A branch `add` under Sub-200 appears under **both** occurrences, with no warning of its own. The saved example trims `rows` to the two occurrences."
 									},
 									"response": [
 										{
-											"name": "🚧 expected once MVP-30214 ships",
+											"name": "Each occurrence renders its own structure",
 											"originalRequest": {
 												"method": "GET",
 												"header": [
@@ -7467,59 +7414,6 @@
 											"cookie": [],
 											"responseTime": null,
 											"body": "{\n  \"asOf\": \"2026-04-05T17:22:03.518Z\",\n  \"rootRevisionId\": \"a0Ag8000000Ab01EAC\",\n  \"sourceTimePoint\": \"2026-01-15T00:00:00.000Z\",\n  \"rows\": [\n    {\n      \"edgeId\": \"a1Eg8000000AbD7EAK\",\n      \"edgeKey\": \"a0Bg8000000Ab20EAC\",\n      \"detail\": {\n        \"ciKind\": \"assembly-edge\",\n        \"parentItemId\": \"a02g8000000Ab40EAC\",\n        \"parentItemNumber\": null,\n        \"childItemId\": \"a02g8000000Ab30EAC\",\n        \"childItemNumber\": null,\n        \"childItemRevisionId\": \"a0Ag8000000Ab73EAC\",\n        \"childRevisionLabel\": null,\n        \"quantity\": 1,\n        \"findNumber\": 10\n      },\n      \"provenance\": \"claiming\",\n      \"governingTimestamp\": \"2026-04-05T17:22:03.518Z\",\n      \"sourceId\": \"a1Cg8000000AbCeEAK\",\n      \"isClaimed\": true,\n      \"isExcluded\": false,\n      \"isReplaced\": false,\n      \"isCollapsedCollision\": false,\n      \"isEditable\": true,\n      \"childRows\": [\n        {\n          \"edgeId\": null,\n          \"edgeKey\": \"a0Bg8000000Ab23EAC\",\n          \"detail\": {\n            \"ciKind\": \"assembly-edge\",\n            \"parentItemId\": \"a02g8000000Ab30EAC\",\n            \"parentItemNumber\": null,\n            \"childItemId\": \"a02g8000000Ab33EAC\",\n            \"childItemNumber\": null,\n            \"childItemRevisionId\": \"a0Ag8000000Ab75EAC\",\n            \"childRevisionLabel\": null,\n            \"quantity\": 2,\n            \"findNumber\": 20\n          },\n          \"provenance\": \"nested\",\n          \"governingTimestamp\": \"2026-04-05T17:22:03.518Z\",\n          \"sourceId\": null,\n          \"isClaimed\": false,\n          \"isExcluded\": false,\n          \"isReplaced\": false,\n          \"isCollapsedCollision\": false,\n          \"isEditable\": false,\n          \"childRows\": []\n        }\n      ]\n    },\n    {\n      \"edgeId\": null,\n      \"edgeKey\": \"a0Bg8000000Ab21EAC\",\n      \"detail\": {\n        \"ciKind\": \"assembly-edge\",\n        \"parentItemId\": \"a02g8000000Ab41EAC\",\n        \"parentItemNumber\": null,\n        \"childItemId\": \"a02g8000000Ab30EAC\",\n        \"childItemNumber\": null,\n        \"childItemRevisionId\": \"a0Ag8000000Ab72EAC\",\n        \"childRevisionLabel\": null,\n        \"quantity\": 1,\n        \"findNumber\": 10\n      },\n      \"provenance\": \"base\",\n      \"governingTimestamp\": \"2026-01-15T00:00:00.000Z\",\n      \"sourceId\": \"a1Cg8000000AbCeEAK\",\n      \"isClaimed\": false,\n      \"isExcluded\": false,\n      \"isReplaced\": false,\n      \"isCollapsedCollision\": false,\n      \"isEditable\": true,\n      \"childRows\": [\n        {\n          \"edgeId\": null,\n          \"edgeKey\": \"a0Bg8000000Ab22EAC\",\n          \"detail\": {\n            \"ciKind\": \"assembly-edge\",\n            \"parentItemId\": \"a02g8000000Ab30EAC\",\n            \"parentItemNumber\": null,\n            \"childItemId\": \"a02g8000000Ab31EAC\",\n            \"childItemNumber\": null,\n            \"childItemRevisionId\": \"a0Ag8000000Ab74EAC\",\n            \"childRevisionLabel\": null,\n            \"quantity\": 4,\n            \"findNumber\": 10\n          },\n          \"provenance\": \"base\",\n          \"governingTimestamp\": \"2026-01-15T00:00:00.000Z\",\n          \"sourceId\": \"a1Cg8000000AbCeEAK\",\n          \"isClaimed\": false,\n          \"isExcluded\": false,\n          \"isReplaced\": false,\n          \"isCollapsedCollision\": false,\n          \"isEditable\": true,\n          \"childRows\": []\n        }\n      ]\n    }\n  ],\n  \"warnings\": [\n    {\n      \"warningCode\": \"MIXED_REVISION\",\n      \"message\": \"This item appears at more than one revision in the same tree, because rows follow different timepoints: rows from the source follow the source timepoint, added and substituted rows follow the as-of date, and a row can hold a chosen revision. This is expected and does not block anything.\",\n      \"itemId\": \"a02g8000000Ab30EAC\",\n      \"itemRevisionIds\": [\n        \"a0Ag8000000Ab72EAC\",\n        \"a0Ag8000000Ab73EAC\"\n      ],\n      \"governingTimestamps\": [\n        \"2026-01-15T00:00:00.000Z\",\n        \"2026-04-05T17:22:03.518Z\"\n      ]\n    }\n  ]\n}"
-										},
-										{
-											"name": "Today — the pin on one occurrence is not rendered",
-											"originalRequest": {
-												"method": "GET",
-												"header": [
-													{
-														"key": "Content-Type",
-														"value": "application/json"
-													}
-												],
-												"url": {
-													"raw": "{{propelApiUrl}}/v4/mbom/branches/:branchId/tree?flat=false&asOf=",
-													"host": [
-														"{{propelApiUrl}}"
-													],
-													"path": [
-														"v4",
-														"mbom",
-														"branches",
-														":branchId",
-														"tree"
-													],
-													"query": [
-														{
-															"key": "flat",
-															"value": "false"
-														},
-														{
-															"key": "asOf",
-															"value": ""
-														}
-													],
-													"variable": [
-														{
-															"key": "branchId",
-															"value": "a1Bg8000000AbCdEAK"
-														}
-													]
-												}
-											},
-											"status": "OK",
-											"code": 200,
-											"_postman_previewlanguage": "json",
-											"header": [
-												{
-													"key": "Content-Type",
-													"value": "application/json"
-												}
-											],
-											"cookie": [],
-											"responseTime": null,
-											"body": "{\n  \"asOf\": \"2026-04-05T17:22:03.518Z\",\n  \"rootRevisionId\": \"a0Ag8000000Ab01EAC\",\n  \"sourceTimePoint\": \"2026-01-15T00:00:00.000Z\",\n  \"rows\": [\n    {\n      \"edgeId\": \"a1Eg8000000AbD7EAK\",\n      \"edgeKey\": \"a0Bg8000000Ab20EAC\",\n      \"detail\": {\n        \"ciKind\": \"assembly-edge\",\n        \"parentItemId\": \"a02g8000000Ab40EAC\",\n        \"parentItemNumber\": null,\n        \"childItemId\": \"a02g8000000Ab30EAC\",\n        \"childItemNumber\": null,\n        \"childItemRevisionId\": \"a0Ag8000000Ab73EAC\",\n        \"childRevisionLabel\": null,\n        \"quantity\": 1,\n        \"findNumber\": 10\n      },\n      \"provenance\": \"claiming\",\n      \"governingTimestamp\": \"2026-04-05T17:22:03.518Z\",\n      \"sourceId\": \"a1Cg8000000AbCeEAK\",\n      \"isClaimed\": true,\n      \"isExcluded\": false,\n      \"isReplaced\": false,\n      \"isCollapsedCollision\": false,\n      \"isEditable\": true,\n      \"childRows\": [\n        {\n          \"edgeId\": null,\n          \"edgeKey\": \"a0Bg8000000Ab22EAC\",\n          \"detail\": {\n            \"ciKind\": \"assembly-edge\",\n            \"parentItemId\": \"a02g8000000Ab30EAC\",\n            \"parentItemNumber\": null,\n            \"childItemId\": \"a02g8000000Ab31EAC\",\n            \"childItemNumber\": null,\n            \"childItemRevisionId\": \"a0Ag8000000Ab74EAC\",\n            \"childRevisionLabel\": null,\n            \"quantity\": 4,\n            \"findNumber\": 10\n          },\n          \"provenance\": \"base\",\n          \"governingTimestamp\": \"2026-01-15T00:00:00.000Z\",\n          \"sourceId\": \"a1Cg8000000AbCeEAK\",\n          \"isClaimed\": false,\n          \"isExcluded\": false,\n          \"isReplaced\": false,\n          \"isCollapsedCollision\": false,\n          \"isEditable\": true,\n          \"childRows\": []\n        }\n      ]\n    },\n    {\n      \"edgeId\": null,\n      \"edgeKey\": \"a0Bg8000000Ab21EAC\",\n      \"detail\": {\n        \"ciKind\": \"assembly-edge\",\n        \"parentItemId\": \"a02g8000000Ab41EAC\",\n        \"parentItemNumber\": null,\n        \"childItemId\": \"a02g8000000Ab30EAC\",\n        \"childItemNumber\": null,\n        \"childItemRevisionId\": \"a0Ag8000000Ab72EAC\",\n        \"childRevisionLabel\": null,\n        \"quantity\": 1,\n        \"findNumber\": 10\n      },\n      \"provenance\": \"base\",\n      \"governingTimestamp\": \"2026-01-15T00:00:00.000Z\",\n      \"sourceId\": \"a1Cg8000000AbCeEAK\",\n      \"isClaimed\": false,\n      \"isExcluded\": false,\n      \"isReplaced\": false,\n      \"isCollapsedCollision\": false,\n      \"isEditable\": true,\n      \"childRows\": [\n        {\n          \"edgeId\": null,\n          \"edgeKey\": \"a0Bg8000000Ab22EAC\",\n          \"detail\": {\n            \"ciKind\": \"assembly-edge\",\n            \"parentItemId\": \"a02g8000000Ab30EAC\",\n            \"parentItemNumber\": null,\n            \"childItemId\": \"a02g8000000Ab31EAC\",\n            \"childItemNumber\": null,\n            \"childItemRevisionId\": \"a0Ag8000000Ab74EAC\",\n            \"childRevisionLabel\": null,\n            \"quantity\": 4,\n            \"findNumber\": 10\n          },\n          \"provenance\": \"base\",\n          \"governingTimestamp\": \"2026-01-15T00:00:00.000Z\",\n          \"sourceId\": \"a1Cg8000000AbCeEAK\",\n          \"isClaimed\": false,\n          \"isExcluded\": false,\n          \"isReplaced\": false,\n          \"isCollapsedCollision\": false,\n          \"isEditable\": true,\n          \"childRows\": []\n        }\n      ]\n    }\n  ],\n  \"warnings\": [\n    {\n      \"warningCode\": \"MIXED_REVISION\",\n      \"message\": \"This item appears at more than one revision in the same tree, because rows follow different timepoints: rows from the source follow the source timepoint, added and substituted rows follow the as-of date, and a row can hold a chosen revision. This is expected and does not block anything.\",\n      \"itemId\": \"a02g8000000Ab30EAC\",\n      \"itemRevisionIds\": [\n        \"a0Ag8000000Ab72EAC\",\n        \"a0Ag8000000Ab73EAC\"\n      ],\n      \"governingTimestamps\": [\n        \"2026-01-15T00:00:00.000Z\",\n        \"2026-04-05T17:22:03.518Z\"\n      ]\n    }\n  ]\n}"
 										}
 									]
 								}

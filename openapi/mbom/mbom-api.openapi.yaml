@@ -182,7 +182,6 @@ info:
 
     | Ticket | Surface it adds or changes |
     |---|---|
-    | [MVP-30214](https://propelplm.atlassian.net/browse/MVP-30214) | **No wire change.** A `replace` substitute no longer absorbs an unrelated line that shares its child item. Each occurrence of an item rendered at two revisions gets its own pinned structure. `AMBIGUOUS_CORRELATION` is narrowed to genuine duplicates. |
     | [MVP-30375](https://propelplm.atlassian.net/browse/MVP-30375) | `TreeRow.isPinned` and `TreeRow.wasClaimed` on every tree read. `TreeRow.pinnedById` / `pinnedAt` on baseline rows. A `BASELINE_PIN_DRIFT` warning on the baseline read. |
     | [MVP-30376](https://propelplm.atlassian.net/browse/MVP-30376) | A `STORED_REVISION_RETIRED` warning on the branch tree read, one per row whose chosen revision is now Cancelled or Expired. The revision still renders. |
     | [MVP-30377](https://propelplm.atlassian.net/browse/MVP-30377) | `DeltaOperation.autoClaim` on `update`, which claims and revises a `base` edge in one operation and carries the same revision choice as `claim`. `DeltaResult.claimed` reports it. |
@@ -206,8 +205,8 @@ info:
     comparison: MVP-30296
     vocabularyRename: MVP-30309
     revisionChoice: MVP-30357
-    # 🚧 planned, not yet implemented; see info.description "Planned changes".
     perOccurrencePins: MVP-30214
+    # 🚧 planned, not yet implemented; see info.description "Planned changes".
     overrideDisclosure: MVP-30375
     retiredStoredRevision: MVP-30376
     autoClaim: MVP-30377
@@ -414,27 +413,26 @@ paths:
           it are suppressed. A branch edit sitting on one of those suppressed lines — a claim,
           exclusion, update or substitute, or an `add` under an item only the suppressed structure
           supplied — takes no effect, and the read says so with `PINNED_SUBTREE_HIDES_EDITS`
-          rather than failing. (When one item is rendered at two different revisions in the same
-          tree, it keeps the source's lines under both occurrences and is flagged
-          `MIXED_REVISION` instead — per-occurrence structure is not built yet.)
-
-          > **🚧 Planned — MVP-30214, not yet implemented.** Each occurrence gets its own
-          > structure. An occurrence pinned to another revision renders that revision's `nested`
-          > rows beneath it, and an unpinned occurrence keeps the source's lines. The
-          > hidden-edit check runs per occurrence, and `MIXED_REVISION` still fires, never
-          > blocking. A branch `add` under such an item appears under **both** occurrences, with
-          > no warning of its own, and survives the parent advancing to a newer revision. No
-          > field is added to the row: occurrences are told apart by `edgeKey` and
-          > `detail.parentItemId` as today. [assumes A-30214-1, A-30214-4]
-        - **A substitute can swallow an unrelated line (known defect).** When a `replace`
-          substitute's child item also has its own, unrelated eBOM line under the same parent at
-          a different find number, the two are merged into one row: one line disappears, and the
-          survivor carries the other line's `edgeKey`.
-
-          > **🚧 Planned — MVP-30214, not yet implemented.** Both render. The substitute is its
-          > own row with its own `replaces-{branchId}-{supersededEdgeKey}-{newChildItemId}` key,
-          > and the unrelated line survives. The ambiguous match is declined rather than refused,
-          > so the read never answers `AMBIGUOUS_CORRELATION`. [assumes A-30214-3]
+          rather than failing.
+        - **Each occurrence renders its own structure (MVP-30214).** One item can render in two
+          places at two revisions — one occurrence pinned and another still at the source's
+          revision, or two pins. Each occurrence follows its own revision: a pinned occurrence
+          renders that revision's `nested` rows beneath it, and an unpinned occurrence keeps the
+          source's lines. An edit on a suppressed line is hidden only when no occurrence still
+          renders that line, and `PINNED_SUBTREE_HIDES_EDITS` then names every pinned revision
+          that hid it. `MIXED_REVISION` still fires, never blocking. A branch `add` under such an
+          item binds to the item, not to one rendering: it appears under **every** occurrence,
+          with no warning of its own, and survives the parent advancing to a newer revision. No
+          field is added to the row. The occurrences themselves are told apart by `edgeKey` and
+          `detail.parentItemId`; their children are not, in the flat shape (see below).
+        - **A substitute never absorbs another line of its new child (MVP-30214).** When a
+          `replace` substitute's child item also has its own, unrelated eBOM line under the same
+          parent, both render. The substitute is its own row with its own
+          `replaces-{branchId}-{supersededEdgeKey}-{newChildItemId}` key, and the other line keeps
+          its own row and `edgeKey`. The ambiguous position match is declined rather than refused,
+          so this read never answers `AMBIGUOUS_CORRELATION`. If upstream later makes the same
+          substitution itself, two rows render — the substitute beside upstream's new line —
+          rather than one.
         - **🚧 Planned — MVP-30375, not yet implemented.** **Every row says whether its revision was a
           choice.** `isPinned` is true exactly when the row stores a chosen child revision. A
           clock-resolved row that happens to resolve to the same revision is `false`. `wasClaimed`
@@ -456,6 +454,12 @@ paths:
 
         `flat=true` (the **default**) returns one row per edge, each carrying `detail.parentItemId` and an
         empty `childRows` — losslessly re-nestable by the client. `flat=false` nests via `childRows`.
+
+        The one exception is an item that renders at two revisions, each occurrence with its own
+        structure (above). The children of both occurrences name the same `parentItemId`, and a
+        flat row does not say which revision's line it is, so re-nesting by `parentItemId` hangs
+        every occurrence's children under each. Read such a tree with `flat=false`, which places
+        each row under the occurrence it belongs to.
 
         **The nested shape duplicates a shared subassembly; the flat shape does not.** The traversal
         walks a DAG and emits a shared subtree once; nesting re-materialises it under every parent
@@ -1286,19 +1290,24 @@ paths:
         configuration, and a key built on it would give two orgs with identical data different diffs.
 
         The key is **not unique** on one side when a parent item renders at two revisions in the
-        same tree. `ItemCloneBatch` preserves `Secondary_Unique_Key__c`, so both revisions' copies
-        of a line share one key. Where that happens today, the pull answers
-        `AMBIGUOUS_CORRELATION` (422), and the message calls it a known limitation. (A pinned
-        occurrence does not reach it yet, because a pin on one of two occurrences is not rendered;
-        see the branch tree read.)
+        same tree, which is routine now that each occurrence of a pinned item renders its own
+        revision's structure (MVP-30214). `ItemCloneBatch` preserves `Secondary_Unique_Key__c`, so
+        both revisions' copies of a line share one key. So within one side, edges at one key are
+        also told apart by their **parent revision**, the revision whose line each sits on, and a
+        pull over such a tree completes. The parent revision separates; it never joins, and it is
+        not part of the key: a branch edge and its source counterpart carry different parent
+        revisions once the source advances. Across the sides, edges at one key pair by equal
+        parent revision first, and then a lone edge left on each side pairs with the other — the
+        source advancing. There is no tie-break on find number.
 
-        > **🚧 Planned — MVP-30214, not yet implemented.** Same-side edges are also told apart by
-        > their **parent revision**, so a pull or comparison over a doubly-rendered parent
-        > completes. The parent revision separates same-side edges only. Cross-side matching still
-        > joins a branch edge to its source counterpart across a parent revision advance.
-        > `AMBIGUOUS_CORRELATION` stays, narrowed to genuine duplicates: the same parent revision,
-        > child item and secondary unique key. There is still no tie-break on find number.
-        > [assumes A-30214-2]
+        A `replace` substitute borrows the key of the line it supersedes. Where it meets a line of
+        its new child under the same parent revision, it stands aside rather than colliding: it is
+        reported on its own, as `claim-orphaned` like any live substitute without a counterpart,
+        and the line pairs as usual.
+
+        Where the join still cannot tell which upstream line corresponds to which branch line, the
+        pull answers `AMBIGUOUS_CORRELATION` (422) rather than guess. The three shapes that raise
+        it, and their remedies, are listed under the 422 response.
 
         ## The two sides are deliberately asymmetric
 
@@ -1395,6 +1404,11 @@ paths:
         will hide is reported instead as a `PINNED_SUBTREE_HIDES_EDITS` warning — the same warning
         the tree read will raise once the commit lands — because the preview is the last point at
         which the caller can see that coming.
+
+        Pins are judged **per occurrence** (MVP-30214), as the tree renders them. A line behind a
+        pin on one occurrence that another, unpinned occurrence of the same item still renders is
+        not hidden: it is reported there like any other line, as `member-added` when it is new.
+        A hidden-edit warning names every pinned revision that hides the edit.
 
         A pinned claim whose line upstream re-revs is reported as `claim-retained` with
         `retargeted: true`: the candidate would resolve the line to a newer revision, and the pin
@@ -1803,12 +1817,11 @@ paths:
         `(Parent_Item__c, Item__c, Secondary_Unique_Key__c)` — the same join
         [pull-preview](#operation/previewMbomPull) documents in full, for the same reason: the
         parent *item* does not move when its revision does, so the key survives the BOM clone a
-        revision advance performs. Two edges on **one side** sharing a key is
+        revision advance performs. Edges at one key are told apart and paired exactly as on the
+        pull: by parent revision within a side, so a side that renders one parent item at two
+        revisions compares cleanly. A `replace` substitute that stands aside is a one-sided
+        member. Where the join cannot tell which member corresponds to which, the answer is
         `AMBIGUOUS_CORRELATION` (422) rather than a guess.
-
-        > **🚧 Planned — MVP-30214, not yet implemented.** Same-side edges are also told apart by
-        > parent revision, so a side that renders one parent item at two revisions compares
-        > cleanly. `AMBIGUOUS_CORRELATION` is kept for genuine duplicate lines. [assumes A-30214-2]
 
         ### Exclusion tombstones are filtered out before the join
 
@@ -2350,7 +2363,9 @@ components:
         One row of a resolved tree. The same shape serves both response shapes: in the **nested**
         shape `childRows` holds the subtree and `parentItemId` is still populated; in the **flat**
         shape every row is a sibling and `childRows` is empty — so a client can rebuild the tree from
-        a flat response without a second request.
+        a flat response without a second request. The one exception is an item rendered at two
+        revisions, whose occurrences' children all name the same `parentItemId`; see the branch
+        tree read's "Flat vs. nested".
       required: [provenance, childRows]
       properties:
         edgeId:
@@ -2368,10 +2383,9 @@ components:
             old prefix — an edge key is identity and is never re-stamped — so treat the key as
             opaque and never parse the prefix.
 
-            > **🚧 Planned — MVP-30214, not yet implemented.** A substitute always carries its own
-            > `replaces-…` key. Today, a substitute whose child item already has its own line
-            > under the same parent is merged into that line's row and shows that line's key; see
-            > the branch tree read. [assumes A-30214-3]
+            A substitute always carries its own `replaces-…` key, even when its child item already
+            has its own line under the same parent: the two render as two rows, each under its own
+            key (see the branch tree read).
           examples: ['a0Bg8000000Ab10EAC']
         detail:
           $ref: '#/components/schemas/AssemblyEdgeDetail'
@@ -2503,9 +2517,8 @@ components:
             | `STORED_REVISION_RETIRED` | 🚧 MVP-30376 |
 
             - `MIXED_REVISION` — one item rendered at more than one revision in the same tree,
-              because two clocks are in play. Legal and expected; warned, never blocked.
-              **🚧 Planned — MVP-30214, not yet implemented.** Still raised, and still never
-              blocking, once each occurrence renders its own pinned structure. [assumes A-30214-1]
+              because two clocks are in play. Legal and expected; warned, never blocked. Each
+              occurrence renders its own revision's structure.
             - `BASELINE_COUNT_DRIFT` — a baseline re-derived a different **row count** than its cut
               recorded.
             - `BASELINE_PROVENANCE_DRIFT` — a baseline re-derived a different number of **`claiming`**
@@ -3894,14 +3907,28 @@ components:
         |---|---|
         | `CANDIDATE_ROOT_MISMATCH` | the candidate belongs to a **different root item** than the source |
         | `CYCLE_DETECTED` / `EBOM_CYCLE` | a cycle in the eBOM below the candidate root |
-        | `AMBIGUOUS_CORRELATION` | two edges on the **same side** of the diff share a correlation key, so which upstream line matches which branch line cannot be determined — no branch state the caller can reach will fix it |
+        | `AMBIGUOUS_CORRELATION` | the correlation join cannot tell which upstream line corresponds to which branch line — one of the three shapes below |
         | `REVISION_CHOICE_REQUIRED` | *commit only* — a `convert-to-native` decision carried neither or both of `childItemRevisionId` and `trackChildRevision: true` |
         | `REVISION_ITEM_MISMATCH` | *commit only* — a `convert-to-native` decision's `childItemRevisionId` is not a revision of the row's child item |
 
-        > **🚧 Planned — MVP-30214, not yet implemented.** `AMBIGUOUS_CORRELATION` is no longer
-        > raised merely because a parent item renders at two revisions in one tree. It is raised
-        > only for a genuine duplicate: the same parent revision, child item and secondary unique
-        > key. [assumes A-30214-2]
+        `AMBIGUOUS_CORRELATION` is raised in three shapes. Which remedy applies depends on the
+        shape, and the message's detail names the edges involved:
+
+        1. **A genuine duplicate line.** Two edges on the **same side** share a correlation key
+           **and** a parent revision. This is data: the BOM has to change, by giving one of the
+           lines its own secondary unique key — unless the pair is two of the branch's own rows
+           at one key, which a branch edit clears.
+        2. **A pairing that would be a guess.** Edges at one key are left on **both** sides under
+           different parent revisions, with more than one on a side. Usually data; a branch row in
+           the mix can be removed to clear it.
+        3. **Two unpaired edges at one position.** Two or more edges at one key (bar `nested`
+           rows) would be left without a counterpart on **one** side, where the diff could report
+           only one of them. For example, a `replace` substitute beside a claim on a line of the
+           same child that upstream drops, or an orphaned claim beside one. A branch edit clears
+           this: exclude the substitute, or dispose of or remove one of the claims.
+
+        One parent item rendering at two revisions is **not** one of these: the parent revision
+        separates those lines.
       content:
         application/json:
           schema: { $ref: '#/components/schemas/RestError' }
@@ -3947,7 +3974,7 @@ components:
 
         | code | Cause |
         |---|---|
-        | `AMBIGUOUS_CORRELATION` | two edges on the **same side** share a correlation key, so which member on one side matches which on the other cannot be determined. No state the caller can reach will fix it — the same known gap the pull has |
+        | `AMBIGUOUS_CORRELATION` | the correlation join cannot tell which member on one side corresponds to which on the other. The same three shapes, with the same remedies, as on the pull (see `PullUnprocessable`): two edges on one side sharing a key **and** a parent revision, edges at one key left on both sides under different parent revisions with more than one on a side, or two or more edges at one key left unpaired on one side. One parent item rendering at two revisions is not one of them |
         | `CYCLE_DETECTED` | a cycle in the eBOM beneath either side's root, so that side cannot be resolved at all |
 
         Both sides are resolved, so either can raise either code. `AMBIGUOUS_CORRELATION`'s message
@@ -3955,10 +3982,6 @@ components:
         `current side` is the **left** side and `candidate side` is the **right** one. The message
         is shared with pull-preview, which is the surface that vocabulary was written for; switch on
         `code`, and read the ids rather than the nouns.
-
-        > **🚧 Planned — MVP-30214, not yet implemented.** Narrowed to genuine duplicates, as on the
-        > pull. A side rendering one parent item at two revisions no longer raises it.
-        > [assumes A-30214-2]
 
         A comparison always reports a cycle as **`CYCLE_DETECTED`**, never as the traversal's own
         `EBOM_CYCLE`: the two mean the same thing to a caller and are both 422, and carrying the
@@ -3971,7 +3994,7 @@ components:
             ambiguous:
               value:
                 code: AMBIGUOUS_CORRELATION
-                message: 'Two BOM lines share the same parent, child and secondary unique key, so this pull cannot tell which line corresponds to which. If these are genuinely duplicate lines, give one its own secondary unique key. If the parent item legitimately renders at two revisions in this tree, this is a known limitation (MVP-30214), not a data error -- contact support rather than editing BOM data that looks correct. (current side: parent item a02g8000000Ab01EAC, child item a02g8000000Ab20EAC, secondary unique key (none); edges a0Bg8000000Ab10EAC and a0Bg8000000Ab19EAC)'
+                message: "Several BOM lines share one position (the same parent, child and secondary unique key), so this pull or comparison cannot tell which line corresponds to which. If two BOM lines are genuine duplicates, give one its own secondary unique key. If the lines include this branch's own changes, such as a substitute or a claim beside a line of the same part, remove or resolve one of those changes first. (left side: parent item a02g8000000Ab01EAC, child item a02g8000000Ab20EAC, secondary unique key (none); edges a0Bg8000000Ab10EAC and a0Bg8000000Ab19EAC, both under parent revision a0Ag8000000Ab01EAC)"
             cycle:
               value:
                 code: CYCLE_DETECTED
