@@ -3562,7 +3562,7 @@
               "ambiguous": {
                 "value": {
                   "code": "AMBIGUOUS_CORRELATION",
-                  "message": "Several BOM lines share one position (the same parent, child and secondary unique key), so this pull or comparison cannot tell which line corresponds to which. If two BOM lines are genuine duplicates, give one its own secondary unique key. If the lines include this branch's own changes, such as a substitute or a claim beside a line of the same part, remove or resolve one of those changes first. (left side: parent item a02g8000000Ab01EAC, child item a02g8000000Ab20EAC, secondary unique key (none); edges a0Bg8000000Ab10EAC and a0Bg8000000Ab19EAC, both under parent revision a0Ag8000000Ab01EAC)"
+                  "message": "Several BOM lines share one position (the same parent, child and secondary unique key), so this pull or comparison cannot tell which line corresponds to which. If two BOM lines are genuine duplicates, give one its own secondary unique key. If this branch's own changes are among them, such as a substitute beside another line of the same part, exclude the substitute first, or in a pull revert your claim on that other line; otherwise remove or revert one of your changes at that position. A baseline cannot be edited, so these remedies apply only to the live branch. (left side: parent item a02g8000000Ab01EAC, child item a02g8000000Ab20EAC, secondary unique key (none); edges a0Bg8000000Ab10EAC and a0Bg8000000Ab19EAC, both under parent revision a0Ag8000000Ab01EAC)"
                 }
               },
               "cycle": {
