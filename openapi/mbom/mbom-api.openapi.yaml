@@ -425,6 +425,13 @@ paths:
           with no warning of its own, and survives the parent advancing to a newer revision. No
           field is added to the row. The occurrences themselves are told apart by `edgeKey` and
           `detail.parentItemId`; their children are not, in the flat shape (see below).
+        - **A row whose source line is gone renders only where the source's structure does
+          (MVP-30214).** A claim or exclusion on a line upstream has since removed (see
+          `claim-orphaned` on the pull) still hangs under its parent item, but only beneath an
+          occurrence showing the source's own structure of that item. Beneath a pinned row, or
+          inside a locally added or substituted assembly's `nested` copy of the item at another
+          revision, a different structure renders, so the row does not appear there. A copy at
+          the very revision the source renders is the same structure and shows it too.
         - **A substitute never absorbs another line of its new child (MVP-30214).** When a
           `replace` substitute's child item also has its own, unrelated eBOM line under the same
           parent, both render. The substitute is its own row with its own
@@ -2535,7 +2542,9 @@ components:
               because a pinned row's own revision structure replaced the source lines they sit on:
               a claim, exclusion, update or substitute on a suppressed line (and on no line still
               rendered elsewhere), or an `add` under an item only the suppressed structure
-              supplied. Rendered, never refused. Raised on the tree reads and on the pull preview,
+              supplied. Not raised for an exclusion of a line upstream has already removed (what
+              `remove` leaves on a `claim-orphaned` line): it removes nothing that exists.
+              Rendered, never refused. Raised on the tree reads and on the pull preview,
               where it describes the tree **after** the commit. A revision cannot be changed in place
               this release, so the remedy is to `revert` the pinned claim and claim the line again —
               tracking, or pinned to the source line's own revision — in a later request.
