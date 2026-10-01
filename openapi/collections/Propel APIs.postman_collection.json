@@ -6799,6 +6799,320 @@
 									"uid": "46943044-de4f0de5-851e-438a-a300-7ebcb2812234"
 								},
 								{
+									"name": "🚧 MVP-30375 — Read a Branch's Effective Structure (override badges)",
+									"protocolProfileBehavior": {
+										"disableBodyPruning": true
+									},
+									"request": {
+										"method": "GET",
+										"header": [
+											{
+												"key": "Content-Type",
+												"value": "application/json"
+											},
+											{
+												"key": "Accept",
+												"value": "application/json"
+											}
+										],
+										"url": {
+											"raw": "{{propelApiUrl}}/v4/mbom/branches/:branchId/tree?flat=true&asOf=",
+											"host": [
+												"{{propelApiUrl}}"
+											],
+											"path": [
+												"v4",
+												"mbom",
+												"branches",
+												":branchId",
+												"tree"
+											],
+											"query": [
+												{
+													"key": "flat",
+													"value": "true"
+												},
+												{
+													"key": "asOf",
+													"value": ""
+												}
+											],
+											"variable": [
+												{
+													"key": "branchId",
+													"value": "{{mbomBranchId}}"
+												}
+											]
+										},
+										"description": "**🚧 Planned — MVP-30375, not yet implemented.** Same request as *Read a Branch's Effective Structure*. Every row gains `isPinned` and `wasClaimed`, both never null. `pinnedById` / `pinnedAt` are present and null on a live read.\n\n## What to assert\n\n| Row | `isPinned` | `wasClaimed` | Why |\n| --- | --- | --- | --- |\n| claim pinned to the **same** revision its source line resolves to | `true` | `false` | a choice, although it renders nothing different |\n| tracking claim (`trackChildRevision: true`) | `false` | `false` | nothing chosen, although it renders a released revision |\n| floating `add` (no `childItemRevisionId`) | `false` | `false` | floats at `asOf` |\n| `convert-to-native` that stamped a revision | `true` | `true` | a stamp is a choice, and the row once claimed |\n\nThe badge follows the **explicit choice**, never the structural pin. A floating `new` row that renders a pinned structure because the read clock moved past T_R stays `false`. `PINNED_SUBTREE_HIDES_EDITS` is the separate, structural signal [assumes A-30375-1, A-30375-2].\n\n**Today** the four fields are absent from every row."
+									},
+									"response": [
+										{
+											"name": "🚧 expected once MVP-30375 ships",
+											"originalRequest": {
+												"method": "GET",
+												"header": [
+													{
+														"key": "Content-Type",
+														"value": "application/json"
+													}
+												],
+												"url": {
+													"raw": "{{propelApiUrl}}/v4/mbom/branches/:branchId/tree?flat=true&asOf=",
+													"host": [
+														"{{propelApiUrl}}"
+													],
+													"path": [
+														"v4",
+														"mbom",
+														"branches",
+														":branchId",
+														"tree"
+													],
+													"query": [
+														{
+															"key": "flat",
+															"value": "true"
+														},
+														{
+															"key": "asOf",
+															"value": ""
+														}
+													],
+													"variable": [
+														{
+															"key": "branchId",
+															"value": "a1Bg8000000AbCdEAK"
+														}
+													]
+												}
+											},
+											"status": "OK",
+											"code": 200,
+											"_postman_previewlanguage": "json",
+											"header": [
+												{
+													"key": "Content-Type",
+													"value": "application/json"
+												}
+											],
+											"cookie": [],
+											"responseTime": null,
+											"body": "{\n  \"asOf\": \"2026-04-05T17:22:03.518Z\",\n  \"rootRevisionId\": \"a0Ag8000000Ab01EAC\",\n  \"sourceTimePoint\": \"2026-01-15T00:00:00.000Z\",\n  \"rows\": [\n    {\n      \"edgeId\": \"a1Eg8000000AbD1EAK\",\n      \"edgeKey\": \"a0Bg8000000Ab10EAC\",\n      \"detail\": {\n        \"ciKind\": \"assembly-edge\",\n        \"parentItemId\": \"a02g8000000Ab01EAC\",\n        \"childItemId\": \"a02g8000000Ab20EAC\",\n        \"childItemRevisionId\": \"a0Ag8000000Ab41EAC\",\n        \"quantity\": 4,\n        \"findNumber\": 10\n      },\n      \"provenance\": \"claiming\",\n      \"governingTimestamp\": \"2026-04-05T17:22:03.518Z\",\n      \"sourceId\": \"a1Cg8000000AbCeEAK\",\n      \"isClaimed\": true,\n      \"isExcluded\": false,\n      \"isReplaced\": false,\n      \"isEditable\": true,\n      \"isPinned\": true,\n      \"wasClaimed\": false,\n      \"pinnedById\": null,\n      \"pinnedAt\": null,\n      \"childRows\": []\n    },\n    {\n      \"edgeId\": \"a1Eg8000000AbD2EAK\",\n      \"edgeKey\": \"a0Bg8000000Ab11EAC\",\n      \"detail\": {\n        \"ciKind\": \"assembly-edge\",\n        \"parentItemId\": \"a02g8000000Ab01EAC\",\n        \"childItemId\": \"a02g8000000Ab21EAC\",\n        \"childItemRevisionId\": \"a0Ag8000000Ab31EAC\",\n        \"quantity\": 3,\n        \"findNumber\": 20\n      },\n      \"provenance\": \"claiming\",\n      \"governingTimestamp\": \"2026-04-05T17:22:03.518Z\",\n      \"sourceId\": \"a1Cg8000000AbCeEAK\",\n      \"isClaimed\": true,\n      \"isExcluded\": false,\n      \"isReplaced\": false,\n      \"isEditable\": true,\n      \"isPinned\": false,\n      \"wasClaimed\": false,\n      \"pinnedById\": null,\n      \"pinnedAt\": null,\n      \"childRows\": []\n    },\n    {\n      \"edgeId\": \"a1Eg8000000AbD9EAK\",\n      \"edgeKey\": \"new-a1Bg8000000AbCdEAK-a02g8000000Ab01EAC-a02g8000000Ab90EAC\",\n      \"detail\": {\n        \"ciKind\": \"assembly-edge\",\n        \"parentItemId\": \"a02g8000000Ab01EAC\",\n        \"childItemId\": \"a02g8000000Ab90EAC\",\n        \"childItemRevisionId\": \"a0Ag8000000Ab95EAC\",\n        \"quantity\": 1,\n        \"findNumber\": 90\n      },\n      \"provenance\": \"new\",\n      \"governingTimestamp\": \"2026-04-05T17:22:03.518Z\",\n      \"sourceId\": null,\n      \"isClaimed\": false,\n      \"isExcluded\": false,\n      \"isReplaced\": false,\n      \"isEditable\": true,\n      \"isPinned\": false,\n      \"wasClaimed\": false,\n      \"pinnedById\": null,\n      \"pinnedAt\": null,\n      \"childRows\": []\n    },\n    {\n      \"edgeId\": \"a1Eg8000000AbD3EAK\",\n      \"edgeKey\": \"a0Bg8000000Ab12EAC\",\n      \"detail\": {\n        \"ciKind\": \"assembly-edge\",\n        \"parentItemId\": \"a02g8000000Ab01EAC\",\n        \"childItemId\": \"a02g8000000Ab22EAC\",\n        \"childItemRevisionId\": \"a0Ag8000000Ab61EAC\",\n        \"quantity\": 3,\n        \"findNumber\": 30\n      },\n      \"provenance\": \"new\",\n      \"governingTimestamp\": \"2026-04-05T17:22:03.518Z\",\n      \"sourceId\": null,\n      \"isClaimed\": false,\n      \"isExcluded\": false,\n      \"isReplaced\": false,\n      \"isEditable\": true,\n      \"isPinned\": true,\n      \"wasClaimed\": true,\n      \"pinnedById\": null,\n      \"pinnedAt\": null,\n      \"childRows\": []\n    }\n  ],\n  \"warnings\": []\n}"
+										},
+										{
+											"name": "Today — no badge fields",
+											"originalRequest": {
+												"method": "GET",
+												"header": [
+													{
+														"key": "Content-Type",
+														"value": "application/json"
+													}
+												],
+												"url": {
+													"raw": "{{propelApiUrl}}/v4/mbom/branches/:branchId/tree?flat=true&asOf=",
+													"host": [
+														"{{propelApiUrl}}"
+													],
+													"path": [
+														"v4",
+														"mbom",
+														"branches",
+														":branchId",
+														"tree"
+													],
+													"query": [
+														{
+															"key": "flat",
+															"value": "true"
+														},
+														{
+															"key": "asOf",
+															"value": ""
+														}
+													],
+													"variable": [
+														{
+															"key": "branchId",
+															"value": "a1Bg8000000AbCdEAK"
+														}
+													]
+												}
+											},
+											"status": "OK",
+											"code": 200,
+											"_postman_previewlanguage": "json",
+											"header": [
+												{
+													"key": "Content-Type",
+													"value": "application/json"
+												}
+											],
+											"cookie": [],
+											"responseTime": null,
+											"body": "{\n  \"asOf\": \"2026-04-05T17:22:03.518Z\",\n  \"rootRevisionId\": \"a0Ag8000000Ab01EAC\",\n  \"sourceTimePoint\": \"2026-01-15T00:00:00.000Z\",\n  \"rows\": [\n    {\n      \"edgeId\": \"a1Eg8000000AbD1EAK\",\n      \"edgeKey\": \"a0Bg8000000Ab10EAC\",\n      \"detail\": {\n        \"ciKind\": \"assembly-edge\",\n        \"parentItemId\": \"a02g8000000Ab01EAC\",\n        \"childItemId\": \"a02g8000000Ab20EAC\",\n        \"childItemRevisionId\": \"a0Ag8000000Ab41EAC\",\n        \"quantity\": 4,\n        \"findNumber\": 10\n      },\n      \"provenance\": \"claiming\",\n      \"governingTimestamp\": \"2026-04-05T17:22:03.518Z\",\n      \"sourceId\": \"a1Cg8000000AbCeEAK\",\n      \"isClaimed\": true,\n      \"isExcluded\": false,\n      \"isReplaced\": false,\n      \"isEditable\": true,\n      \"childRows\": []\n    },\n    {\n      \"edgeId\": \"a1Eg8000000AbD2EAK\",\n      \"edgeKey\": \"a0Bg8000000Ab11EAC\",\n      \"detail\": {\n        \"ciKind\": \"assembly-edge\",\n        \"parentItemId\": \"a02g8000000Ab01EAC\",\n        \"childItemId\": \"a02g8000000Ab21EAC\",\n        \"childItemRevisionId\": \"a0Ag8000000Ab31EAC\",\n        \"quantity\": 3,\n        \"findNumber\": 20\n      },\n      \"provenance\": \"claiming\",\n      \"governingTimestamp\": \"2026-04-05T17:22:03.518Z\",\n      \"sourceId\": \"a1Cg8000000AbCeEAK\",\n      \"isClaimed\": true,\n      \"isExcluded\": false,\n      \"isReplaced\": false,\n      \"isEditable\": true,\n      \"childRows\": []\n    },\n    {\n      \"edgeId\": \"a1Eg8000000AbD9EAK\",\n      \"edgeKey\": \"new-a1Bg8000000AbCdEAK-a02g8000000Ab01EAC-a02g8000000Ab90EAC\",\n      \"detail\": {\n        \"ciKind\": \"assembly-edge\",\n        \"parentItemId\": \"a02g8000000Ab01EAC\",\n        \"childItemId\": \"a02g8000000Ab90EAC\",\n        \"childItemRevisionId\": \"a0Ag8000000Ab95EAC\",\n        \"quantity\": 1,\n        \"findNumber\": 90\n      },\n      \"provenance\": \"new\",\n      \"governingTimestamp\": \"2026-04-05T17:22:03.518Z\",\n      \"sourceId\": null,\n      \"isClaimed\": false,\n      \"isExcluded\": false,\n      \"isReplaced\": false,\n      \"isEditable\": true,\n      \"childRows\": []\n    },\n    {\n      \"edgeId\": \"a1Eg8000000AbD3EAK\",\n      \"edgeKey\": \"a0Bg8000000Ab12EAC\",\n      \"detail\": {\n        \"ciKind\": \"assembly-edge\",\n        \"parentItemId\": \"a02g8000000Ab01EAC\",\n        \"childItemId\": \"a02g8000000Ab22EAC\",\n        \"childItemRevisionId\": \"a0Ag8000000Ab61EAC\",\n        \"quantity\": 3,\n        \"findNumber\": 30\n      },\n      \"provenance\": \"new\",\n      \"governingTimestamp\": \"2026-04-05T17:22:03.518Z\",\n      \"sourceId\": null,\n      \"isClaimed\": false,\n      \"isExcluded\": false,\n      \"isReplaced\": false,\n      \"isEditable\": true,\n      \"childRows\": []\n    }\n  ],\n  \"warnings\": []\n}"
+										}
+									]
+								},
+								{
+									"name": "🚧 MVP-30376 — Read a Branch's Effective Structure (a chosen revision was cancelled)",
+									"protocolProfileBehavior": {
+										"disableBodyPruning": true
+									},
+									"request": {
+										"method": "GET",
+										"header": [
+											{
+												"key": "Content-Type",
+												"value": "application/json"
+											},
+											{
+												"key": "Accept",
+												"value": "application/json"
+											}
+										],
+										"url": {
+											"raw": "{{propelApiUrl}}/v4/mbom/branches/:branchId/tree?flat=true&asOf=",
+											"host": [
+												"{{propelApiUrl}}"
+											],
+											"path": [
+												"v4",
+												"mbom",
+												"branches",
+												":branchId",
+												"tree"
+											],
+											"query": [
+												{
+													"key": "flat",
+													"value": "true"
+												},
+												{
+													"key": "asOf",
+													"value": ""
+												}
+											],
+											"variable": [
+												{
+													"key": "branchId",
+													"value": "{{mbomBranchId}}"
+												}
+											]
+										},
+										"description": "**🚧 Planned — MVP-30376, not yet implemented.** Same request as *Read a Branch's Effective Structure*.\n\n## Setup\n\n1. Claim a line **pinned** to a released revision: `{\"op\": \"claim\", \"ebomAssemblyId\": \"…\", \"childItemRevisionId\": \"<rev>\"}`.\n2. Cancel or expire that revision on the Item Revision record.\n\nThen read the tree.\n\n## What to assert\n\n| | Once MVP-30376 ships | Today |\n| --- | --- | --- |\n| The row's `detail.childItemRevisionId` | still the dead revision (never substituted) | the same |\n| `warnings` | one `STORED_REVISION_RETIRED`, `itemId` = the row's child item, `itemRevisionIds` = [the dead revision] | empty |\n\nThese cases never warn:\n\n- A row that stores **no** revision, such as a tracking claim, or an `add` sent without `childItemRevisionId`. It resolves through a query that already skips Cancelled and Expired revisions.\n- A tombstone.\n- An edit hidden behind another pin.\n\nOther rules:\n\n- A `convert-to-native` that **stamped** a revision warns the same way when that revision dies. One that tracked warns nothing.\n- Warnings come one per row, never deduplicated by item.\n- The warning appears on the branch tree read only. The baseline read and the pull preview do not raise it [assumes A-30376-1, A-30376-2, A-30376-3]."
+									},
+									"response": [
+										{
+											"name": "🚧 expected once MVP-30376 ships",
+											"originalRequest": {
+												"method": "GET",
+												"header": [
+													{
+														"key": "Content-Type",
+														"value": "application/json"
+													}
+												],
+												"url": {
+													"raw": "{{propelApiUrl}}/v4/mbom/branches/:branchId/tree?flat=true&asOf=",
+													"host": [
+														"{{propelApiUrl}}"
+													],
+													"path": [
+														"v4",
+														"mbom",
+														"branches",
+														":branchId",
+														"tree"
+													],
+													"query": [
+														{
+															"key": "flat",
+															"value": "true"
+														},
+														{
+															"key": "asOf",
+															"value": ""
+														}
+													],
+													"variable": [
+														{
+															"key": "branchId",
+															"value": "a1Bg8000000AbCdEAK"
+														}
+													]
+												}
+											},
+											"status": "OK",
+											"code": 200,
+											"_postman_previewlanguage": "json",
+											"header": [
+												{
+													"key": "Content-Type",
+													"value": "application/json"
+												}
+											],
+											"cookie": [],
+											"responseTime": null,
+											"body": "{\n  \"asOf\": \"2026-04-05T17:22:03.518Z\",\n  \"rootRevisionId\": \"a0Ag8000000Ab01EAC\",\n  \"sourceTimePoint\": \"2026-01-15T00:00:00.000Z\",\n  \"rows\": [\n    {\n      \"edgeId\": \"a1Eg8000000AbD1EAK\",\n      \"edgeKey\": \"a0Bg8000000Ab10EAC\",\n      \"detail\": {\n        \"ciKind\": \"assembly-edge\",\n        \"parentItemId\": \"a02g8000000Ab01EAC\",\n        \"childItemId\": \"a02g8000000Ab20EAC\",\n        \"childItemRevisionId\": \"a0Ag8000000Ab41EAC\",\n        \"quantity\": 4,\n        \"findNumber\": 10\n      },\n      \"provenance\": \"claiming\",\n      \"governingTimestamp\": \"2026-04-05T17:22:03.518Z\",\n      \"sourceId\": \"a1Cg8000000AbCeEAK\",\n      \"isClaimed\": true,\n      \"isExcluded\": false,\n      \"isReplaced\": false,\n      \"isEditable\": true,\n      \"childRows\": []\n    }\n  ],\n  \"warnings\": [\n    {\n      \"warningCode\": \"STORED_REVISION_RETIRED\",\n      \"message\": \"This line is set to a specific revision that has since been cancelled or expired. It is still shown, because nobody chose to replace it — review whether it should now point at a different revision.\",\n      \"itemId\": \"a02g8000000Ab20EAC\",\n      \"itemRevisionIds\": [\n        \"a0Ag8000000Ab41EAC\"\n      ],\n      \"governingTimestamps\": []\n    }\n  ]\n}"
+										},
+										{
+											"name": "Today — the dead revision renders silently",
+											"originalRequest": {
+												"method": "GET",
+												"header": [
+													{
+														"key": "Content-Type",
+														"value": "application/json"
+													}
+												],
+												"url": {
+													"raw": "{{propelApiUrl}}/v4/mbom/branches/:branchId/tree?flat=true&asOf=",
+													"host": [
+														"{{propelApiUrl}}"
+													],
+													"path": [
+														"v4",
+														"mbom",
+														"branches",
+														":branchId",
+														"tree"
+													],
+													"query": [
+														{
+															"key": "flat",
+															"value": "true"
+														},
+														{
+															"key": "asOf",
+															"value": ""
+														}
+													],
+													"variable": [
+														{
+															"key": "branchId",
+															"value": "a1Bg8000000AbCdEAK"
+														}
+													]
+												}
+											},
+											"status": "OK",
+											"code": 200,
+											"_postman_previewlanguage": "json",
+											"header": [
+												{
+													"key": "Content-Type",
+													"value": "application/json"
+												}
+											],
+											"cookie": [],
+											"responseTime": null,
+											"body": "{\n  \"asOf\": \"2026-04-05T17:22:03.518Z\",\n  \"rootRevisionId\": \"a0Ag8000000Ab01EAC\",\n  \"sourceTimePoint\": \"2026-01-15T00:00:00.000Z\",\n  \"rows\": [\n    {\n      \"edgeId\": \"a1Eg8000000AbD1EAK\",\n      \"edgeKey\": \"a0Bg8000000Ab10EAC\",\n      \"detail\": {\n        \"ciKind\": \"assembly-edge\",\n        \"parentItemId\": \"a02g8000000Ab01EAC\",\n        \"childItemId\": \"a02g8000000Ab20EAC\",\n        \"childItemRevisionId\": \"a0Ag8000000Ab41EAC\",\n        \"quantity\": 4,\n        \"findNumber\": 10\n      },\n      \"provenance\": \"claiming\",\n      \"governingTimestamp\": \"2026-04-05T17:22:03.518Z\",\n      \"sourceId\": \"a1Cg8000000AbCeEAK\",\n      \"isClaimed\": true,\n      \"isExcluded\": false,\n      \"isReplaced\": false,\n      \"isEditable\": true,\n      \"childRows\": []\n    }\n  ],\n  \"warnings\": []\n}"
+										}
+									]
+								},
+								{
 									"name": "Read What a Source Supplies",
 									"id": "45f6dbcb-16f8-4f06-8c8f-218bd1cd433e",
 									"protocolProfileBehavior": {
@@ -6894,6 +7208,214 @@
 									"createdAt": "2026-09-04T13:53:21.000Z",
 									"updatedAt": "2026-09-04T13:54:22.000Z",
 									"uid": "46943044-45f6dbcb-16f8-4f06-8c8f-218bd1cd433e"
+								},
+								{
+									"name": "Branch tree: a substitute that shares its child with another line",
+									"protocolProfileBehavior": {
+										"disableBodyPruning": true
+									},
+									"request": {
+										"method": "GET",
+										"header": [
+											{
+												"key": "Content-Type",
+												"value": "application/json"
+											},
+											{
+												"key": "Accept",
+												"value": "application/json"
+											}
+										],
+										"url": {
+											"raw": "{{propelApiUrl}}/v4/mbom/branches/:branchId/tree?flat=true&asOf=",
+											"host": [
+												"{{propelApiUrl}}"
+											],
+											"path": [
+												"v4",
+												"mbom",
+												"branches",
+												":branchId",
+												"tree"
+											],
+											"query": [
+												{
+													"key": "flat",
+													"value": "true"
+												},
+												{
+													"key": "asOf",
+													"value": ""
+												}
+											],
+											"variable": [
+												{
+													"key": "branchId",
+													"value": "{{mbomBranchId}}"
+												}
+											]
+										},
+										"description": "Behaviour only: the request and response are the ordinary branch tree read.\n\nA `replace` substitute never absorbs an unrelated eBOM line that happens to carry the same child item. This reproduces the MVP-30320 finding, which is now fixed.\n\n## Setup (two requests before this one)\n\n1. The eBOM supplies **Label-400** as its own line under Assy-100 at find **60**, and **Panel-300** at find **40**.\n2. `POST …/deltas` with `{\"op\": \"replace\", \"replacedEbomAssemblyId\": \"<Panel-300's find-40 line>\", \"newChildItemId\": \"<Label-400>\", \"quantity\": 2, \"findNumber\": 40}`.\n\nThen read the tree.\n\n## What to assert\n\n| | Expected |\n|---|---|\n| Row count | one row more than before: the substitute beside the line it would have been merged into |\n| Label-400's own find-60 line | present, `provenance: base`, under its own `edgeKey` |\n| Substitute's `edgeKey` | its own `replaces-{branchId}-{supersededEdgeKey}-{newChildItemId}` |\n| Status | 200, no error |\n\nThe read **declines** the ambiguous match rather than refusing, and never answers `AMBIGUOUS_CORRELATION`. A pull or comparison over this branch completes too: the substitute is reported on its own (`claim-orphaned` in a pull preview, a one-sided member in a comparison), and the find-60 line pairs as usual. If upstream then drops the find-60 line, a pull still completes: the substitute is `claim-orphaned` and the line `member-removed`. The one pull refusal is when the branch has also claimed the find-60 line: both rows are then `claim-orphaned` at one position, the pull answers `AMBIGUOUS_CORRELATION` (422), and excluding the substitute or reverting that claim clears it. A comparison against a side without the find-60 line refuses whether it is claimed or not, and excluding the substitute clears it there. The saved example trims `rows` to the Assy-100 lines at issue."
+									},
+									"response": [
+										{
+											"name": "Both rows render — the substitute under its own key",
+											"originalRequest": {
+												"method": "GET",
+												"header": [
+													{
+														"key": "Content-Type",
+														"value": "application/json"
+													}
+												],
+												"url": {
+													"raw": "{{propelApiUrl}}/v4/mbom/branches/:branchId/tree?flat=true&asOf=",
+													"host": [
+														"{{propelApiUrl}}"
+													],
+													"path": [
+														"v4",
+														"mbom",
+														"branches",
+														":branchId",
+														"tree"
+													],
+													"query": [
+														{
+															"key": "flat",
+															"value": "true"
+														},
+														{
+															"key": "asOf",
+															"value": ""
+														}
+													],
+													"variable": [
+														{
+															"key": "branchId",
+															"value": "a1Bg8000000AbCdEAK"
+														}
+													]
+												}
+											},
+											"status": "OK",
+											"code": 200,
+											"_postman_previewlanguage": "json",
+											"header": [
+												{
+													"key": "Content-Type",
+													"value": "application/json"
+												}
+											],
+											"cookie": [],
+											"responseTime": null,
+											"body": "{\n  \"asOf\": \"2026-04-05T17:22:03.518Z\",\n  \"rootRevisionId\": \"a0Ag8000000Ab01EAC\",\n  \"sourceTimePoint\": \"2026-01-15T00:00:00.000Z\",\n  \"rows\": [\n    {\n      \"edgeId\": \"a1Eg8000000AbD8EAK\",\n      \"edgeKey\": \"replaces-a1Bg8000000AbCdEAK-a0Bg8000000Ab13EAC-a02g8000000Ab24EAC\",\n      \"detail\": {\n        \"ciKind\": \"assembly-edge\",\n        \"parentItemId\": \"a02g8000000Ab01EAC\",\n        \"parentItemNumber\": null,\n        \"childItemId\": \"a02g8000000Ab24EAC\",\n        \"childItemNumber\": null,\n        \"childItemRevisionId\": \"a0Ag8000000Ab71EAC\",\n        \"childRevisionLabel\": null,\n        \"quantity\": 2,\n        \"findNumber\": 40\n      },\n      \"provenance\": \"claiming\",\n      \"governingTimestamp\": \"2026-04-05T17:22:03.518Z\",\n      \"sourceId\": \"a1Cg8000000AbCeEAK\",\n      \"isClaimed\": true,\n      \"isExcluded\": false,\n      \"isReplaced\": true,\n      \"isCollapsedCollision\": false,\n      \"isEditable\": true,\n      \"childRows\": []\n    },\n    {\n      \"edgeId\": null,\n      \"edgeKey\": \"a0Bg8000000Ab17EAC\",\n      \"detail\": {\n        \"ciKind\": \"assembly-edge\",\n        \"parentItemId\": \"a02g8000000Ab01EAC\",\n        \"parentItemNumber\": null,\n        \"childItemId\": \"a02g8000000Ab24EAC\",\n        \"childItemNumber\": null,\n        \"childItemRevisionId\": \"a0Ag8000000Ab71EAC\",\n        \"childRevisionLabel\": null,\n        \"quantity\": 1,\n        \"findNumber\": 60\n      },\n      \"provenance\": \"base\",\n      \"governingTimestamp\": \"2026-01-15T00:00:00.000Z\",\n      \"sourceId\": \"a1Cg8000000AbCeEAK\",\n      \"isClaimed\": false,\n      \"isExcluded\": false,\n      \"isReplaced\": false,\n      \"isCollapsedCollision\": false,\n      \"isEditable\": true,\n      \"childRows\": []\n    }\n  ],\n  \"warnings\": []\n}"
+										}
+									]
+								},
+								{
+									"name": "Branch tree: one of two occurrences pinned",
+									"protocolProfileBehavior": {
+										"disableBodyPruning": true
+									},
+									"request": {
+										"method": "GET",
+										"header": [
+											{
+												"key": "Content-Type",
+												"value": "application/json"
+											},
+											{
+												"key": "Accept",
+												"value": "application/json"
+											}
+										],
+										"url": {
+											"raw": "{{propelApiUrl}}/v4/mbom/branches/:branchId/tree?flat=false&asOf=",
+											"host": [
+												"{{propelApiUrl}}"
+											],
+											"path": [
+												"v4",
+												"mbom",
+												"branches",
+												":branchId",
+												"tree"
+											],
+											"query": [
+												{
+													"key": "flat",
+													"value": "false"
+												},
+												{
+													"key": "asOf",
+													"value": ""
+												}
+											],
+											"variable": [
+												{
+													"key": "branchId",
+													"value": "{{mbomBranchId}}"
+												}
+											]
+										},
+										"description": "Behaviour only: the request and response are the ordinary branch tree read. **needs fixture:** a subassembly the eBOM supplies under two different parents.\n\n## Setup\n\n1. The eBOM supplies **Sub-200** under both **Assy-A** and **Assy-B**. At T_R both resolve to Sub-200 **rev-1**, whose one line is Part-31. Sub-200 **rev-2** replaces that line with Part-33.\n2. `POST …/deltas` with `{\"op\": \"claim\", \"ebomAssemblyId\": \"<Sub-200's line under Assy-A>\", \"childItemRevisionId\": \"<Sub-200 rev-2>\"}`.\n\nThen read the tree nested (`flat=false`).\n\n## What to assert\n\n| | Expected |\n|---|---|\n| Under Assy-A's Sub-200 (pinned rev-2) | rev-2's own line as a read-only `nested` row |\n| Under Assy-B's Sub-200 (base, rev-1) | rev-1's line |\n| `MIXED_REVISION` for Sub-200 | raised, never blocking |\n| A later pull over this tree | completes |\n\nEach occurrence renders its own revision's structure. The occurrences themselves are told apart by `edgeKey` / `detail.parentItemId`; no field is added to the row. Read this tree nested: in the flat shape both occurrences' children name Sub-200 as their parent, so re-nesting them by `parentItemId` would hang both revisions' lines under each. A branch `add` under Sub-200 appears under **both** occurrences, with no warning of its own. The saved example trims `rows` to the two occurrences."
+									},
+									"response": [
+										{
+											"name": "Each occurrence renders its own structure",
+											"originalRequest": {
+												"method": "GET",
+												"header": [
+													{
+														"key": "Content-Type",
+														"value": "application/json"
+													}
+												],
+												"url": {
+													"raw": "{{propelApiUrl}}/v4/mbom/branches/:branchId/tree?flat=false&asOf=",
+													"host": [
+														"{{propelApiUrl}}"
+													],
+													"path": [
+														"v4",
+														"mbom",
+														"branches",
+														":branchId",
+														"tree"
+													],
+													"query": [
+														{
+															"key": "flat",
+															"value": "false"
+														},
+														{
+															"key": "asOf",
+															"value": ""
+														}
+													],
+													"variable": [
+														{
+															"key": "branchId",
+															"value": "a1Bg8000000AbCdEAK"
+														}
+													]
+												}
+											},
+											"status": "OK",
+											"code": 200,
+											"_postman_previewlanguage": "json",
+											"header": [
+												{
+													"key": "Content-Type",
+													"value": "application/json"
+												}
+											],
+											"cookie": [],
+											"responseTime": null,
+											"body": "{\n  \"asOf\": \"2026-04-05T17:22:03.518Z\",\n  \"rootRevisionId\": \"a0Ag8000000Ab01EAC\",\n  \"sourceTimePoint\": \"2026-01-15T00:00:00.000Z\",\n  \"rows\": [\n    {\n      \"edgeId\": \"a1Eg8000000AbD7EAK\",\n      \"edgeKey\": \"a0Bg8000000Ab20EAC\",\n      \"detail\": {\n        \"ciKind\": \"assembly-edge\",\n        \"parentItemId\": \"a02g8000000Ab40EAC\",\n        \"parentItemNumber\": null,\n        \"childItemId\": \"a02g8000000Ab30EAC\",\n        \"childItemNumber\": null,\n        \"childItemRevisionId\": \"a0Ag8000000Ab73EAC\",\n        \"childRevisionLabel\": null,\n        \"quantity\": 1,\n        \"findNumber\": 10\n      },\n      \"provenance\": \"claiming\",\n      \"governingTimestamp\": \"2026-04-05T17:22:03.518Z\",\n      \"sourceId\": \"a1Cg8000000AbCeEAK\",\n      \"isClaimed\": true,\n      \"isExcluded\": false,\n      \"isReplaced\": false,\n      \"isCollapsedCollision\": false,\n      \"isEditable\": true,\n      \"childRows\": [\n        {\n          \"edgeId\": null,\n          \"edgeKey\": \"a0Bg8000000Ab23EAC\",\n          \"detail\": {\n            \"ciKind\": \"assembly-edge\",\n            \"parentItemId\": \"a02g8000000Ab30EAC\",\n            \"parentItemNumber\": null,\n            \"childItemId\": \"a02g8000000Ab33EAC\",\n            \"childItemNumber\": null,\n            \"childItemRevisionId\": \"a0Ag8000000Ab75EAC\",\n            \"childRevisionLabel\": null,\n            \"quantity\": 2,\n            \"findNumber\": 20\n          },\n          \"provenance\": \"nested\",\n          \"governingTimestamp\": \"2026-04-05T17:22:03.518Z\",\n          \"sourceId\": null,\n          \"isClaimed\": false,\n          \"isExcluded\": false,\n          \"isReplaced\": false,\n          \"isCollapsedCollision\": false,\n          \"isEditable\": false,\n          \"childRows\": []\n        }\n      ]\n    },\n    {\n      \"edgeId\": null,\n      \"edgeKey\": \"a0Bg8000000Ab21EAC\",\n      \"detail\": {\n        \"ciKind\": \"assembly-edge\",\n        \"parentItemId\": \"a02g8000000Ab41EAC\",\n        \"parentItemNumber\": null,\n        \"childItemId\": \"a02g8000000Ab30EAC\",\n        \"childItemNumber\": null,\n        \"childItemRevisionId\": \"a0Ag8000000Ab72EAC\",\n        \"childRevisionLabel\": null,\n        \"quantity\": 1,\n        \"findNumber\": 10\n      },\n      \"provenance\": \"base\",\n      \"governingTimestamp\": \"2026-01-15T00:00:00.000Z\",\n      \"sourceId\": \"a1Cg8000000AbCeEAK\",\n      \"isClaimed\": false,\n      \"isExcluded\": false,\n      \"isReplaced\": false,\n      \"isCollapsedCollision\": false,\n      \"isEditable\": true,\n      \"childRows\": [\n        {\n          \"edgeId\": null,\n          \"edgeKey\": \"a0Bg8000000Ab22EAC\",\n          \"detail\": {\n            \"ciKind\": \"assembly-edge\",\n            \"parentItemId\": \"a02g8000000Ab30EAC\",\n            \"parentItemNumber\": null,\n            \"childItemId\": \"a02g8000000Ab31EAC\",\n            \"childItemNumber\": null,\n            \"childItemRevisionId\": \"a0Ag8000000Ab74EAC\",\n            \"childRevisionLabel\": null,\n            \"quantity\": 4,\n            \"findNumber\": 10\n          },\n          \"provenance\": \"base\",\n          \"governingTimestamp\": \"2026-01-15T00:00:00.000Z\",\n          \"sourceId\": \"a1Cg8000000AbCeEAK\",\n          \"isClaimed\": false,\n          \"isExcluded\": false,\n          \"isReplaced\": false,\n          \"isCollapsedCollision\": false,\n          \"isEditable\": true,\n          \"childRows\": []\n        }\n      ]\n    }\n  ],\n  \"warnings\": [\n    {\n      \"warningCode\": \"MIXED_REVISION\",\n      \"message\": \"This item appears at more than one revision in the same tree, because rows follow different timepoints: rows from the source follow the source timepoint, added and substituted rows follow the as-of date, and a row can hold a chosen revision. This is expected and does not block anything.\",\n      \"itemId\": \"a02g8000000Ab30EAC\",\n      \"itemRevisionIds\": [\n        \"a0Ag8000000Ab72EAC\",\n        \"a0Ag8000000Ab73EAC\"\n      ],\n      \"governingTimestamps\": [\n        \"2026-01-15T00:00:00.000Z\",\n        \"2026-04-05T17:22:03.518Z\"\n      ]\n    }\n  ]\n}"
+										}
+									]
 								}
 							],
 							"id": "c1fff844-79b0-4fff-802c-384475ba9301",
@@ -7531,6 +8053,264 @@
 									"createdAt": "2026-09-04T13:53:21.000Z",
 									"updatedAt": "2026-09-04T13:54:22.000Z",
 									"uid": "46943044-b12cfdbc-3300-48c0-8171-8dd1a1e10f01"
+								},
+								{
+									"name": "🚧 MVP-30377 — update with autoClaim — claim and revise in one operation",
+									"protocolProfileBehavior": {
+										"disableBodyPruning": true
+									},
+									"request": {
+										"method": "POST",
+										"header": [
+											{
+												"key": "Content-Type",
+												"value": "application/json"
+											},
+											{
+												"key": "Accept",
+												"value": "application/json"
+											}
+										],
+										"body": {
+											"mode": "raw",
+											"raw": "{\n  \"operations\": [\n    {\n      \"op\": \"update\",\n      \"clientRef\": \"qty-in-one\",\n      \"ebomAssemblyId\": \"{{mbomEbomAssemblyId}}\",\n      \"quantity\": 3,\n      \"autoClaim\": true,\n      \"trackChildRevision\": true\n    }\n  ]\n}",
+											"options": {
+												"raw": {
+													"language": "json"
+												}
+											}
+										},
+										"url": {
+											"raw": "{{propelApiUrl}}/v4/mbom/branches/:branchId/deltas",
+											"host": [
+												"{{propelApiUrl}}"
+											],
+											"path": [
+												"v4",
+												"mbom",
+												"branches",
+												":branchId",
+												"deltas"
+											],
+											"variable": [
+												{
+													"key": "branchId",
+													"value": "{{mbomBranchId}}"
+												}
+											]
+										},
+										"description": "**🚧 Planned — MVP-30377, not yet implemented.**\n\n`update` on a `base` edge answers `CLAIM_REQUIRED` today. Claiming first cannot be folded into the same batch, because every operation validates against one pre-batch snapshot. So \"change this line's quantity\" is two requests. With `autoClaim: true` it is one.\n\n## Fields (in addition to `update`'s own)\n\n| Field | Required | Description |\n| --- | --- | --- |\n| `autoClaim` | | `true` claims a `base` edge and revises it in one operation. `false` or omitted keeps today's `CLAIM_REQUIRED`, which still carries the eBOM line. |\n| `trackChildRevision` | **exactly one of these two** whenever `autoClaim` is `true` | `true` means the claimed row keeps following its source line. This is the expected case. |\n| `childItemRevisionId` | | Claims **and pins** this revision. It must belong to the line's child item, or `REVISION_ITEM_MISMATCH` (422). |\n\n## What to assert\n\n- **Base edge:** 200. `results[0].claimed` is `true`, and `forked` is null [assumes A-30377-2, A-30377-3]. With `trackChildRevision: true`, the row stores no revision and renders exactly what it rendered before.\n- **Neither or both choice fields:** `422 REVISION_CHOICE_REQUIRED`, whatever state the row is in, and nothing is claimed.\n- **Edge the branch already owns:** a no-op claim. The update applies, and `claimed` is **null** (never `false`). A `childItemRevisionId` different from the stored one is `400 INVALID_REQUEST` naming `set-revision` [assumes A-30377-1].\n- **No guard is bypassed.** These all still refuse the operation:\n  - `NOT_EDITABLE` (nested row), `NOT_SUPPLIED` (excluded row), `STALE_REVISION`\n  - a non-positive quantity, or a second operation on the same edge in the batch\n  - a past `asOf` on a base edge (`INVALID_REQUEST`), and `REVISION_ITEM_MISMATCH`\n  - `[replace(L, X), update(L, autoClaim)]` in one batch, as `[replace(L, X), claim(L)]` is refused\n- **Owned edge at a past `asOf`:** tolerated, as on plain `update`, because no claim happens [assumes A-30377-5].\n- **Hidden row:** a row hidden behind a pin, addressed by `ebomAssemblyId`, answers `NOT_FOUND`. `autoClaim` does not change how a row is found; reaching one by `assemblyCiId` is MVP-30378's concern (A-30378-5).\n\n**Today:** `autoClaim` is an unknown key and is silently ignored. `trackChildRevision` is ignored on `update`. The operation answers **409 `CLAIM_REQUIRED`**."
+									},
+									"response": [
+										{
+											"name": "🚧 expected once MVP-30377 ships",
+											"originalRequest": {
+												"method": "POST",
+												"header": [
+													{
+														"key": "Content-Type",
+														"value": "application/json"
+													}
+												],
+												"body": {
+													"mode": "raw",
+													"raw": "{\n  \"operations\": [\n    {\n      \"op\": \"update\",\n      \"clientRef\": \"qty-in-one\",\n      \"ebomAssemblyId\": \"a0Bg8000000Ab11EAC\",\n      \"quantity\": 3,\n      \"autoClaim\": true,\n      \"trackChildRevision\": true\n    }\n  ]\n}",
+													"options": {
+														"raw": {
+															"language": "json"
+														}
+													}
+												},
+												"url": {
+													"raw": "{{propelApiUrl}}/v4/mbom/branches/:branchId/deltas",
+													"host": [
+														"{{propelApiUrl}}"
+													],
+													"path": [
+														"v4",
+														"mbom",
+														"branches",
+														":branchId",
+														"deltas"
+													],
+													"variable": [
+														{
+															"key": "branchId",
+															"value": "a1Bg8000000AbCdEAK"
+														}
+													]
+												}
+											},
+											"status": "OK",
+											"code": 200,
+											"_postman_previewlanguage": "json",
+											"header": [
+												{
+													"key": "Content-Type",
+													"value": "application/json"
+												}
+											],
+											"cookie": [],
+											"responseTime": null,
+											"body": "{\n  \"branchId\": \"a1Bg8000000AbCdEAK\",\n  \"atomic\": true,\n  \"asOf\": \"2026-04-05T17:24:40.220Z\",\n  \"applied\": 1,\n  \"failed\": 0,\n  \"results\": [\n    {\n      \"index\": 0,\n      \"clientRef\": \"qty-in-one\",\n      \"op\": \"update\",\n      \"success\": true,\n      \"errorCode\": null,\n      \"message\": null,\n      \"ciId\": \"a1Gg8000000AbF2EAK\",\n      \"edgeId\": \"a1Eg8000000AbD2EAK\",\n      \"forked\": null,\n      \"claimed\": true\n    }\n  ]\n}"
+										},
+										{
+											"name": "🚧 expected once MVP-30377 ships — no revision choice",
+											"originalRequest": {
+												"method": "POST",
+												"header": [
+													{
+														"key": "Content-Type",
+														"value": "application/json"
+													}
+												],
+												"body": {
+													"mode": "raw",
+													"raw": "{\n  \"operations\": [\n    {\n      \"op\": \"update\",\n      \"clientRef\": \"qty-in-one\",\n      \"quantity\": 3,\n      \"autoClaim\": true,\n      \"ebomAssemblyId\": \"a0Bg8000000Ab11EAC\"\n    }\n  ]\n}",
+													"options": {
+														"raw": {
+															"language": "json"
+														}
+													}
+												},
+												"url": {
+													"raw": "{{propelApiUrl}}/v4/mbom/branches/:branchId/deltas",
+													"host": [
+														"{{propelApiUrl}}"
+													],
+													"path": [
+														"v4",
+														"mbom",
+														"branches",
+														":branchId",
+														"deltas"
+													],
+													"variable": [
+														{
+															"key": "branchId",
+															"value": "a1Bg8000000AbCdEAK"
+														}
+													]
+												}
+											},
+											"status": "Unprocessable Entity",
+											"code": 422,
+											"_postman_previewlanguage": "json",
+											"header": [
+												{
+													"key": "Content-Type",
+													"value": "application/json"
+												}
+											],
+											"cookie": [],
+											"responseTime": null,
+											"body": "{\n  \"code\": \"REVISION_CHOICE_REQUIRED\",\n  \"message\": \"Choose how this line's part revision behaves: pick a specific revision to hold, or leave it to follow the timepoint in effect. (1 of 1 operations failed validation)\",\n  \"failures\": [\n    {\n      \"index\": 0,\n      \"clientRef\": \"qty-in-one\",\n      \"op\": \"update\",\n      \"success\": false,\n      \"errorCode\": \"REVISION_CHOICE_REQUIRED\",\n      \"message\": \"Choose how this line's part revision behaves: pick a specific revision to hold, or leave it to follow the timepoint in effect. (update with autoClaim requires childItemRevisionId or trackChildRevision: true)\",\n      \"ciId\": null,\n      \"edgeId\": null,\n      \"forked\": null,\n      \"claimed\": null\n    }\n  ]\n}"
+										},
+										{
+											"name": "🚧 expected once MVP-30377 ships — owned edge, different revision",
+											"originalRequest": {
+												"method": "POST",
+												"header": [
+													{
+														"key": "Content-Type",
+														"value": "application/json"
+													}
+												],
+												"body": {
+													"mode": "raw",
+													"raw": "{\n  \"operations\": [\n    {\n      \"op\": \"update\",\n      \"clientRef\": \"qty-in-one\",\n      \"assemblyCiId\": \"a1Eg8000000AbD1EAK\",\n      \"quantity\": 3,\n      \"autoClaim\": true,\n      \"childItemRevisionId\": \"a0Ag8000000Ab42EAC\"\n    }\n  ]\n}",
+													"options": {
+														"raw": {
+															"language": "json"
+														}
+													}
+												},
+												"url": {
+													"raw": "{{propelApiUrl}}/v4/mbom/branches/:branchId/deltas",
+													"host": [
+														"{{propelApiUrl}}"
+													],
+													"path": [
+														"v4",
+														"mbom",
+														"branches",
+														":branchId",
+														"deltas"
+													],
+													"variable": [
+														{
+															"key": "branchId",
+															"value": "a1Bg8000000AbCdEAK"
+														}
+													]
+												}
+											},
+											"status": "Bad Request",
+											"code": 400,
+											"_postman_previewlanguage": "json",
+											"header": [
+												{
+													"key": "Content-Type",
+													"value": "application/json"
+												}
+											],
+											"cookie": [],
+											"responseTime": null,
+											"body": "{\n  \"code\": \"INVALID_REQUEST\",\n  \"message\": \"That request could not be read. Check that the body is valid JSON and that every required value is supplied. (1 of 1 operations failed validation)\",\n  \"failures\": [\n    {\n      \"index\": 0,\n      \"clientRef\": \"qty-in-one\",\n      \"op\": \"update\",\n      \"success\": false,\n      \"errorCode\": \"INVALID_REQUEST\",\n      \"message\": \"That request could not be read. Check that the body is valid JSON and that every required value is supplied. (the edge is already owned; update does not change its revision -- use set-revision)\",\n      \"ciId\": null,\n      \"edgeId\": null,\n      \"forked\": null,\n      \"claimed\": null\n    }\n  ]\n}"
+										},
+										{
+											"name": "Today — autoClaim is ignored and the base row is refused",
+											"originalRequest": {
+												"method": "POST",
+												"header": [
+													{
+														"key": "Content-Type",
+														"value": "application/json"
+													}
+												],
+												"body": {
+													"mode": "raw",
+													"raw": "{\n  \"operations\": [\n    {\n      \"op\": \"update\",\n      \"clientRef\": \"qty-in-one\",\n      \"ebomAssemblyId\": \"a0Bg8000000Ab11EAC\",\n      \"quantity\": 3,\n      \"autoClaim\": true,\n      \"trackChildRevision\": true\n    }\n  ]\n}",
+													"options": {
+														"raw": {
+															"language": "json"
+														}
+													}
+												},
+												"url": {
+													"raw": "{{propelApiUrl}}/v4/mbom/branches/:branchId/deltas",
+													"host": [
+														"{{propelApiUrl}}"
+													],
+													"path": [
+														"v4",
+														"mbom",
+														"branches",
+														":branchId",
+														"deltas"
+													],
+													"variable": [
+														{
+															"key": "branchId",
+															"value": "a1Bg8000000AbCdEAK"
+														}
+													]
+												}
+											},
+											"status": "Conflict",
+											"code": 409,
+											"_postman_previewlanguage": "json",
+											"header": [
+												{
+													"key": "Content-Type",
+													"value": "application/json"
+												}
+											],
+											"cookie": [],
+											"responseTime": null,
+											"body": "{\n  \"code\": \"CLAIM_REQUIRED\",\n  \"message\": \"This row is supplied by the source and read-only. Claim it before editing. (1 of 1 operations failed validation)\",\n  \"failures\": [\n    {\n      \"index\": 0,\n      \"clientRef\": \"qty-in-one\",\n      \"op\": \"update\",\n      \"success\": false,\n      \"errorCode\": \"CLAIM_REQUIRED\",\n      \"message\": \"This row is supplied by the source and read-only. Claim it before editing. (claim Assembly__c a0Bg8000000Ab11EAC before revising it)\",\n      \"ciId\": null,\n      \"edgeId\": null,\n      \"forked\": null\n    }\n  ]\n}"
+										}
+									]
 								},
 								{
 									"name": "add — a part the eBOM never supplied",
@@ -8741,6 +9521,470 @@
 									"uid": "46943044-9760908d-3dee-4358-ae54-5eca2ed30a2e"
 								},
 								{
+									"name": "🚧 MVP-30378 — set-revision — change or clear a stored revision",
+									"protocolProfileBehavior": {
+										"disableBodyPruning": true
+									},
+									"request": {
+										"method": "POST",
+										"header": [
+											{
+												"key": "Content-Type",
+												"value": "application/json"
+											},
+											{
+												"key": "Accept",
+												"value": "application/json"
+											}
+										],
+										"body": {
+											"mode": "raw",
+											"raw": "{\n  \"operations\": [\n    {\n      \"op\": \"set-revision\",\n      \"clientRef\": \"take-rev-2\",\n      \"assemblyCiId\": \"{{mbomAssemblyCiId}}\",\n      \"childItemRevisionId\": \"{{mbomPinRevisionId}}\"\n    }\n  ]\n}",
+											"options": {
+												"raw": {
+													"language": "json"
+												}
+											}
+										},
+										"url": {
+											"raw": "{{propelApiUrl}}/v4/mbom/branches/:branchId/deltas",
+											"host": [
+												"{{propelApiUrl}}"
+											],
+											"path": [
+												"v4",
+												"mbom",
+												"branches",
+												":branchId",
+												"deltas"
+											],
+											"variable": [
+												{
+													"key": "branchId",
+													"value": "{{mbomBranchId}}"
+												}
+											]
+										},
+										"description": "**🚧 Planned — MVP-30378, not yet implemented.**\n\nOnce a row stores a child revision, nothing can change it today except `revert`, which also drops the branch's quantity and find number, or `convert-to-native`, which severs the row's tie to its source line. `set-revision` changes only the revision.\n\n## Fields\n\n| Field | Required | Description |\n| --- | --- | --- |\n| `assemblyCiId` | one of | The branch-owned edge. It also finds a row hidden behind a pin. |\n| `ebomAssemblyId` | one of | The legacy line. On a `base` row the answer is `CLAIM_REQUIRED`. It never finds a hidden row. |\n| `childItemRevisionId` | **exactly one of these two** | **Set or change** the pin. It must be a revision of the row's own child item, or `REVISION_ITEM_MISMATCH`. |\n| `trackChildRevision` | | `true` **clears** the pin. |\n\nClearing is spelled `trackChildRevision: true`, not a null `childItemRevisionId` [assumes A-30378-2].\n\n## What clearing means depends on the row\n\n- A cleared **claim** becomes a *tracking claim*. It renders its source line's revision at **T_R**, does **not** pick up a newer release on read, and moves when a pull accepts a newer source.\n- A cleared **`new` row or substitute** floats at **`asOf`**. The next read picks up a newer release.\n\n## Structure follows the pin\n\n- Setting a pin **different** from the source line's revision renders that revision's structure beneath the row as read-only `nested` rows. Edits there may then be hidden (`PINNED_SUBTREE_HIDES_EDITS`).\n- Clearing it, or setting it back to the source line's revision, restores the source's lines, and any edits it hid render again.\n\n## Also\n\n- It always appends a new `CI_Rev__c` and never edits a Draft in place. `forked` is always null.\n- Sending the value the row already stores succeeds and writes nothing [assumes A-30378-8].\n- It is refused in this order: `INVALID_REQUEST` (no id) → `REVISION_CHOICE_REQUIRED` → `NOT_FOUND` → `NOT_EDITABLE` (nested) → `NOT_SUPPLIED` (tombstone) → `CLAIM_REQUIRED` (`base`) → `REVISION_ITEM_MISMATCH`. A past `asOf` is tolerated, as on `update` [assumes A-30378-9].\n- `convert-to-native` can also re-stamp or clear a revision, but it severs the source tie. `set-revision` is the non-severing path [assumes A-30378-7].\n\n**Today:** `400 INVALID_REQUEST`, unknown op."
+									},
+									"response": [
+										{
+											"name": "🚧 expected once MVP-30378 ships",
+											"originalRequest": {
+												"method": "POST",
+												"header": [
+													{
+														"key": "Content-Type",
+														"value": "application/json"
+													}
+												],
+												"body": {
+													"mode": "raw",
+													"raw": "{\n  \"operations\": [\n    {\n      \"op\": \"set-revision\",\n      \"clientRef\": \"take-rev-2\",\n      \"assemblyCiId\": \"a1Eg8000000AbD1EAK\",\n      \"childItemRevisionId\": \"a0Ag8000000Ab42EAC\"\n    }\n  ]\n}",
+													"options": {
+														"raw": {
+															"language": "json"
+														}
+													}
+												},
+												"url": {
+													"raw": "{{propelApiUrl}}/v4/mbom/branches/:branchId/deltas",
+													"host": [
+														"{{propelApiUrl}}"
+													],
+													"path": [
+														"v4",
+														"mbom",
+														"branches",
+														":branchId",
+														"deltas"
+													],
+													"variable": [
+														{
+															"key": "branchId",
+															"value": "a1Bg8000000AbCdEAK"
+														}
+													]
+												}
+											},
+											"status": "OK",
+											"code": 200,
+											"_postman_previewlanguage": "json",
+											"header": [
+												{
+													"key": "Content-Type",
+													"value": "application/json"
+												}
+											],
+											"cookie": [],
+											"responseTime": null,
+											"body": "{\n  \"branchId\": \"a1Bg8000000AbCdEAK\",\n  \"atomic\": true,\n  \"asOf\": \"2026-04-06T15:10:00.000Z\",\n  \"applied\": 1,\n  \"failed\": 0,\n  \"results\": [\n    {\n      \"index\": 0,\n      \"clientRef\": \"take-rev-2\",\n      \"op\": \"set-revision\",\n      \"success\": true,\n      \"errorCode\": null,\n      \"message\": null,\n      \"ciId\": \"a1Gg8000000AbF1EAK\",\n      \"edgeId\": \"a1Eg8000000AbD1EAK\",\n      \"forked\": null\n    }\n  ]\n}"
+										},
+										{
+											"name": "🚧 expected once MVP-30378 ships — cleared",
+											"originalRequest": {
+												"method": "POST",
+												"header": [
+													{
+														"key": "Content-Type",
+														"value": "application/json"
+													}
+												],
+												"body": {
+													"mode": "raw",
+													"raw": "{\n  \"operations\": [\n    {\n      \"op\": \"set-revision\",\n      \"clientRef\": \"stop-pinning\",\n      \"assemblyCiId\": \"a1Eg8000000AbD1EAK\",\n      \"trackChildRevision\": true\n    }\n  ]\n}",
+													"options": {
+														"raw": {
+															"language": "json"
+														}
+													}
+												},
+												"url": {
+													"raw": "{{propelApiUrl}}/v4/mbom/branches/:branchId/deltas",
+													"host": [
+														"{{propelApiUrl}}"
+													],
+													"path": [
+														"v4",
+														"mbom",
+														"branches",
+														":branchId",
+														"deltas"
+													],
+													"variable": [
+														{
+															"key": "branchId",
+															"value": "a1Bg8000000AbCdEAK"
+														}
+													]
+												}
+											},
+											"status": "OK",
+											"code": 200,
+											"_postman_previewlanguage": "json",
+											"header": [
+												{
+													"key": "Content-Type",
+													"value": "application/json"
+												}
+											],
+											"cookie": [],
+											"responseTime": null,
+											"body": "{\n  \"branchId\": \"a1Bg8000000AbCdEAK\",\n  \"atomic\": true,\n  \"asOf\": \"2026-04-06T15:10:00.000Z\",\n  \"applied\": 1,\n  \"failed\": 0,\n  \"results\": [\n    {\n      \"index\": 0,\n      \"clientRef\": \"stop-pinning\",\n      \"op\": \"set-revision\",\n      \"success\": true,\n      \"errorCode\": null,\n      \"message\": null,\n      \"ciId\": \"a1Gg8000000AbF1EAK\",\n      \"edgeId\": \"a1Eg8000000AbD1EAK\",\n      \"forked\": null\n    }\n  ]\n}"
+										},
+										{
+											"name": "🚧 expected once MVP-30378 ships — no choice",
+											"originalRequest": {
+												"method": "POST",
+												"header": [
+													{
+														"key": "Content-Type",
+														"value": "application/json"
+													}
+												],
+												"body": {
+													"mode": "raw",
+													"raw": "{\n  \"operations\": [\n    {\n      \"op\": \"set-revision\",\n      \"clientRef\": \"no-choice\",\n      \"assemblyCiId\": \"a1Eg8000000AbD1EAK\"\n    }\n  ]\n}",
+													"options": {
+														"raw": {
+															"language": "json"
+														}
+													}
+												},
+												"url": {
+													"raw": "{{propelApiUrl}}/v4/mbom/branches/:branchId/deltas",
+													"host": [
+														"{{propelApiUrl}}"
+													],
+													"path": [
+														"v4",
+														"mbom",
+														"branches",
+														":branchId",
+														"deltas"
+													],
+													"variable": [
+														{
+															"key": "branchId",
+															"value": "a1Bg8000000AbCdEAK"
+														}
+													]
+												}
+											},
+											"status": "Unprocessable Entity",
+											"code": 422,
+											"_postman_previewlanguage": "json",
+											"header": [
+												{
+													"key": "Content-Type",
+													"value": "application/json"
+												}
+											],
+											"cookie": [],
+											"responseTime": null,
+											"body": "{\n  \"code\": \"REVISION_CHOICE_REQUIRED\",\n  \"message\": \"Choose how this line's part revision behaves: pick a specific revision to hold, or leave it to follow the timepoint in effect. (1 of 1 operations failed validation)\",\n  \"failures\": [\n    {\n      \"index\": 0,\n      \"clientRef\": \"no-choice\",\n      \"op\": \"set-revision\",\n      \"success\": false,\n      \"errorCode\": \"REVISION_CHOICE_REQUIRED\",\n      \"message\": \"Choose how this line's part revision behaves: pick a specific revision to hold, or leave it to follow the timepoint in effect. (set-revision requires childItemRevisionId or trackChildRevision: true)\",\n      \"ciId\": null,\n      \"edgeId\": null,\n      \"forked\": null\n    }\n  ]\n}"
+										},
+										{
+											"name": "🚧 expected once MVP-30378 ships — base row",
+											"originalRequest": {
+												"method": "POST",
+												"header": [
+													{
+														"key": "Content-Type",
+														"value": "application/json"
+													}
+												],
+												"body": {
+													"mode": "raw",
+													"raw": "{\n  \"operations\": [\n    {\n      \"op\": \"set-revision\",\n      \"clientRef\": \"not-owned\",\n      \"ebomAssemblyId\": \"a0Bg8000000Ab12EAC\",\n      \"childItemRevisionId\": \"a0Ag8000000Ab62EAC\"\n    }\n  ]\n}",
+													"options": {
+														"raw": {
+															"language": "json"
+														}
+													}
+												},
+												"url": {
+													"raw": "{{propelApiUrl}}/v4/mbom/branches/:branchId/deltas",
+													"host": [
+														"{{propelApiUrl}}"
+													],
+													"path": [
+														"v4",
+														"mbom",
+														"branches",
+														":branchId",
+														"deltas"
+													],
+													"variable": [
+														{
+															"key": "branchId",
+															"value": "a1Bg8000000AbCdEAK"
+														}
+													]
+												}
+											},
+											"status": "Conflict",
+											"code": 409,
+											"_postman_previewlanguage": "json",
+											"header": [
+												{
+													"key": "Content-Type",
+													"value": "application/json"
+												}
+											],
+											"cookie": [],
+											"responseTime": null,
+											"body": "{\n  \"code\": \"CLAIM_REQUIRED\",\n  \"message\": \"This row is supplied by the source and read-only. Claim it before editing. (1 of 1 operations failed validation)\",\n  \"failures\": [\n    {\n      \"index\": 0,\n      \"clientRef\": \"not-owned\",\n      \"op\": \"set-revision\",\n      \"success\": false,\n      \"errorCode\": \"CLAIM_REQUIRED\",\n      \"message\": \"This row is supplied by the source and read-only. Claim it before editing. (claim Assembly__c a0Bg8000000Ab12EAC before revising it)\",\n      \"ciId\": null,\n      \"edgeId\": null,\n      \"forked\": null\n    }\n  ]\n}"
+										},
+										{
+											"name": "Today — unknown op",
+											"originalRequest": {
+												"method": "POST",
+												"header": [
+													{
+														"key": "Content-Type",
+														"value": "application/json"
+													}
+												],
+												"body": {
+													"mode": "raw",
+													"raw": "{\n  \"operations\": [\n    {\n      \"op\": \"set-revision\",\n      \"clientRef\": \"take-rev-2\",\n      \"assemblyCiId\": \"a1Eg8000000AbD1EAK\",\n      \"childItemRevisionId\": \"a0Ag8000000Ab42EAC\"\n    }\n  ]\n}",
+													"options": {
+														"raw": {
+															"language": "json"
+														}
+													}
+												},
+												"url": {
+													"raw": "{{propelApiUrl}}/v4/mbom/branches/:branchId/deltas",
+													"host": [
+														"{{propelApiUrl}}"
+													],
+													"path": [
+														"v4",
+														"mbom",
+														"branches",
+														":branchId",
+														"deltas"
+													],
+													"variable": [
+														{
+															"key": "branchId",
+															"value": "a1Bg8000000AbCdEAK"
+														}
+													]
+												}
+											},
+											"status": "Bad Request",
+											"code": 400,
+											"_postman_previewlanguage": "json",
+											"header": [
+												{
+													"key": "Content-Type",
+													"value": "application/json"
+												}
+											],
+											"cookie": [],
+											"responseTime": null,
+											"body": "{\n  \"code\": \"INVALID_REQUEST\",\n  \"message\": \"That request could not be read. Check that the body is valid JSON and that every required value is supplied. (1 of 1 operations failed validation)\",\n  \"failures\": [\n    {\n      \"index\": 0,\n      \"clientRef\": \"take-rev-2\",\n      \"op\": \"set-revision\",\n      \"success\": false,\n      \"errorCode\": \"INVALID_REQUEST\",\n      \"message\": \"That request could not be read. Check that the body is valid JSON and that every required value is supplied. (unknown op set-revision)\",\n      \"ciId\": null,\n      \"edgeId\": null,\n      \"forked\": null\n    }\n  ]\n}"
+										}
+									]
+								},
+								{
+									"name": "🚧 MVP-30378 — update with childItemRevisionId — refused, use set-revision",
+									"protocolProfileBehavior": {
+										"disableBodyPruning": true
+									},
+									"request": {
+										"method": "POST",
+										"header": [
+											{
+												"key": "Content-Type",
+												"value": "application/json"
+											},
+											{
+												"key": "Accept",
+												"value": "application/json"
+											}
+										],
+										"body": {
+											"mode": "raw",
+											"raw": "{\n  \"operations\": [\n    {\n      \"op\": \"update\",\n      \"clientRef\": \"qty-and-rev\",\n      \"assemblyCiId\": \"{{mbomAssemblyCiId}}\",\n      \"quantity\": 5,\n      \"childItemRevisionId\": \"{{mbomPinRevisionId}}\"\n    }\n  ]\n}",
+											"options": {
+												"raw": {
+													"language": "json"
+												}
+											}
+										},
+										"url": {
+											"raw": "{{propelApiUrl}}/v4/mbom/branches/:branchId/deltas",
+											"host": [
+												"{{propelApiUrl}}"
+											],
+											"path": [
+												"v4",
+												"mbom",
+												"branches",
+												":branchId",
+												"deltas"
+											],
+											"variable": [
+												{
+													"key": "branchId",
+													"value": "{{mbomBranchId}}"
+												}
+											]
+										},
+										"description": "**🚧 Planned — MVP-30378, not yet implemented.**\n\nToday `update` silently **ignores** `childItemRevisionId`. It carries the stored revision forward and applies only the quantity, so a client that expected the revision to change gets a quiet no-op.\n\nOnce MVP-30378 ships, a non-null `childItemRevisionId` on a plain `update` is refused with `400 INVALID_REQUEST` naming `set-revision`. `trackChildRevision` on a plain `update` stays ignored. The exception is `update` with MVP-30377's `autoClaim`, whose rules are on that request [assumes A-30378-6].\n\n**Today:** `200`. The quantity is applied, and the revision is unchanged."
+									},
+									"response": [
+										{
+											"name": "🚧 expected once MVP-30378 ships",
+											"originalRequest": {
+												"method": "POST",
+												"header": [
+													{
+														"key": "Content-Type",
+														"value": "application/json"
+													}
+												],
+												"body": {
+													"mode": "raw",
+													"raw": "{\n  \"operations\": [\n    {\n      \"op\": \"update\",\n      \"clientRef\": \"qty-and-rev\",\n      \"assemblyCiId\": \"a1Eg8000000AbD1EAK\",\n      \"quantity\": 5,\n      \"childItemRevisionId\": \"a0Ag8000000Ab42EAC\"\n    }\n  ]\n}",
+													"options": {
+														"raw": {
+															"language": "json"
+														}
+													}
+												},
+												"url": {
+													"raw": "{{propelApiUrl}}/v4/mbom/branches/:branchId/deltas",
+													"host": [
+														"{{propelApiUrl}}"
+													],
+													"path": [
+														"v4",
+														"mbom",
+														"branches",
+														":branchId",
+														"deltas"
+													],
+													"variable": [
+														{
+															"key": "branchId",
+															"value": "a1Bg8000000AbCdEAK"
+														}
+													]
+												}
+											},
+											"status": "Bad Request",
+											"code": 400,
+											"_postman_previewlanguage": "json",
+											"header": [
+												{
+													"key": "Content-Type",
+													"value": "application/json"
+												}
+											],
+											"cookie": [],
+											"responseTime": null,
+											"body": "{\n  \"code\": \"INVALID_REQUEST\",\n  \"message\": \"That request could not be read. Check that the body is valid JSON and that every required value is supplied. (1 of 1 operations failed validation)\",\n  \"failures\": [\n    {\n      \"index\": 0,\n      \"clientRef\": \"qty-and-rev\",\n      \"op\": \"update\",\n      \"success\": false,\n      \"errorCode\": \"INVALID_REQUEST\",\n      \"message\": \"That request could not be read. Check that the body is valid JSON and that every required value is supplied. (update does not change a child revision; use set-revision)\",\n      \"ciId\": null,\n      \"edgeId\": null,\n      \"forked\": null\n    }\n  ]\n}"
+										},
+										{
+											"name": "Today — revision silently ignored",
+											"originalRequest": {
+												"method": "POST",
+												"header": [
+													{
+														"key": "Content-Type",
+														"value": "application/json"
+													}
+												],
+												"body": {
+													"mode": "raw",
+													"raw": "{\n  \"operations\": [\n    {\n      \"op\": \"update\",\n      \"clientRef\": \"qty-and-rev\",\n      \"assemblyCiId\": \"a1Eg8000000AbD1EAK\",\n      \"quantity\": 5,\n      \"childItemRevisionId\": \"a0Ag8000000Ab42EAC\"\n    }\n  ]\n}",
+													"options": {
+														"raw": {
+															"language": "json"
+														}
+													}
+												},
+												"url": {
+													"raw": "{{propelApiUrl}}/v4/mbom/branches/:branchId/deltas",
+													"host": [
+														"{{propelApiUrl}}"
+													],
+													"path": [
+														"v4",
+														"mbom",
+														"branches",
+														":branchId",
+														"deltas"
+													],
+													"variable": [
+														{
+															"key": "branchId",
+															"value": "a1Bg8000000AbCdEAK"
+														}
+													]
+												}
+											},
+											"status": "OK",
+											"code": 200,
+											"_postman_previewlanguage": "json",
+											"header": [
+												{
+													"key": "Content-Type",
+													"value": "application/json"
+												}
+											],
+											"cookie": [],
+											"responseTime": null,
+											"body": "{\n  \"branchId\": \"a1Bg8000000AbCdEAK\",\n  \"atomic\": true,\n  \"asOf\": \"2026-04-05T17:24:40.220Z\",\n  \"applied\": 1,\n  \"failed\": 0,\n  \"results\": [\n    {\n      \"index\": 0,\n      \"clientRef\": \"qty-and-rev\",\n      \"op\": \"update\",\n      \"success\": true,\n      \"errorCode\": null,\n      \"message\": null,\n      \"ciId\": \"a1Gg8000000AbF1EAK\",\n      \"edgeId\": \"a1Eg8000000AbD1EAK\",\n      \"forked\": false\n    }\n  ]\n}"
+										}
+									]
+								},
+								{
 									"name": "Mixed batch (atomic: false)",
 									"id": "295a71fa-066c-482e-8b8f-a54904d4cb9f",
 									"protocolProfileBehavior": {
@@ -8760,7 +10004,7 @@
 										],
 										"body": {
 											"mode": "raw",
-											"raw": "{\n  \"atomic\": false,\n  \"operations\": [\n    { \"op\": \"claim\", \"clientRef\": \"ok\", \"ebomAssemblyId\": \"{{mbomEbomAssemblyId}}\" },\n    { \"op\": \"update\", \"clientRef\": \"will-fail\", \"ebomAssemblyId\": \"{{mbomEbomAssemblyId}}\", \"quantity\": 9 }\n  ]\n}",
+											"raw": "{\n  \"atomic\": false,\n  \"operations\": [\n    { \"op\": \"claim\", \"clientRef\": \"ok\", \"ebomAssemblyId\": \"{{mbomEbomAssemblyId}}\", \"trackChildRevision\": true },\n    { \"op\": \"update\", \"clientRef\": \"will-fail\", \"ebomAssemblyId\": \"{{mbomEbomAssemblyId}}\", \"quantity\": 9 }\n  ]\n}",
 											"options": {
 												"raw": {
 													"language": "json"
@@ -8787,7 +10031,7 @@
 												}
 											]
 										},
-										"description": "Demonstrates the two things people get wrong about batches at the same time.\n\n**1. `atomic: false` returns `200` even when operations failed.** Check `failed` and each `results[].success` — not the status code. Under the default `atomic: true`, the identical batch would be a `409` with a `failures[]` array and **nothing applied**.\n\n**2. A later operation cannot see an earlier one's effect.** Both operations here name the same eBOM line: the `claim` succeeds, and the `update` still answers `CLAIM_REQUIRED`, because both validated against the one pre-batch snapshot in which the row was still `base`.\n\n> That is not a bug to work around — it is what makes \"every operation is validated before any is executed\" true, which is what lets the endpoint report *every* fault rather than only the first. **Dependent edits are two requests.**\n\nSwap `atomic` to `true` and re-send to see the same batch rejected wholesale."
+										"description": "Demonstrates the two things people get wrong about batches at the same time.\n\n**1. `atomic: false` returns `200` even when operations failed.** Check `failed` and each `results[].success` — not the status code. Under the default `atomic: true`, the identical batch would be a `409` with a `failures[]` array and **nothing applied**.\n\n**2. A later operation cannot see an earlier one's effect.** Both operations here name the same eBOM line: the `claim` succeeds, and the `update` still answers `CLAIM_REQUIRED`, because both validated against the one pre-batch snapshot in which the row was still `base`.\n\n> That is not a bug to work around — it is what makes \"every operation is validated before any is executed\" true, which is what lets the endpoint report *every* fault rather than only the first. **Dependent edits are two requests.**\n\nThe `claim` carries `trackChildRevision: true` because a claim must choose what its child revision does; without it the claim fails too, with `REVISION_CHOICE_REQUIRED`.\n\nTo see the same batch rejected wholesale, send it with `atomic: true` **first**, on a line that is still `base`. Sent after this one, the `claim` has already landed, and the `atomic: true` re-send fails on `ALREADY_CLAIMED` instead."
 									},
 									"response": [
 										{
@@ -8803,7 +10047,7 @@
 												],
 												"body": {
 													"mode": "raw",
-													"raw": "{\n  \"atomic\": false,\n  \"operations\": [\n    { \"op\": \"claim\", \"clientRef\": \"ok\", \"ebomAssemblyId\": \"a0Bg8000000Ab11EAC\" },\n    { \"op\": \"update\", \"clientRef\": \"will-fail\", \"ebomAssemblyId\": \"a0Bg8000000Ab11EAC\", \"quantity\": 9 }\n  ]\n}",
+													"raw": "{\n  \"atomic\": false,\n  \"operations\": [\n    { \"op\": \"claim\", \"clientRef\": \"ok\", \"ebomAssemblyId\": \"a0Bg8000000Ab11EAC\", \"trackChildRevision\": true },\n    { \"op\": \"update\", \"clientRef\": \"will-fail\", \"ebomAssemblyId\": \"a0Bg8000000Ab11EAC\", \"quantity\": 9 }\n  ]\n}",
 													"options": {
 														"raw": {
 															"language": "json"
@@ -9351,6 +10595,200 @@
 									"createdAt": "2026-09-04T13:53:21.000Z",
 									"updatedAt": "2026-09-04T13:54:22.000Z",
 									"uid": "46943044-04de9b29-f0cc-4ba0-8c37-7f489430e235"
+								},
+								{
+									"name": "🚧 MVP-30375 — Read a Baseline (who pinned each row; pin drift)",
+									"protocolProfileBehavior": {
+										"disableBodyPruning": true
+									},
+									"request": {
+										"method": "GET",
+										"header": [
+											{
+												"key": "Content-Type",
+												"value": "application/json"
+											},
+											{
+												"key": "Accept",
+												"value": "application/json"
+											}
+										],
+										"url": {
+											"raw": "{{propelApiUrl}}/v4/mbom/baselines/:baselineId/tree?flat=true",
+											"host": [
+												"{{propelApiUrl}}"
+											],
+											"path": [
+												"v4",
+												"mbom",
+												"baselines",
+												":baselineId",
+												"tree"
+											],
+											"query": [
+												{
+													"key": "flat",
+													"value": "true"
+												}
+											],
+											"variable": [
+												{
+													"key": "baselineId",
+													"value": "{{mbomBaselineId}}"
+												}
+											]
+										},
+										"description": "**🚧 Planned — MVP-30375, not yet implemented.** Same request as *Read a Baseline*.\n\n## Who pinned it, and when\n\nOn a row with `isPinned: true`, `pinnedById` / `pinnedAt` name the `CreatedById` / `CreatedDate` of the **payload revision that carries the row's current value**. That means who last revised the row: an `update` that changed only the quantity carries the pin forward and becomes the author. They are null on unpinned rows, and on every live tree read [assumes A-30375-4].\n\n## `BASELINE_PIN_DRIFT`\n\nThe cut stamps a count of pinned rows. It counts contained members only: no tombstones, no `nested` rows, and no edits hidden behind a pin. A re-derived read that finds a different number warns and still returns the rows. A baseline cut before MVP-30375 has no count and **never** warns. The count itself is not returned; the cut response still carries only `memberCount` [assumes A-30375-3, A-30375-5].\n\n**Setup for the drift example (needs fixture):** cut a baseline over a branch with one pinned claim. Then clear that pin in the **same whole second** as the cut, which is the same narrow window `BASELINE_PROVENANCE_DRIFT` has. Two ways to clear it: MVP-30378's `set-revision` with `trackChildRevision: true`, or a direct data edit. A convert-to-native would also move the claim count.\n\n**Today** the rows carry none of the four fields, and `BASELINE_PIN_DRIFT` is never raised."
+									},
+									"response": [
+										{
+											"name": "🚧 expected once MVP-30375 ships",
+											"originalRequest": {
+												"method": "GET",
+												"header": [
+													{
+														"key": "Content-Type",
+														"value": "application/json"
+													}
+												],
+												"url": {
+													"raw": "{{propelApiUrl}}/v4/mbom/baselines/:baselineId/tree?flat=true",
+													"host": [
+														"{{propelApiUrl}}"
+													],
+													"path": [
+														"v4",
+														"mbom",
+														"baselines",
+														":baselineId",
+														"tree"
+													],
+													"query": [
+														{
+															"key": "flat",
+															"value": "true"
+														}
+													],
+													"variable": [
+														{
+															"key": "baselineId",
+															"value": "a1Fg8000000AbE1EAK"
+														}
+													]
+												}
+											},
+											"status": "OK",
+											"code": 200,
+											"_postman_previewlanguage": "json",
+											"header": [
+												{
+													"key": "Content-Type",
+													"value": "application/json"
+												}
+											],
+											"cookie": [],
+											"responseTime": null,
+											"body": "{\n  \"baselineId\": \"a1Fg8000000AbE1EAK\",\n  \"label\": \"Pilot build 1\",\n  \"resolutionTimePoint\": \"2026-04-06T14:31:02.000Z\",\n  \"rows\": [\n    {\n      \"edgeId\": null,\n      \"edgeKey\": null,\n      \"detail\": {\n        \"ciKind\": \"assembly-edge\",\n        \"parentItemId\": \"a02g8000000Ab01EAC\",\n        \"childItemId\": \"a02g8000000Ab20EAC\",\n        \"childItemRevisionId\": \"a0Ag8000000Ab41EAC\",\n        \"quantity\": 4,\n        \"findNumber\": 10\n      },\n      \"provenance\": \"claiming\",\n      \"governingTimestamp\": \"2026-04-06T14:31:02.000Z\",\n      \"sourceId\": \"a1Cg8000000AbCeEAK\",\n      \"isClaimed\": true,\n      \"isExcluded\": false,\n      \"isReplaced\": false,\n      \"isEditable\": true,\n      \"isPinned\": true,\n      \"wasClaimed\": false,\n      \"pinnedById\": \"005g8000000AbZ1AAK\",\n      \"pinnedAt\": \"2026-04-05T17:22:04.000Z\",\n      \"childRows\": []\n    }\n  ],\n  \"warnings\": []\n}"
+										},
+										{
+											"name": "🚧 expected once MVP-30375 ships — pin drift",
+											"originalRequest": {
+												"method": "GET",
+												"header": [
+													{
+														"key": "Content-Type",
+														"value": "application/json"
+													}
+												],
+												"url": {
+													"raw": "{{propelApiUrl}}/v4/mbom/baselines/:baselineId/tree?flat=true",
+													"host": [
+														"{{propelApiUrl}}"
+													],
+													"path": [
+														"v4",
+														"mbom",
+														"baselines",
+														":baselineId",
+														"tree"
+													],
+													"query": [
+														{
+															"key": "flat",
+															"value": "true"
+														}
+													],
+													"variable": [
+														{
+															"key": "baselineId",
+															"value": "a1Fg8000000AbE1EAK"
+														}
+													]
+												}
+											},
+											"status": "OK",
+											"code": 200,
+											"_postman_previewlanguage": "json",
+											"header": [
+												{
+													"key": "Content-Type",
+													"value": "application/json"
+												}
+											],
+											"cookie": [],
+											"responseTime": null,
+											"body": "{\n  \"baselineId\": \"a1Fg8000000AbE1EAK\",\n  \"label\": \"Pilot build 1\",\n  \"resolutionTimePoint\": \"2026-04-06T14:31:02.000Z\",\n  \"rows\": [],\n  \"warnings\": [\n    {\n      \"warningCode\": \"BASELINE_PIN_DRIFT\",\n      \"message\": \"This baseline recorded a different number of rows with a chosen revision than it now re-derives. The rows shown are still the honest answer for the stored timepoint, but something the resolution depends on has changed since the baseline was taken.\",\n      \"itemId\": null,\n      \"itemRevisionIds\": [],\n      \"governingTimestamps\": []\n    }\n  ]\n}"
+										},
+										{
+											"name": "Today — no author fields, no pin-drift canary",
+											"originalRequest": {
+												"method": "GET",
+												"header": [
+													{
+														"key": "Content-Type",
+														"value": "application/json"
+													}
+												],
+												"url": {
+													"raw": "{{propelApiUrl}}/v4/mbom/baselines/:baselineId/tree?flat=true",
+													"host": [
+														"{{propelApiUrl}}"
+													],
+													"path": [
+														"v4",
+														"mbom",
+														"baselines",
+														":baselineId",
+														"tree"
+													],
+													"query": [
+														{
+															"key": "flat",
+															"value": "true"
+														}
+													],
+													"variable": [
+														{
+															"key": "baselineId",
+															"value": "a1Fg8000000AbE1EAK"
+														}
+													]
+												}
+											},
+											"status": "OK",
+											"code": 200,
+											"_postman_previewlanguage": "json",
+											"header": [
+												{
+													"key": "Content-Type",
+													"value": "application/json"
+												}
+											],
+											"cookie": [],
+											"responseTime": null,
+											"body": "{\n  \"baselineId\": \"a1Fg8000000AbE1EAK\",\n  \"label\": \"Pilot build 1\",\n  \"resolutionTimePoint\": \"2026-04-06T14:31:02.000Z\",\n  \"rows\": [\n    {\n      \"edgeId\": null,\n      \"edgeKey\": null,\n      \"detail\": {\n        \"ciKind\": \"assembly-edge\",\n        \"parentItemId\": \"a02g8000000Ab01EAC\",\n        \"childItemId\": \"a02g8000000Ab20EAC\",\n        \"childItemRevisionId\": \"a0Ag8000000Ab41EAC\",\n        \"quantity\": 4,\n        \"findNumber\": 10\n      },\n      \"provenance\": \"claiming\",\n      \"governingTimestamp\": \"2026-04-06T14:31:02.000Z\",\n      \"sourceId\": \"a1Cg8000000AbCeEAK\",\n      \"isClaimed\": true,\n      \"isExcluded\": false,\n      \"isReplaced\": false,\n      \"isEditable\": true,\n      \"childRows\": []\n    }\n  ],\n  \"warnings\": []\n}"
+										}
+									]
 								}
 							],
 							"id": "8928ab04-173f-417f-ab14-e5a7193af235",
@@ -9742,6 +11180,320 @@
 									"createdAt": "2026-09-04T13:53:21.000Z",
 									"updatedAt": "2026-09-04T13:54:22.000Z",
 									"uid": "46943044-3d2fcaae-3d98-4995-9e2d-4bfa5590401b"
+								},
+								{
+									"name": "🚧 MVP-30378 — Preview a Pull (accept-source-revision offered)",
+									"protocolProfileBehavior": {
+										"disableBodyPruning": true
+									},
+									"request": {
+										"method": "GET",
+										"header": [
+											{
+												"key": "Content-Type",
+												"value": "application/json"
+											},
+											{
+												"key": "Accept",
+												"value": "application/json"
+											}
+										],
+										"url": {
+											"raw": "{{propelApiUrl}}/v4/mbom/sources/:sourceId/pull-preview?candidateRootRevisionId=&entriesLimit=200",
+											"host": [
+												"{{propelApiUrl}}"
+											],
+											"path": [
+												"v4",
+												"mbom",
+												"sources",
+												":sourceId",
+												"pull-preview"
+											],
+											"query": [
+												{
+													"key": "candidateRootRevisionId",
+													"value": ""
+												},
+												{
+													"key": "entriesLimit",
+													"value": "200"
+												}
+											],
+											"variable": [
+												{
+													"key": "sourceId",
+													"value": "{{mbomSourceId}}"
+												}
+											]
+										},
+										"description": "**🚧 Planned — MVP-30378, not yet implemented.** Same request as *Preview a Pull*.\n\n## Setup\n\n1. Claim Motor-002's line **pinned** to its current revision: `claim` with `childItemRevisionId`.\n2. Claim Bracket-005's line **tracking**: `claim` with `trackChildRevision: true`. Leave its quantity alone.\n3. Release a new Assy-100 revision that re-revs both children.\n\n## What to assert\n\n| Entry | Once MVP-30378 ships | Today |\n| --- | --- | --- |\n| Motor-002, `claim-retained`, `retargeted: true` | `availableActions: [accept-source-revision]`, `decision: informational`, `revisionAdvances: false` | `availableActions: []`, and no `revisionAdvances` |\n| Bracket-005, `claim-superseded` | `revisionAdvances: true` (it will render rev-4), `retargeted: null` | no `revisionAdvances` |\n| `summary.required` | 0: the accept is optional | 0 |\n\n- `revisionAdvances` is present on `claim-retained` and `claim-superseded` only, and null elsewhere. It is never true together with `retargeted`.\n- A `base` row's advance is still `member-version-advance`.\n- No new entry kind is added [assumes A-30378-3, A-30378-4, A-30378-10]."
+									},
+									"response": [
+										{
+											"name": "🚧 expected once MVP-30378 ships",
+											"originalRequest": {
+												"method": "GET",
+												"header": [
+													{
+														"key": "Content-Type",
+														"value": "application/json"
+													}
+												],
+												"url": {
+													"raw": "{{propelApiUrl}}/v4/mbom/sources/:sourceId/pull-preview?candidateRootRevisionId=&entriesLimit=200",
+													"host": [
+														"{{propelApiUrl}}"
+													],
+													"path": [
+														"v4",
+														"mbom",
+														"sources",
+														":sourceId",
+														"pull-preview"
+													],
+													"query": [
+														{
+															"key": "candidateRootRevisionId",
+															"value": ""
+														},
+														{
+															"key": "entriesLimit",
+															"value": "200"
+														}
+													],
+													"variable": [
+														{
+															"key": "sourceId",
+															"value": "a1Cg8000000AbCeEAK"
+														}
+													]
+												}
+											},
+											"status": "OK",
+											"code": 200,
+											"_postman_previewlanguage": "json",
+											"header": [
+												{
+													"key": "Content-Type",
+													"value": "application/json"
+												}
+											],
+											"cookie": [],
+											"responseTime": null,
+											"body": "{\n  \"sourceId\": \"a1Cg8000000AbCeEAK\",\n  \"branchId\": \"a1Bg8000000AbCdEAK\",\n  \"branchLabel\": \"MBOM-GDL\",\n  \"sourceType\": \"Ebom\",\n  \"currentSourceVersion\": {\n    \"sourceRevisionId\": \"a1Dg8000000AbCfEAK\",\n    \"rootItemRevisionId\": \"a0Ag8000000Ab01EAC\",\n    \"rootItemNumber\": \"Assy-100\",\n    \"rootRevisionLabel\": \"rev-1\",\n    \"resolutionTimestamp\": \"2026-01-15T00:00:00.000Z\",\n    \"acceptedAt\": \"2026-01-15T09:12:44.000Z\"\n  },\n  \"candidateSourceVersion\": {\n    \"sourceRevisionId\": null,\n    \"rootItemRevisionId\": \"a0Ag8000000Ab02EAC\",\n    \"rootItemNumber\": \"Assy-100\",\n    \"rootRevisionLabel\": \"rev-2\",\n    \"resolutionTimestamp\": \"2026-04-02T00:00:00.000Z\",\n    \"acceptedAt\": null\n  },\n  \"hasChanges\": true,\n  \"summary\": {\n    \"total\": 3,\n    \"informational\": 3,\n    \"required\": 0,\n    \"byKind\": {\n      \"source-version-advance\": 1,\n      \"claim-retained\": 1,\n      \"claim-superseded\": 1\n    }\n  },\n  \"entries\": [\n    {\n      \"entryId\": \"5c1e0a77f9b34d20\",\n      \"kind\": \"source-version-advance\",\n      \"decision\": \"informational\",\n      \"availableActions\": [],\n      \"retargeted\": null,\n      \"revisionAdvances\": null,\n      \"claimKind\": null,\n      \"message\": \"The source assembly moves to a newer released revision.\",\n      \"target\": {\n        \"ciKind\": \"source\",\n        \"edgeId\": null,\n        \"edgeKey\": null,\n        \"label\": \"Assy-100\",\n        \"path\": [\n          {\n            \"ciKind\": \"source\",\n            \"label\": \"Assy-100\",\n            \"edgeId\": null,\n            \"edgeKey\": null\n          }\n        ]\n      },\n      \"current\": null,\n      \"candidate\": null\n    },\n    {\n      \"entryId\": \"8a3e5f09c2d71b64\",\n      \"kind\": \"claim-retained\",\n      \"decision\": \"informational\",\n      \"availableActions\": [\n        \"accept-source-revision\"\n      ],\n      \"retargeted\": true,\n      \"revisionAdvances\": false,\n      \"claimKind\": \"claim\",\n      \"message\": \"Your change to this member is kept, and the newer revision's version of it is suppressed.\",\n      \"target\": {\n        \"ciKind\": \"assembly-edge\",\n        \"edgeId\": \"a1Eg8000000AbD1EAK\",\n        \"edgeKey\": \"a0Bg8000000Ab10EAC\",\n        \"label\": \"Motor-002\",\n        \"path\": [\n          {\n            \"ciKind\": \"source\",\n            \"label\": \"Assy-100\",\n            \"edgeId\": null,\n            \"edgeKey\": null\n          }\n        ]\n      },\n      \"current\": {\n        \"provenance\": \"claiming\",\n        \"governingClock\": \"branch\",\n        \"governingTimestamp\": \"2026-04-05T17:22:03.518Z\",\n        \"detail\": {\n          \"ciKind\": \"assembly-edge\",\n          \"parentItemId\": \"a02g8000000Ab01EAC\",\n          \"parentItemNumber\": \"Assy-100\",\n          \"childItemId\": \"a02g8000000Ab20EAC\",\n          \"childItemNumber\": \"Motor-002\",\n          \"childItemRevisionId\": \"a0Ag8000000Ab41EAC\",\n          \"childRevisionLabel\": \"rev-1\",\n          \"quantity\": 4,\n          \"findNumber\": 10\n        }\n      },\n      \"candidate\": {\n        \"provenance\": \"base\",\n        \"governingClock\": \"source\",\n        \"governingTimestamp\": \"2026-04-02T00:00:00.000Z\",\n        \"detail\": {\n          \"ciKind\": \"assembly-edge\",\n          \"parentItemId\": \"a02g8000000Ab01EAC\",\n          \"parentItemNumber\": \"Assy-100\",\n          \"childItemId\": \"a02g8000000Ab20EAC\",\n          \"childItemNumber\": \"Motor-002\",\n          \"childItemRevisionId\": \"a0Ag8000000Ab42EAC\",\n          \"childRevisionLabel\": \"rev-2\",\n          \"quantity\": 4,\n          \"findNumber\": 10\n        }\n      }\n    },\n    {\n      \"entryId\": \"3b91c7e0d5a2f846\",\n      \"kind\": \"claim-superseded\",\n      \"decision\": \"informational\",\n      \"availableActions\": [],\n      \"retargeted\": null,\n      \"revisionAdvances\": true,\n      \"claimKind\": \"claim\",\n      \"message\": \"The newer revision now matches your change to this member, so your change no longer alters anything.\",\n      \"target\": {\n        \"ciKind\": \"assembly-edge\",\n        \"edgeId\": \"a1Eg8000000AbD2EAK\",\n        \"edgeKey\": \"a0Bg8000000Ab11EAC\",\n        \"label\": \"Bracket-005\",\n        \"path\": [\n          {\n            \"ciKind\": \"source\",\n            \"label\": \"Assy-100\",\n            \"edgeId\": null,\n            \"edgeKey\": null\n          }\n        ]\n      },\n      \"current\": {\n        \"provenance\": \"claiming\",\n        \"governingClock\": \"branch\",\n        \"governingTimestamp\": \"2026-04-05T17:22:03.518Z\",\n        \"detail\": {\n          \"ciKind\": \"assembly-edge\",\n          \"parentItemId\": \"a02g8000000Ab01EAC\",\n          \"parentItemNumber\": \"Assy-100\",\n          \"childItemId\": \"a02g8000000Ab21EAC\",\n          \"childItemNumber\": \"Bracket-005\",\n          \"childItemRevisionId\": \"a0Ag8000000Ab31EAC\",\n          \"childRevisionLabel\": \"rev-3\",\n          \"quantity\": 2,\n          \"findNumber\": 20\n        }\n      },\n      \"candidate\": {\n        \"provenance\": \"base\",\n        \"governingClock\": \"source\",\n        \"governingTimestamp\": \"2026-04-02T00:00:00.000Z\",\n        \"detail\": {\n          \"ciKind\": \"assembly-edge\",\n          \"parentItemId\": \"a02g8000000Ab01EAC\",\n          \"parentItemNumber\": \"Assy-100\",\n          \"childItemId\": \"a02g8000000Ab21EAC\",\n          \"childItemNumber\": \"Bracket-005\",\n          \"childItemRevisionId\": \"a0Ag8000000Ab32EAC\",\n          \"childRevisionLabel\": \"rev-4\",\n          \"quantity\": 2,\n          \"findNumber\": 20\n        }\n      }\n    }\n  ],\n  \"warnings\": [],\n  \"truncated\": false,\n  \"entriesLimit\": 200,\n  \"diffFingerprint\": \"sha256:4c0d9e72b1a83f56\",\n  \"generatedAt\": \"2026-04-05T17:22:03.518Z\"\n}"
+										},
+										{
+											"name": "Today — no action on a retargeted pin, no revisionAdvances",
+											"originalRequest": {
+												"method": "GET",
+												"header": [
+													{
+														"key": "Content-Type",
+														"value": "application/json"
+													}
+												],
+												"url": {
+													"raw": "{{propelApiUrl}}/v4/mbom/sources/:sourceId/pull-preview?candidateRootRevisionId=&entriesLimit=200",
+													"host": [
+														"{{propelApiUrl}}"
+													],
+													"path": [
+														"v4",
+														"mbom",
+														"sources",
+														":sourceId",
+														"pull-preview"
+													],
+													"query": [
+														{
+															"key": "candidateRootRevisionId",
+															"value": ""
+														},
+														{
+															"key": "entriesLimit",
+															"value": "200"
+														}
+													],
+													"variable": [
+														{
+															"key": "sourceId",
+															"value": "a1Cg8000000AbCeEAK"
+														}
+													]
+												}
+											},
+											"status": "OK",
+											"code": 200,
+											"_postman_previewlanguage": "json",
+											"header": [
+												{
+													"key": "Content-Type",
+													"value": "application/json"
+												}
+											],
+											"cookie": [],
+											"responseTime": null,
+											"body": "{\n  \"sourceId\": \"a1Cg8000000AbCeEAK\",\n  \"branchId\": \"a1Bg8000000AbCdEAK\",\n  \"branchLabel\": \"MBOM-GDL\",\n  \"sourceType\": \"Ebom\",\n  \"currentSourceVersion\": {\n    \"sourceRevisionId\": \"a1Dg8000000AbCfEAK\",\n    \"rootItemRevisionId\": \"a0Ag8000000Ab01EAC\",\n    \"rootItemNumber\": \"Assy-100\",\n    \"rootRevisionLabel\": \"rev-1\",\n    \"resolutionTimestamp\": \"2026-01-15T00:00:00.000Z\",\n    \"acceptedAt\": \"2026-01-15T09:12:44.000Z\"\n  },\n  \"candidateSourceVersion\": {\n    \"sourceRevisionId\": null,\n    \"rootItemRevisionId\": \"a0Ag8000000Ab02EAC\",\n    \"rootItemNumber\": \"Assy-100\",\n    \"rootRevisionLabel\": \"rev-2\",\n    \"resolutionTimestamp\": \"2026-04-02T00:00:00.000Z\",\n    \"acceptedAt\": null\n  },\n  \"hasChanges\": true,\n  \"summary\": {\n    \"total\": 3,\n    \"informational\": 3,\n    \"required\": 0,\n    \"byKind\": {\n      \"source-version-advance\": 1,\n      \"claim-retained\": 1,\n      \"claim-superseded\": 1\n    }\n  },\n  \"entries\": [\n    {\n      \"entryId\": \"5c1e0a77f9b34d20\",\n      \"kind\": \"source-version-advance\",\n      \"decision\": \"informational\",\n      \"availableActions\": [],\n      \"retargeted\": null,\n      \"claimKind\": null,\n      \"message\": \"The source assembly moves to a newer released revision.\",\n      \"target\": {\n        \"ciKind\": \"source\",\n        \"edgeId\": null,\n        \"edgeKey\": null,\n        \"label\": \"Assy-100\",\n        \"path\": [\n          {\n            \"ciKind\": \"source\",\n            \"label\": \"Assy-100\",\n            \"edgeId\": null,\n            \"edgeKey\": null\n          }\n        ]\n      },\n      \"current\": null,\n      \"candidate\": null\n    },\n    {\n      \"entryId\": \"8a3e5f09c2d71b64\",\n      \"kind\": \"claim-retained\",\n      \"decision\": \"informational\",\n      \"availableActions\": [],\n      \"retargeted\": true,\n      \"claimKind\": \"claim\",\n      \"message\": \"Your change to this member is kept, and the newer revision's version of it is suppressed.\",\n      \"target\": {\n        \"ciKind\": \"assembly-edge\",\n        \"edgeId\": \"a1Eg8000000AbD1EAK\",\n        \"edgeKey\": \"a0Bg8000000Ab10EAC\",\n        \"label\": \"Motor-002\",\n        \"path\": [\n          {\n            \"ciKind\": \"source\",\n            \"label\": \"Assy-100\",\n            \"edgeId\": null,\n            \"edgeKey\": null\n          }\n        ]\n      },\n      \"current\": {\n        \"provenance\": \"claiming\",\n        \"governingClock\": \"branch\",\n        \"governingTimestamp\": \"2026-04-05T17:22:03.518Z\",\n        \"detail\": {\n          \"ciKind\": \"assembly-edge\",\n          \"parentItemId\": \"a02g8000000Ab01EAC\",\n          \"parentItemNumber\": \"Assy-100\",\n          \"childItemId\": \"a02g8000000Ab20EAC\",\n          \"childItemNumber\": \"Motor-002\",\n          \"childItemRevisionId\": \"a0Ag8000000Ab41EAC\",\n          \"childRevisionLabel\": \"rev-1\",\n          \"quantity\": 4,\n          \"findNumber\": 10\n        }\n      },\n      \"candidate\": {\n        \"provenance\": \"base\",\n        \"governingClock\": \"source\",\n        \"governingTimestamp\": \"2026-04-02T00:00:00.000Z\",\n        \"detail\": {\n          \"ciKind\": \"assembly-edge\",\n          \"parentItemId\": \"a02g8000000Ab01EAC\",\n          \"parentItemNumber\": \"Assy-100\",\n          \"childItemId\": \"a02g8000000Ab20EAC\",\n          \"childItemNumber\": \"Motor-002\",\n          \"childItemRevisionId\": \"a0Ag8000000Ab42EAC\",\n          \"childRevisionLabel\": \"rev-2\",\n          \"quantity\": 4,\n          \"findNumber\": 10\n        }\n      }\n    },\n    {\n      \"entryId\": \"3b91c7e0d5a2f846\",\n      \"kind\": \"claim-superseded\",\n      \"decision\": \"informational\",\n      \"availableActions\": [],\n      \"retargeted\": null,\n      \"claimKind\": \"claim\",\n      \"message\": \"The newer revision now matches your change to this member, so your change no longer alters anything.\",\n      \"target\": {\n        \"ciKind\": \"assembly-edge\",\n        \"edgeId\": \"a1Eg8000000AbD2EAK\",\n        \"edgeKey\": \"a0Bg8000000Ab11EAC\",\n        \"label\": \"Bracket-005\",\n        \"path\": [\n          {\n            \"ciKind\": \"source\",\n            \"label\": \"Assy-100\",\n            \"edgeId\": null,\n            \"edgeKey\": null\n          }\n        ]\n      },\n      \"current\": {\n        \"provenance\": \"claiming\",\n        \"governingClock\": \"branch\",\n        \"governingTimestamp\": \"2026-04-05T17:22:03.518Z\",\n        \"detail\": {\n          \"ciKind\": \"assembly-edge\",\n          \"parentItemId\": \"a02g8000000Ab01EAC\",\n          \"parentItemNumber\": \"Assy-100\",\n          \"childItemId\": \"a02g8000000Ab21EAC\",\n          \"childItemNumber\": \"Bracket-005\",\n          \"childItemRevisionId\": \"a0Ag8000000Ab31EAC\",\n          \"childRevisionLabel\": \"rev-3\",\n          \"quantity\": 2,\n          \"findNumber\": 20\n        }\n      },\n      \"candidate\": {\n        \"provenance\": \"base\",\n        \"governingClock\": \"source\",\n        \"governingTimestamp\": \"2026-04-02T00:00:00.000Z\",\n        \"detail\": {\n          \"ciKind\": \"assembly-edge\",\n          \"parentItemId\": \"a02g8000000Ab01EAC\",\n          \"parentItemNumber\": \"Assy-100\",\n          \"childItemId\": \"a02g8000000Ab21EAC\",\n          \"childItemNumber\": \"Bracket-005\",\n          \"childItemRevisionId\": \"a0Ag8000000Ab32EAC\",\n          \"childRevisionLabel\": \"rev-4\",\n          \"quantity\": 2,\n          \"findNumber\": 20\n        }\n      }\n    }\n  ],\n  \"warnings\": [],\n  \"truncated\": false,\n  \"entriesLimit\": 200,\n  \"diffFingerprint\": \"sha256:4c0d9e72b1a83f56\",\n  \"generatedAt\": \"2026-04-05T17:22:03.518Z\"\n}"
+										}
+									]
+								},
+								{
+									"name": "🚧 MVP-30379 — Preview a Pull (per-field decisions offered)",
+									"protocolProfileBehavior": {
+										"disableBodyPruning": true
+									},
+									"request": {
+										"method": "GET",
+										"header": [
+											{
+												"key": "Content-Type",
+												"value": "application/json"
+											},
+											{
+												"key": "Accept",
+												"value": "application/json"
+											}
+										],
+										"url": {
+											"raw": "{{propelApiUrl}}/v4/mbom/sources/:sourceId/pull-preview?candidateRootRevisionId=&entriesLimit=200",
+											"host": [
+												"{{propelApiUrl}}"
+											],
+											"path": [
+												"v4",
+												"mbom",
+												"sources",
+												":sourceId",
+												"pull-preview"
+											],
+											"query": [
+												{
+													"key": "candidateRootRevisionId",
+													"value": ""
+												},
+												{
+													"key": "entriesLimit",
+													"value": "200"
+												}
+											],
+											"variable": [
+												{
+													"key": "sourceId",
+													"value": "{{mbomSourceId}}"
+												}
+											]
+										},
+										"description": "**🚧 Planned — MVP-30379, not yet implemented.** Same request as *Preview a Pull*.\n\n## Setup\n\n1. Claim Motor-002's line **pinned** to rev-1, and change its quantity to 4.\n2. `add` Label-400 at quantity 1, at a position upstream will later supply at quantity 2.\n3. Claim Bracket-005's line **tracking**, and leave it matching upstream.\n4. Release a new Assy-100 revision that re-revs Motor-002, sets its quantity to 6, and adds Label-400 at quantity 2.\n\n## What to assert\n\n| Entry | `availableActions` once MVP-30379 ships | Today |\n| --- | --- | --- |\n| Motor-002 `claim-retained` (revision and quantity diverge) | `[accept-fields, accept-source-revision]` | `[]` |\n| Label-400 `member-add-collision` (quantity diverges) | `[accept-fields]` | `[]` |\n| Bracket-005 `claim-superseded` | `[release]` | `[]` |\n\n- Every entry stays `decision: informational`, and `summary.required` is 0: nothing here blocks the commit.\n- `accept-fields` covers only the fields that **actually diverge**: the value the branch holds differs from the candidate's. A tracking claim holds no revision, so its revision never diverges, even when `current` and `candidate` render different revisions.\n- `diffFingerprint`'s mechanism is unchanged, but it digests each entry's `availableActions`, so its value changes with the actions offered. A preview taken before this ships answers `STALE_REVISION` on a commit made after it.\n- `revisionAdvances` is MVP-30378's field [assumes A-30379-7]."
+									},
+									"response": [
+										{
+											"name": "🚧 expected once MVP-30379 ships",
+											"originalRequest": {
+												"method": "GET",
+												"header": [
+													{
+														"key": "Content-Type",
+														"value": "application/json"
+													}
+												],
+												"url": {
+													"raw": "{{propelApiUrl}}/v4/mbom/sources/:sourceId/pull-preview?candidateRootRevisionId=&entriesLimit=200",
+													"host": [
+														"{{propelApiUrl}}"
+													],
+													"path": [
+														"v4",
+														"mbom",
+														"sources",
+														":sourceId",
+														"pull-preview"
+													],
+													"query": [
+														{
+															"key": "candidateRootRevisionId",
+															"value": ""
+														},
+														{
+															"key": "entriesLimit",
+															"value": "200"
+														}
+													],
+													"variable": [
+														{
+															"key": "sourceId",
+															"value": "a1Cg8000000AbCeEAK"
+														}
+													]
+												}
+											},
+											"status": "OK",
+											"code": 200,
+											"_postman_previewlanguage": "json",
+											"header": [
+												{
+													"key": "Content-Type",
+													"value": "application/json"
+												}
+											],
+											"cookie": [],
+											"responseTime": null,
+											"body": "{\n  \"sourceId\": \"a1Cg8000000AbCeEAK\",\n  \"branchId\": \"a1Bg8000000AbCdEAK\",\n  \"branchLabel\": \"MBOM-GDL\",\n  \"sourceType\": \"Ebom\",\n  \"currentSourceVersion\": {\n    \"sourceRevisionId\": \"a1Dg8000000AbCfEAK\",\n    \"rootItemRevisionId\": \"a0Ag8000000Ab01EAC\",\n    \"rootItemNumber\": \"Assy-100\",\n    \"rootRevisionLabel\": \"rev-1\",\n    \"resolutionTimestamp\": \"2026-01-15T00:00:00.000Z\",\n    \"acceptedAt\": \"2026-01-15T09:12:44.000Z\"\n  },\n  \"candidateSourceVersion\": {\n    \"sourceRevisionId\": null,\n    \"rootItemRevisionId\": \"a0Ag8000000Ab02EAC\",\n    \"rootItemNumber\": \"Assy-100\",\n    \"rootRevisionLabel\": \"rev-2\",\n    \"resolutionTimestamp\": \"2026-04-02T00:00:00.000Z\",\n    \"acceptedAt\": null\n  },\n  \"hasChanges\": true,\n  \"summary\": {\n    \"total\": 3,\n    \"informational\": 3,\n    \"required\": 0,\n    \"byKind\": {\n      \"claim-retained\": 1,\n      \"member-add-collision\": 1,\n      \"claim-superseded\": 1\n    }\n  },\n  \"entries\": [\n    {\n      \"entryId\": \"8a3e5f09c2d71b64\",\n      \"kind\": \"claim-retained\",\n      \"decision\": \"informational\",\n      \"availableActions\": [\n        \"accept-fields\",\n        \"accept-source-revision\"\n      ],\n      \"retargeted\": true,\n      \"revisionAdvances\": false,\n      \"claimKind\": \"claim\",\n      \"message\": \"Your change to this member is kept, and the newer revision's version of it is suppressed.\",\n      \"target\": {\n        \"ciKind\": \"assembly-edge\",\n        \"edgeId\": \"a1Eg8000000AbD1EAK\",\n        \"edgeKey\": \"a0Bg8000000Ab10EAC\",\n        \"label\": \"Motor-002\",\n        \"path\": [\n          {\n            \"ciKind\": \"source\",\n            \"label\": \"Assy-100\",\n            \"edgeId\": null,\n            \"edgeKey\": null\n          }\n        ]\n      },\n      \"current\": {\n        \"provenance\": \"claiming\",\n        \"governingClock\": \"branch\",\n        \"governingTimestamp\": \"2026-04-05T17:22:03.518Z\",\n        \"detail\": {\n          \"ciKind\": \"assembly-edge\",\n          \"parentItemId\": \"a02g8000000Ab01EAC\",\n          \"parentItemNumber\": \"Assy-100\",\n          \"childItemId\": \"a02g8000000Ab20EAC\",\n          \"childItemNumber\": \"Motor-002\",\n          \"childItemRevisionId\": \"a0Ag8000000Ab41EAC\",\n          \"childRevisionLabel\": \"rev-1\",\n          \"quantity\": 4,\n          \"findNumber\": 10\n        }\n      },\n      \"candidate\": {\n        \"provenance\": \"base\",\n        \"governingClock\": \"source\",\n        \"governingTimestamp\": \"2026-04-02T00:00:00.000Z\",\n        \"detail\": {\n          \"ciKind\": \"assembly-edge\",\n          \"parentItemId\": \"a02g8000000Ab01EAC\",\n          \"parentItemNumber\": \"Assy-100\",\n          \"childItemId\": \"a02g8000000Ab20EAC\",\n          \"childItemNumber\": \"Motor-002\",\n          \"childItemRevisionId\": \"a0Ag8000000Ab42EAC\",\n          \"childRevisionLabel\": \"rev-2\",\n          \"quantity\": 6,\n          \"findNumber\": 10\n        }\n      }\n    },\n    {\n      \"entryId\": \"c7d42a9e0b15f386\",\n      \"kind\": \"member-add-collision\",\n      \"decision\": \"informational\",\n      \"availableActions\": [\n        \"accept-fields\"\n      ],\n      \"retargeted\": null,\n      \"revisionAdvances\": null,\n      \"claimKind\": null,\n      \"message\": \"The newer revision adds a member this branch already provides itself. Your own version is kept.\",\n      \"target\": {\n        \"ciKind\": \"assembly-edge\",\n        \"edgeId\": \"a1Eg8000000AbD5EAK\",\n        \"edgeKey\": \"new-a1Bg8000000AbCdEAK-a02g8000000Ab01EAC-a02g8000000Ab24EAC\",\n        \"label\": \"Label-400\",\n        \"path\": [\n          {\n            \"ciKind\": \"source\",\n            \"label\": \"Assy-100\",\n            \"edgeId\": null,\n            \"edgeKey\": null\n          }\n        ]\n      },\n      \"current\": {\n        \"provenance\": \"new\",\n        \"governingClock\": \"branch\",\n        \"governingTimestamp\": \"2026-04-05T17:22:03.518Z\",\n        \"detail\": {\n          \"ciKind\": \"assembly-edge\",\n          \"parentItemId\": \"a02g8000000Ab01EAC\",\n          \"parentItemNumber\": \"Assy-100\",\n          \"childItemId\": \"a02g8000000Ab24EAC\",\n          \"childItemNumber\": \"Label-400\",\n          \"childItemRevisionId\": \"a0Ag8000000Ab71EAC\",\n          \"childRevisionLabel\": \"rev-1\",\n          \"quantity\": 1,\n          \"findNumber\": 60\n        }\n      },\n      \"candidate\": {\n        \"provenance\": \"base\",\n        \"governingClock\": \"source\",\n        \"governingTimestamp\": \"2026-04-02T00:00:00.000Z\",\n        \"detail\": {\n          \"ciKind\": \"assembly-edge\",\n          \"parentItemId\": \"a02g8000000Ab01EAC\",\n          \"parentItemNumber\": \"Assy-100\",\n          \"childItemId\": \"a02g8000000Ab24EAC\",\n          \"childItemNumber\": \"Label-400\",\n          \"childItemRevisionId\": \"a0Ag8000000Ab71EAC\",\n          \"childRevisionLabel\": \"rev-1\",\n          \"quantity\": 2,\n          \"findNumber\": 60\n        }\n      }\n    },\n    {\n      \"entryId\": \"3b91c7e0d5a2f846\",\n      \"kind\": \"claim-superseded\",\n      \"decision\": \"informational\",\n      \"availableActions\": [\n        \"release\"\n      ],\n      \"retargeted\": null,\n      \"revisionAdvances\": false,\n      \"claimKind\": \"claim\",\n      \"message\": \"The newer revision now matches your change to this member, so your change no longer alters anything.\",\n      \"target\": {\n        \"ciKind\": \"assembly-edge\",\n        \"edgeId\": \"a1Eg8000000AbD2EAK\",\n        \"edgeKey\": \"a0Bg8000000Ab11EAC\",\n        \"label\": \"Bracket-005\",\n        \"path\": [\n          {\n            \"ciKind\": \"source\",\n            \"label\": \"Assy-100\",\n            \"edgeId\": null,\n            \"edgeKey\": null\n          }\n        ]\n      },\n      \"current\": {\n        \"provenance\": \"claiming\",\n        \"governingClock\": \"branch\",\n        \"governingTimestamp\": \"2026-04-05T17:22:03.518Z\",\n        \"detail\": {\n          \"ciKind\": \"assembly-edge\",\n          \"parentItemId\": \"a02g8000000Ab01EAC\",\n          \"parentItemNumber\": \"Assy-100\",\n          \"childItemId\": \"a02g8000000Ab21EAC\",\n          \"childItemNumber\": \"Bracket-005\",\n          \"childItemRevisionId\": \"a0Ag8000000Ab31EAC\",\n          \"childRevisionLabel\": \"rev-3\",\n          \"quantity\": 2,\n          \"findNumber\": 20\n        }\n      },\n      \"candidate\": {\n        \"provenance\": \"base\",\n        \"governingClock\": \"source\",\n        \"governingTimestamp\": \"2026-04-02T00:00:00.000Z\",\n        \"detail\": {\n          \"ciKind\": \"assembly-edge\",\n          \"parentItemId\": \"a02g8000000Ab01EAC\",\n          \"parentItemNumber\": \"Assy-100\",\n          \"childItemId\": \"a02g8000000Ab21EAC\",\n          \"childItemNumber\": \"Bracket-005\",\n          \"childItemRevisionId\": \"a0Ag8000000Ab31EAC\",\n          \"childRevisionLabel\": \"rev-3\",\n          \"quantity\": 2,\n          \"findNumber\": 20\n        }\n      }\n    }\n  ],\n  \"warnings\": [],\n  \"truncated\": false,\n  \"entriesLimit\": 200,\n  \"diffFingerprint\": \"sha256:b5e81c3a9f04d267\",\n  \"generatedAt\": \"2026-04-05T17:22:03.518Z\"\n}"
+										},
+										{
+											"name": "Today — no optional actions offered",
+											"originalRequest": {
+												"method": "GET",
+												"header": [
+													{
+														"key": "Content-Type",
+														"value": "application/json"
+													}
+												],
+												"url": {
+													"raw": "{{propelApiUrl}}/v4/mbom/sources/:sourceId/pull-preview?candidateRootRevisionId=&entriesLimit=200",
+													"host": [
+														"{{propelApiUrl}}"
+													],
+													"path": [
+														"v4",
+														"mbom",
+														"sources",
+														":sourceId",
+														"pull-preview"
+													],
+													"query": [
+														{
+															"key": "candidateRootRevisionId",
+															"value": ""
+														},
+														{
+															"key": "entriesLimit",
+															"value": "200"
+														}
+													],
+													"variable": [
+														{
+															"key": "sourceId",
+															"value": "a1Cg8000000AbCeEAK"
+														}
+													]
+												}
+											},
+											"status": "OK",
+											"code": 200,
+											"_postman_previewlanguage": "json",
+											"header": [
+												{
+													"key": "Content-Type",
+													"value": "application/json"
+												}
+											],
+											"cookie": [],
+											"responseTime": null,
+											"body": "{\n  \"sourceId\": \"a1Cg8000000AbCeEAK\",\n  \"branchId\": \"a1Bg8000000AbCdEAK\",\n  \"branchLabel\": \"MBOM-GDL\",\n  \"sourceType\": \"Ebom\",\n  \"currentSourceVersion\": {\n    \"sourceRevisionId\": \"a1Dg8000000AbCfEAK\",\n    \"rootItemRevisionId\": \"a0Ag8000000Ab01EAC\",\n    \"rootItemNumber\": \"Assy-100\",\n    \"rootRevisionLabel\": \"rev-1\",\n    \"resolutionTimestamp\": \"2026-01-15T00:00:00.000Z\",\n    \"acceptedAt\": \"2026-01-15T09:12:44.000Z\"\n  },\n  \"candidateSourceVersion\": {\n    \"sourceRevisionId\": null,\n    \"rootItemRevisionId\": \"a0Ag8000000Ab02EAC\",\n    \"rootItemNumber\": \"Assy-100\",\n    \"rootRevisionLabel\": \"rev-2\",\n    \"resolutionTimestamp\": \"2026-04-02T00:00:00.000Z\",\n    \"acceptedAt\": null\n  },\n  \"hasChanges\": true,\n  \"summary\": {\n    \"total\": 3,\n    \"informational\": 3,\n    \"required\": 0,\n    \"byKind\": {\n      \"claim-retained\": 1,\n      \"member-add-collision\": 1,\n      \"claim-superseded\": 1\n    }\n  },\n  \"entries\": [\n    {\n      \"entryId\": \"8a3e5f09c2d71b64\",\n      \"kind\": \"claim-retained\",\n      \"decision\": \"informational\",\n      \"availableActions\": [],\n      \"retargeted\": true,\n      \"claimKind\": \"claim\",\n      \"message\": \"Your change to this member is kept, and the newer revision's version of it is suppressed.\",\n      \"target\": {\n        \"ciKind\": \"assembly-edge\",\n        \"edgeId\": \"a1Eg8000000AbD1EAK\",\n        \"edgeKey\": \"a0Bg8000000Ab10EAC\",\n        \"label\": \"Motor-002\",\n        \"path\": [\n          {\n            \"ciKind\": \"source\",\n            \"label\": \"Assy-100\",\n            \"edgeId\": null,\n            \"edgeKey\": null\n          }\n        ]\n      },\n      \"current\": {\n        \"provenance\": \"claiming\",\n        \"governingClock\": \"branch\",\n        \"governingTimestamp\": \"2026-04-05T17:22:03.518Z\",\n        \"detail\": {\n          \"ciKind\": \"assembly-edge\",\n          \"parentItemId\": \"a02g8000000Ab01EAC\",\n          \"parentItemNumber\": \"Assy-100\",\n          \"childItemId\": \"a02g8000000Ab20EAC\",\n          \"childItemNumber\": \"Motor-002\",\n          \"childItemRevisionId\": \"a0Ag8000000Ab41EAC\",\n          \"childRevisionLabel\": \"rev-1\",\n          \"quantity\": 4,\n          \"findNumber\": 10\n        }\n      },\n      \"candidate\": {\n        \"provenance\": \"base\",\n        \"governingClock\": \"source\",\n        \"governingTimestamp\": \"2026-04-02T00:00:00.000Z\",\n        \"detail\": {\n          \"ciKind\": \"assembly-edge\",\n          \"parentItemId\": \"a02g8000000Ab01EAC\",\n          \"parentItemNumber\": \"Assy-100\",\n          \"childItemId\": \"a02g8000000Ab20EAC\",\n          \"childItemNumber\": \"Motor-002\",\n          \"childItemRevisionId\": \"a0Ag8000000Ab42EAC\",\n          \"childRevisionLabel\": \"rev-2\",\n          \"quantity\": 6,\n          \"findNumber\": 10\n        }\n      }\n    },\n    {\n      \"entryId\": \"c7d42a9e0b15f386\",\n      \"kind\": \"member-add-collision\",\n      \"decision\": \"informational\",\n      \"availableActions\": [],\n      \"retargeted\": null,\n      \"claimKind\": null,\n      \"message\": \"The newer revision adds a member this branch already provides itself. Your own version is kept.\",\n      \"target\": {\n        \"ciKind\": \"assembly-edge\",\n        \"edgeId\": \"a1Eg8000000AbD5EAK\",\n        \"edgeKey\": \"new-a1Bg8000000AbCdEAK-a02g8000000Ab01EAC-a02g8000000Ab24EAC\",\n        \"label\": \"Label-400\",\n        \"path\": [\n          {\n            \"ciKind\": \"source\",\n            \"label\": \"Assy-100\",\n            \"edgeId\": null,\n            \"edgeKey\": null\n          }\n        ]\n      },\n      \"current\": {\n        \"provenance\": \"new\",\n        \"governingClock\": \"branch\",\n        \"governingTimestamp\": \"2026-04-05T17:22:03.518Z\",\n        \"detail\": {\n          \"ciKind\": \"assembly-edge\",\n          \"parentItemId\": \"a02g8000000Ab01EAC\",\n          \"parentItemNumber\": \"Assy-100\",\n          \"childItemId\": \"a02g8000000Ab24EAC\",\n          \"childItemNumber\": \"Label-400\",\n          \"childItemRevisionId\": \"a0Ag8000000Ab71EAC\",\n          \"childRevisionLabel\": \"rev-1\",\n          \"quantity\": 1,\n          \"findNumber\": 60\n        }\n      },\n      \"candidate\": {\n        \"provenance\": \"base\",\n        \"governingClock\": \"source\",\n        \"governingTimestamp\": \"2026-04-02T00:00:00.000Z\",\n        \"detail\": {\n          \"ciKind\": \"assembly-edge\",\n          \"parentItemId\": \"a02g8000000Ab01EAC\",\n          \"parentItemNumber\": \"Assy-100\",\n          \"childItemId\": \"a02g8000000Ab24EAC\",\n          \"childItemNumber\": \"Label-400\",\n          \"childItemRevisionId\": \"a0Ag8000000Ab71EAC\",\n          \"childRevisionLabel\": \"rev-1\",\n          \"quantity\": 2,\n          \"findNumber\": 60\n        }\n      }\n    },\n    {\n      \"entryId\": \"3b91c7e0d5a2f846\",\n      \"kind\": \"claim-superseded\",\n      \"decision\": \"informational\",\n      \"availableActions\": [],\n      \"retargeted\": null,\n      \"claimKind\": \"claim\",\n      \"message\": \"The newer revision now matches your change to this member, so your change no longer alters anything.\",\n      \"target\": {\n        \"ciKind\": \"assembly-edge\",\n        \"edgeId\": \"a1Eg8000000AbD2EAK\",\n        \"edgeKey\": \"a0Bg8000000Ab11EAC\",\n        \"label\": \"Bracket-005\",\n        \"path\": [\n          {\n            \"ciKind\": \"source\",\n            \"label\": \"Assy-100\",\n            \"edgeId\": null,\n            \"edgeKey\": null\n          }\n        ]\n      },\n      \"current\": {\n        \"provenance\": \"claiming\",\n        \"governingClock\": \"branch\",\n        \"governingTimestamp\": \"2026-04-05T17:22:03.518Z\",\n        \"detail\": {\n          \"ciKind\": \"assembly-edge\",\n          \"parentItemId\": \"a02g8000000Ab01EAC\",\n          \"parentItemNumber\": \"Assy-100\",\n          \"childItemId\": \"a02g8000000Ab21EAC\",\n          \"childItemNumber\": \"Bracket-005\",\n          \"childItemRevisionId\": \"a0Ag8000000Ab31EAC\",\n          \"childRevisionLabel\": \"rev-3\",\n          \"quantity\": 2,\n          \"findNumber\": 20\n        }\n      },\n      \"candidate\": {\n        \"provenance\": \"base\",\n        \"governingClock\": \"source\",\n        \"governingTimestamp\": \"2026-04-02T00:00:00.000Z\",\n        \"detail\": {\n          \"ciKind\": \"assembly-edge\",\n          \"parentItemId\": \"a02g8000000Ab01EAC\",\n          \"parentItemNumber\": \"Assy-100\",\n          \"childItemId\": \"a02g8000000Ab21EAC\",\n          \"childItemNumber\": \"Bracket-005\",\n          \"childItemRevisionId\": \"a0Ag8000000Ab31EAC\",\n          \"childRevisionLabel\": \"rev-3\",\n          \"quantity\": 2,\n          \"findNumber\": 20\n        }\n      }\n    }\n  ],\n  \"warnings\": [],\n  \"truncated\": false,\n  \"entriesLimit\": 200,\n  \"diffFingerprint\": \"sha256:b5e81c3a9f04d267\",\n  \"generatedAt\": \"2026-04-05T17:22:03.518Z\"\n}"
+										}
+									]
 								},
 								{
 									"name": "Commit a Pull",
@@ -10147,6 +11899,470 @@
 									"createdAt": "2026-09-04T13:53:21.000Z",
 									"updatedAt": "2026-09-04T13:54:22.000Z",
 									"uid": "46943044-0e7eb5c6-a441-4ccc-af4d-7d412d0104e7"
+								},
+								{
+									"name": "🚧 MVP-30378 — Commit a Pull with accept-source-revision",
+									"protocolProfileBehavior": {
+										"disableBodyPruning": true
+									},
+									"request": {
+										"method": "POST",
+										"header": [
+											{
+												"key": "Content-Type",
+												"value": "application/json"
+											},
+											{
+												"key": "Accept",
+												"value": "application/json"
+											}
+										],
+										"body": {
+											"mode": "raw",
+											"raw": "{\n  \"candidateRootRevisionId\": \"{{mbomCandidateRootRevisionId}}\",\n  \"diffFingerprint\": \"{{mbomDiffFingerprint}}\",\n  \"decisions\": [\n    {\n      \"entryId\": \"{{mbomRetainedEntryId}}\",\n      \"action\": \"accept-source-revision\"\n    }\n  ]\n}",
+											"options": {
+												"raw": {
+													"language": "json"
+												}
+											}
+										},
+										"url": {
+											"raw": "{{propelApiUrl}}/v4/mbom/sources/:sourceId/pull",
+											"host": [
+												"{{propelApiUrl}}"
+											],
+											"path": [
+												"v4",
+												"mbom",
+												"sources",
+												":sourceId",
+												"pull"
+											],
+											"variable": [
+												{
+													"key": "sourceId",
+													"value": "{{mbomSourceId}}"
+												}
+											]
+										},
+										"description": "**🚧 Planned — MVP-30378, not yet implemented.** Commit the preview above, taking the newer revision on the pinned claim. Set `mbomRetainedEntryId` to the `claim-retained` entry's `entryId`.\n\n## What to assert\n\n- `201`, with `applied[]` reporting `{kind: claim-retained, action: accept-source-revision}`.\n- **A tree read afterwards**:\n  - Motor-002 renders the candidate's revision, with its **quantity and find number unchanged**.\n  - It is still pinned: its pin now equals the source line's revision, so no `nested` rows appear beneath it.\n  - Any edit its old pin hid renders again.\n- **The next pull that moves the line** reports `retargeted: true` again. A `release`/track would not; that is MVP-30379.\n- Omitting the decision still commits, and the pin wins as today.\n- `accept-source-revision` on an entry that does not offer it, such as `claim-retained` with `retargeted: false`, answers `400 INVALID_REQUEST`.\n- The commit never becomes an `update` [assumes A-30378-3, A-30378-11].\n\n**Today:** `400 INVALID_REQUEST`. No kind other than `claim-orphaned` is actionable."
+									},
+									"response": [
+										{
+											"name": "🚧 expected once MVP-30378 ships",
+											"originalRequest": {
+												"method": "POST",
+												"header": [
+													{
+														"key": "Content-Type",
+														"value": "application/json"
+													}
+												],
+												"body": {
+													"mode": "raw",
+													"raw": "{\n  \"candidateRootRevisionId\": \"a0Ag8000000Ab02EAC\",\n  \"diffFingerprint\": \"sha256:4c0d9e72b1a83f56\",\n  \"decisions\": [\n    {\n      \"entryId\": \"8a3e5f09c2d71b64\",\n      \"action\": \"accept-source-revision\"\n    }\n  ]\n}",
+													"options": {
+														"raw": {
+															"language": "json"
+														}
+													}
+												},
+												"url": {
+													"raw": "{{propelApiUrl}}/v4/mbom/sources/:sourceId/pull",
+													"host": [
+														"{{propelApiUrl}}"
+													],
+													"path": [
+														"v4",
+														"mbom",
+														"sources",
+														":sourceId",
+														"pull"
+													],
+													"variable": [
+														{
+															"key": "sourceId",
+															"value": "a1Cg8000000AbCeEAK"
+														}
+													]
+												}
+											},
+											"status": "Created",
+											"code": 201,
+											"_postman_previewlanguage": "json",
+											"header": [
+												{
+													"key": "Content-Type",
+													"value": "application/json"
+												}
+											],
+											"cookie": [],
+											"responseTime": null,
+											"body": "{\n  \"sourceId\": \"a1Cg8000000AbCeEAK\",\n  \"newSourceRevisionId\": \"a1Dg8000000AbChEAK\",\n  \"acceptedRootRevisionId\": \"a0Ag8000000Ab02EAC\",\n  \"acceptedAt\": \"2026-04-06T14:02:51.317Z\",\n  \"applied\": [\n    {\n      \"entryId\": \"8a3e5f09c2d71b64\",\n      \"kind\": \"claim-retained\",\n      \"action\": \"accept-source-revision\",\n      \"edgeId\": \"a1Eg8000000AbD1EAK\"\n    },\n    {\n      \"entryId\": \"3b91c7e0d5a2f846\",\n      \"kind\": \"claim-superseded\",\n      \"action\": null,\n      \"edgeId\": \"a1Eg8000000AbD2EAK\"\n    }\n  ]\n}"
+										},
+										{
+											"name": "Today — claim-retained is not actionable",
+											"originalRequest": {
+												"method": "POST",
+												"header": [
+													{
+														"key": "Content-Type",
+														"value": "application/json"
+													}
+												],
+												"body": {
+													"mode": "raw",
+													"raw": "{\n  \"candidateRootRevisionId\": \"a0Ag8000000Ab02EAC\",\n  \"diffFingerprint\": \"sha256:4c0d9e72b1a83f56\",\n  \"decisions\": [\n    {\n      \"entryId\": \"8a3e5f09c2d71b64\",\n      \"action\": \"accept-source-revision\"\n    }\n  ]\n}",
+													"options": {
+														"raw": {
+															"language": "json"
+														}
+													}
+												},
+												"url": {
+													"raw": "{{propelApiUrl}}/v4/mbom/sources/:sourceId/pull",
+													"host": [
+														"{{propelApiUrl}}"
+													],
+													"path": [
+														"v4",
+														"mbom",
+														"sources",
+														":sourceId",
+														"pull"
+													],
+													"variable": [
+														{
+															"key": "sourceId",
+															"value": "a1Cg8000000AbCeEAK"
+														}
+													]
+												}
+											},
+											"status": "Bad Request",
+											"code": 400,
+											"_postman_previewlanguage": "json",
+											"header": [
+												{
+													"key": "Content-Type",
+													"value": "application/json"
+												}
+											],
+											"cookie": [],
+											"responseTime": null,
+											"body": "{\n  \"code\": \"INVALID_REQUEST\",\n  \"message\": \"That request could not be read. Check that the body is valid JSON and that every required value is supplied. (entryId 8a3e5f09c2d71b64 is claim-retained, which offers no accept/reject decision)\"\n}"
+										}
+									]
+								},
+								{
+									"name": "🚧 MVP-30379 — Commit a Pull with accept-fields and release",
+									"protocolProfileBehavior": {
+										"disableBodyPruning": true
+									},
+									"request": {
+										"method": "POST",
+										"header": [
+											{
+												"key": "Content-Type",
+												"value": "application/json"
+											},
+											{
+												"key": "Accept",
+												"value": "application/json"
+											}
+										],
+										"body": {
+											"mode": "raw",
+											"raw": "{\n  \"candidateRootRevisionId\": \"{{mbomCandidateRootRevisionId}}\",\n  \"diffFingerprint\": \"{{mbomDiffFingerprint}}\",\n  \"decisions\": [\n    {\n      \"entryId\": \"{{mbomRetainedEntryId}}\",\n      \"action\": \"accept-fields\",\n      \"acceptedFields\": {\n        \"childItemRevisionId\": \"candidate\"\n      }\n    },\n    {\n      \"entryId\": \"{{mbomCollisionEntryId}}\",\n      \"action\": \"accept-fields\",\n      \"acceptedFields\": {\n        \"quantity\": \"candidate\"\n      }\n    },\n    {\n      \"entryId\": \"{{mbomSupersededEntryId}}\",\n      \"action\": \"release\"\n    }\n  ]\n}",
+											"options": {
+												"raw": {
+													"language": "json"
+												}
+											}
+										},
+										"url": {
+											"raw": "{{propelApiUrl}}/v4/mbom/sources/:sourceId/pull",
+											"host": [
+												"{{propelApiUrl}}"
+											],
+											"path": [
+												"v4",
+												"mbom",
+												"sources",
+												":sourceId",
+												"pull"
+											],
+											"variable": [
+												{
+													"key": "sourceId",
+													"value": "{{mbomSourceId}}"
+												}
+											]
+										},
+										"description": "**🚧 Planned — MVP-30379, not yet implemented.** Commit the preview above with one decision per decidable entry.\n\n## `acceptedFields`\n\nThe keys are `quantity`, `findNumber` and `childItemRevisionId`. Name only what you are taking; an omitted field keeps the branch's value.\n\n| Value | Revision | Quantity / find number |\n| --- | --- | --- |\n| `candidate` | **pins** the candidate's revision, and reports `retargeted: true` again on the next pull that moves the line | takes upstream's value |\n| `release` | stores nothing. A claim then **tracks** T_R, still gets a `claim-*` entry every pull, and is never retargeted. A native row **floats** at `asOf`. | **refused**, because there is no clock to fall back to [assumes A-30379-2] |\n\n`release` on `claim-superseded` takes no `acceptedFields`. It clears a **pinned** claim's revision, and it **reverts** a **tracking** claim to `base` [assumes A-30379-3].\n\n## What to assert\n\n- **Result:** `201`. `applied[]` reports `accept-fields` on the `claim-retained` entry and on the `member-add-collision` entry, whose kind appears in `applied` only when it was decided. It reports `release` on the `claim-superseded` entry [assumes A-30379-8].\n- **A tree read afterwards:**\n  - Motor-002 renders rev-2 and keeps **quantity 4**.\n  - Label-400 is at quantity 2.\n  - Bracket-005 is `base`.\n- **`candidate` and `release` behave differently on the next pull** that moves Motor-002's line. After `candidate` it is `claim-retained` with `retargeted: true`. After `release` it has `retargeted: false`, and it renders the new revision.\n- **Accepting the quantity and the revision on one row** emits **one** operation for that edge, a `set-revision` carrying the quantity, never two [assumes A-30379-5].\n- **Refusals, each `400 INVALID_REQUEST` with nothing written:**\n  - a field that does not diverge (the branch holds the candidate's value, or none), including a tracking claim's revision\n  - an unknown key: `childItem`, or the old spelling `childItemRevision`\n  - an empty `acceptedFields`\n  - `acceptedFields` on `claim-orphaned`, or with any action but `accept-fields`\n  - more than 200 compiled operations. This is refused, not chunked [assumes A-30379-4].\n- **Zero decisions** still commits, because only `claim-orphaned` is required.\n\n**Today:** `400 INVALID_REQUEST`. No kind other than `claim-orphaned` is actionable."
+									},
+									"response": [
+										{
+											"name": "🚧 expected once MVP-30379 ships",
+											"originalRequest": {
+												"method": "POST",
+												"header": [
+													{
+														"key": "Content-Type",
+														"value": "application/json"
+													}
+												],
+												"body": {
+													"mode": "raw",
+													"raw": "{\n  \"candidateRootRevisionId\": \"a0Ag8000000Ab02EAC\",\n  \"diffFingerprint\": \"sha256:b5e81c3a9f04d267\",\n  \"decisions\": [\n    {\n      \"entryId\": \"8a3e5f09c2d71b64\",\n      \"action\": \"accept-fields\",\n      \"acceptedFields\": {\n        \"childItemRevisionId\": \"candidate\"\n      }\n    },\n    {\n      \"entryId\": \"c7d42a9e0b15f386\",\n      \"action\": \"accept-fields\",\n      \"acceptedFields\": {\n        \"quantity\": \"candidate\"\n      }\n    },\n    {\n      \"entryId\": \"3b91c7e0d5a2f846\",\n      \"action\": \"release\"\n    }\n  ]\n}",
+													"options": {
+														"raw": {
+															"language": "json"
+														}
+													}
+												},
+												"url": {
+													"raw": "{{propelApiUrl}}/v4/mbom/sources/:sourceId/pull",
+													"host": [
+														"{{propelApiUrl}}"
+													],
+													"path": [
+														"v4",
+														"mbom",
+														"sources",
+														":sourceId",
+														"pull"
+													],
+													"variable": [
+														{
+															"key": "sourceId",
+															"value": "a1Cg8000000AbCeEAK"
+														}
+													]
+												}
+											},
+											"status": "Created",
+											"code": 201,
+											"_postman_previewlanguage": "json",
+											"header": [
+												{
+													"key": "Content-Type",
+													"value": "application/json"
+												}
+											],
+											"cookie": [],
+											"responseTime": null,
+											"body": "{\n  \"sourceId\": \"a1Cg8000000AbCeEAK\",\n  \"newSourceRevisionId\": \"a1Dg8000000AbChEAK\",\n  \"acceptedRootRevisionId\": \"a0Ag8000000Ab02EAC\",\n  \"acceptedAt\": \"2026-04-06T14:02:51.317Z\",\n  \"applied\": [\n    {\n      \"entryId\": \"8a3e5f09c2d71b64\",\n      \"kind\": \"claim-retained\",\n      \"action\": \"accept-fields\",\n      \"edgeId\": \"a1Eg8000000AbD1EAK\"\n    },\n    {\n      \"entryId\": \"c7d42a9e0b15f386\",\n      \"kind\": \"member-add-collision\",\n      \"action\": \"accept-fields\",\n      \"edgeId\": \"a1Eg8000000AbD5EAK\"\n    },\n    {\n      \"entryId\": \"3b91c7e0d5a2f846\",\n      \"kind\": \"claim-superseded\",\n      \"action\": \"release\",\n      \"edgeId\": \"a1Eg8000000AbD2EAK\"\n    }\n  ]\n}"
+										},
+										{
+											"name": "🚧 expected once MVP-30379 ships — field does not diverge",
+											"originalRequest": {
+												"method": "POST",
+												"header": [
+													{
+														"key": "Content-Type",
+														"value": "application/json"
+													}
+												],
+												"body": {
+													"mode": "raw",
+													"raw": "{\n  \"candidateRootRevisionId\": \"a0Ag8000000Ab02EAC\",\n  \"diffFingerprint\": \"sha256:b5e81c3a9f04d267\",\n  \"decisions\": [\n    {\n      \"entryId\": \"8a3e5f09c2d71b64\",\n      \"action\": \"accept-fields\",\n      \"acceptedFields\": {\n        \"findNumber\": \"candidate\"\n      }\n    }\n  ]\n}",
+													"options": {
+														"raw": {
+															"language": "json"
+														}
+													}
+												},
+												"url": {
+													"raw": "{{propelApiUrl}}/v4/mbom/sources/:sourceId/pull",
+													"host": [
+														"{{propelApiUrl}}"
+													],
+													"path": [
+														"v4",
+														"mbom",
+														"sources",
+														":sourceId",
+														"pull"
+													],
+													"variable": [
+														{
+															"key": "sourceId",
+															"value": "a1Cg8000000AbCeEAK"
+														}
+													]
+												}
+											},
+											"status": "Bad Request",
+											"code": 400,
+											"_postman_previewlanguage": "json",
+											"header": [
+												{
+													"key": "Content-Type",
+													"value": "application/json"
+												}
+											],
+											"cookie": [],
+											"responseTime": null,
+											"body": "{\n  \"code\": \"INVALID_REQUEST\",\n  \"message\": \"That request could not be read. Check that the body is valid JSON and that every required value is supplied. (entryId 8a3e5f09c2d71b64: findNumber does not differ from upstream, so there is nothing to accept)\"\n}"
+										},
+										{
+											"name": "🚧 expected once MVP-30379 ships — childItem is not assertable",
+											"originalRequest": {
+												"method": "POST",
+												"header": [
+													{
+														"key": "Content-Type",
+														"value": "application/json"
+													}
+												],
+												"body": {
+													"mode": "raw",
+													"raw": "{\n  \"candidateRootRevisionId\": \"a0Ag8000000Ab02EAC\",\n  \"diffFingerprint\": \"sha256:b5e81c3a9f04d267\",\n  \"decisions\": [\n    {\n      \"entryId\": \"8a3e5f09c2d71b64\",\n      \"action\": \"accept-fields\",\n      \"acceptedFields\": {\n        \"childItem\": \"candidate\"\n      }\n    }\n  ]\n}",
+													"options": {
+														"raw": {
+															"language": "json"
+														}
+													}
+												},
+												"url": {
+													"raw": "{{propelApiUrl}}/v4/mbom/sources/:sourceId/pull",
+													"host": [
+														"{{propelApiUrl}}"
+													],
+													"path": [
+														"v4",
+														"mbom",
+														"sources",
+														":sourceId",
+														"pull"
+													],
+													"variable": [
+														{
+															"key": "sourceId",
+															"value": "a1Cg8000000AbCeEAK"
+														}
+													]
+												}
+											},
+											"status": "Bad Request",
+											"code": 400,
+											"_postman_previewlanguage": "json",
+											"header": [
+												{
+													"key": "Content-Type",
+													"value": "application/json"
+												}
+											],
+											"cookie": [],
+											"responseTime": null,
+											"body": "{\n  \"code\": \"INVALID_REQUEST\",\n  \"message\": \"That request could not be read. Check that the body is valid JSON and that every required value is supplied. (entryId 8a3e5f09c2d71b64: childItem is not a field a decision can accept)\"\n}"
+										},
+										{
+											"name": "🚧 expected once MVP-30379 ships — release on a quantity",
+											"originalRequest": {
+												"method": "POST",
+												"header": [
+													{
+														"key": "Content-Type",
+														"value": "application/json"
+													}
+												],
+												"body": {
+													"mode": "raw",
+													"raw": "{\n  \"candidateRootRevisionId\": \"a0Ag8000000Ab02EAC\",\n  \"diffFingerprint\": \"sha256:b5e81c3a9f04d267\",\n  \"decisions\": [\n    {\n      \"entryId\": \"c7d42a9e0b15f386\",\n      \"action\": \"accept-fields\",\n      \"acceptedFields\": {\n        \"quantity\": \"release\"\n      }\n    }\n  ]\n}",
+													"options": {
+														"raw": {
+															"language": "json"
+														}
+													}
+												},
+												"url": {
+													"raw": "{{propelApiUrl}}/v4/mbom/sources/:sourceId/pull",
+													"host": [
+														"{{propelApiUrl}}"
+													],
+													"path": [
+														"v4",
+														"mbom",
+														"sources",
+														":sourceId",
+														"pull"
+													],
+													"variable": [
+														{
+															"key": "sourceId",
+															"value": "a1Cg8000000AbCeEAK"
+														}
+													]
+												}
+											},
+											"status": "Bad Request",
+											"code": 400,
+											"_postman_previewlanguage": "json",
+											"header": [
+												{
+													"key": "Content-Type",
+													"value": "application/json"
+												}
+											],
+											"cookie": [],
+											"responseTime": null,
+											"body": "{\n  \"code\": \"INVALID_REQUEST\",\n  \"message\": \"That request could not be read. Check that the body is valid JSON and that every required value is supplied. (entryId c7d42a9e0b15f386: quantity has no upstream clock to release to; accept the candidate value or revert the row)\"\n}"
+										},
+										{
+											"name": "Today — claim-retained is not actionable",
+											"originalRequest": {
+												"method": "POST",
+												"header": [
+													{
+														"key": "Content-Type",
+														"value": "application/json"
+													}
+												],
+												"body": {
+													"mode": "raw",
+													"raw": "{\n  \"candidateRootRevisionId\": \"a0Ag8000000Ab02EAC\",\n  \"diffFingerprint\": \"sha256:b5e81c3a9f04d267\",\n  \"decisions\": [\n    {\n      \"entryId\": \"8a3e5f09c2d71b64\",\n      \"action\": \"accept-fields\",\n      \"acceptedFields\": {\n        \"childItemRevisionId\": \"candidate\"\n      }\n    },\n    {\n      \"entryId\": \"c7d42a9e0b15f386\",\n      \"action\": \"accept-fields\",\n      \"acceptedFields\": {\n        \"quantity\": \"candidate\"\n      }\n    },\n    {\n      \"entryId\": \"3b91c7e0d5a2f846\",\n      \"action\": \"release\"\n    }\n  ]\n}",
+													"options": {
+														"raw": {
+															"language": "json"
+														}
+													}
+												},
+												"url": {
+													"raw": "{{propelApiUrl}}/v4/mbom/sources/:sourceId/pull",
+													"host": [
+														"{{propelApiUrl}}"
+													],
+													"path": [
+														"v4",
+														"mbom",
+														"sources",
+														":sourceId",
+														"pull"
+													],
+													"variable": [
+														{
+															"key": "sourceId",
+															"value": "a1Cg8000000AbCeEAK"
+														}
+													]
+												}
+											},
+											"status": "Bad Request",
+											"code": 400,
+											"_postman_previewlanguage": "json",
+											"header": [
+												{
+													"key": "Content-Type",
+													"value": "application/json"
+												}
+											],
+											"cookie": [],
+											"responseTime": null,
+											"body": "{\n  \"code\": \"INVALID_REQUEST\",\n  \"message\": \"That request could not be read. Check that the body is valid JSON and that every required value is supplied. (entryId 8a3e5f09c2d71b64 is claim-retained, which offers no accept/reject decision)\"\n}"
+										}
+									]
 								}
 							],
 							"id": "ed3d83cb-c989-4b43-aef3-da7fcfd277bc",
@@ -10251,7 +12467,7 @@
 												}
 											]
 										},
-										"description": "**The one to run first.** Answers *\"what have I changed relative to upstream?\"* — the branch with its deltas overlaid on the left, and what its source *supplies* on the right, with no deltas folded in.\n\n**This call is pure.** No DML anywhere behind it. Two calls with the same inputs against an unchanged org return identical output, `entryId` values included.\n\nEvery claim, exclude, add and replace the branch has made shows up here — except one worth knowing about up front: a member the branch **claimed but did not change** comes back `member-unchanged`, because provenance is reported, never classified. The same part at the same quantity in the same position is the same member however each side came to hold it. `left.provenance` is where you see the claim.\n\n## Path parameters\n\n| Parameter | Type | Required | Description |\n| --- | --- | --- | --- |\n| `branchId` | Id | **Yes** | The `Branch__c` on the **left**. A well-formed id of the wrong object is a 404 |\n\n## Query parameters\n\n| Parameter | Type | Required | Default | Description |\n| --- | --- | --- | --- | --- |\n| `rightKind` | Enum | **Yes** | — | `branch` \\| `baseline` \\| `source` \\| `ebom`. Matched case-insensitively |\n| `rightId` | Id | **Yes** | — | The record the right side is. Must be the object `rightKind` implies. **Missing is a 400; present but unusable is a 404** |\n| `asOf` | ISO-8601 | No | now | The **left** side's clock. Refused for a baseline left side |\n| `rightAsOf` | ISO-8601 | No | see below | The **right** side's clock. Refused for a baseline right side; defaults to an eBOM revision's own release date |\n| `includeUnchanged` | Boolean | No | `false` | Emit a `member-unchanged` entry per matching key. **Only an explicit `true` turns it on** — `1` and `yes` fall back to false rather than 400ing |\n| `entriesLimit` | Integer | No | 200 | Caps `entries` as a plain prefix. Must be positive; `0` is a 400. **Not raised by `includeUnchanged`** |\n\n## Response fields\n\n| Field | Description |\n| --- | --- |\n| `left` / `right` | What each side WAS: its type, id, label, root item and revision, and its two clocks. Published for both sides because `member-added` means nothing until you know what the right side is |\n| `identical` | True when nothing but `member-unchanged` was emitted. A `root-version-differs` entry alone makes it false |\n| `summary.total` / `summary.byKind` | Counts of entries **emitted** — both move with `includeUnchanged` |\n| `summary.added` / `removed` / `differing` / `unchanged` | Counts of **correlation keys** — none of them move with `includeUnchanged` |\n| `summary.unchanged` | Populated **whether or not the unchanged rows were asked for**. So it does NOT always equal `byKind['member-unchanged']`, which is `0` by default |\n| `entries[]` | One per differing correlation key, ordered by breadcrumb path, then find number, then child item id, then kind |\n| `entries[].differingFields` | On `member-differs` only: which of `quantity` / `findNumber` / `childRevision` disagree. Empty (never null) elsewhere |\n| `entries[].left` / `.right` | How each side renders the member. `left` is null on `member-added`, `right` on `member-removed` |\n| `leftWarnings[]` / `rightWarnings[]` | Each side's own resolution warnings. `COMPARE_ROOTS_DIFFER` is about the pair and is reported on **`leftWarnings`** |\n| `truncated` / `entriesLimit` | Whether `entries` was capped, and at what. `summary` still reports untruncated totals |\n| `generatedAt` | Server clock, read once for the whole call so the two sides are never resolved microseconds apart |\n\n## Entry kinds\n\n| kind | Meaning |\n| --- | --- |\n| `root-version-differs` | The two sides resolve **different root revisions** — including when the roots are different items. One entry per comparison |\n| `member-added` | Present on the **right** only |\n| `member-removed` | Present on the **left** only |\n| `member-differs` | Present on both; `differingFields` names what disagrees |\n| `member-unchanged` | Present on both and identical. **Only emitted with `includeUnchanged=true`** |\n\n## Watch out for\n\n- **Read access is the gate, not write** — deliberately unlike `pull-preview`, which needs the same write grant the commit does because previewing a pull is initiating one. A comparison initiates nothing, so a read-only user may run it.\n- **There is no decision tier and no actions.** `decision`, `availableActions`, `retargeted` and `claimKind` are **absent**, not defaulted — a comparison decides nothing, so there is no default a client could misread as an answer.\n- **There is no `diffFingerprint`.** The pull carries one so a commit can fail fast on a stale preview. Nothing here is committed, so a digest would be a field nobody could act on.\n- **Exclusion tombstones are filtered from both sides before the join.** A member excluded on the left surfaces as `member-added` against a right that still supplies it — the left does not contain it and the right does.\n- **Provenance is reported, never classified.** A branch that claimed a member without changing it reads as *unchanged* against its own source; `left.provenance` is where you see the claim.\n- **`rightKind` is matched case-insensitively.** `Branch` is a 200. Send lower case — that is the published spelling and what comes back in `right.kind`.\n- **Truncation is a plain prefix and `summary` is left alone.** That is what makes `truncated: true` actionable: re-issue with a larger `entriesLimit` for a longer, stable prefix of the same comparison.\n\n## Error responses\n\n| Status | code | Cause |\n| --- | --- | --- |\n| 400 | `INVALID_REQUEST` | `rightKind` missing or unknown; `rightId` missing; `entriesLimit` not a positive integer (`entriesLimit=0` is refused, **not** silently defaulted); `rightAsOf` sent for a baseline right side |\n| 400 | `ASOF_INVALID` / `ASOF_IN_FUTURE` | Either clock could not be parsed, or names a moment that has not happened |\n| 403 | `FORBIDDEN` | No **read** on an object one of the sides needs |\n| 404 | `NOT_FOUND` | A path id or `rightId` names nothing or the wrong object, or the path carries a trailing segment |\n| 409 | `NOT_RELEASED` | `rightKind=ebom` names a revision that is not Released, or is Cancelled, Expired, or has no release date |\n| 422 | `AMBIGUOUS_CORRELATION` | Two edges on one side share a correlation key. Its message says `current side` for the **left** and `candidate side` for the **right** — the join's vocabulary, shared with pull-preview |\n| 422 | `CYCLE_DETECTED` | A cycle in the eBOM beneath either side's root. A comparison always reports a cycle under this code, never the traversal's own `EBOM_CYCLE` |\n| 500 | `INTERNAL_ERROR` | Unmodelled server failure |\n"
+										"description": "**The one to run first.** Answers *\"what have I changed relative to upstream?\"* — the branch with its deltas overlaid on the left, and what its source *supplies* on the right, with no deltas folded in.\n\n**This call is pure.** No DML anywhere behind it. Two calls with the same inputs against an unchanged org return identical output, `entryId` values included.\n\nEvery claim, exclude, add and replace the branch has made shows up here — except one worth knowing about up front: a member the branch **claimed but did not change** comes back `member-unchanged`, because provenance is reported, never classified. The same part at the same quantity in the same position is the same member however each side came to hold it. `left.provenance` is where you see the claim.\n\n## Path parameters\n\n| Parameter | Type | Required | Description |\n| --- | --- | --- | --- |\n| `branchId` | Id | **Yes** | The `Branch__c` on the **left**. A well-formed id of the wrong object is a 404 |\n\n## Query parameters\n\n| Parameter | Type | Required | Default | Description |\n| --- | --- | --- | --- | --- |\n| `rightKind` | Enum | **Yes** | — | `branch` \\| `baseline` \\| `source` \\| `ebom`. Matched case-insensitively |\n| `rightId` | Id | **Yes** | — | The record the right side is. Must be the object `rightKind` implies. **Missing is a 400; present but unusable is a 404** |\n| `asOf` | ISO-8601 | No | now | The **left** side's clock. Refused for a baseline left side |\n| `rightAsOf` | ISO-8601 | No | see below | The **right** side's clock. Refused for a baseline right side; defaults to an eBOM revision's own release date |\n| `includeUnchanged` | Boolean | No | `false` | Emit a `member-unchanged` entry per matching key. **Only an explicit `true` turns it on** — `1` and `yes` fall back to false rather than 400ing |\n| `entriesLimit` | Integer | No | 200 | Caps `entries` as a plain prefix. Must be positive; `0` is a 400. **Not raised by `includeUnchanged`** |\n\n## Response fields\n\n| Field | Description |\n| --- | --- |\n| `left` / `right` | What each side WAS: its type, id, label, root item and revision, and its two clocks. Published for both sides because `member-added` means nothing until you know what the right side is |\n| `identical` | True when nothing but `member-unchanged` was emitted. A `root-version-differs` entry alone makes it false |\n| `summary.total` / `summary.byKind` | Counts of entries **emitted** — both move with `includeUnchanged` |\n| `summary.added` / `removed` / `differing` / `unchanged` | Counts of **correlation keys** — none of them move with `includeUnchanged` |\n| `summary.unchanged` | Populated **whether or not the unchanged rows were asked for**. So it does NOT always equal `byKind['member-unchanged']`, which is `0` by default |\n| `entries[]` | One per differing correlation key, ordered by breadcrumb path, then find number, then child item id, then kind |\n| `entries[].differingFields` | On `member-differs` only: which of `quantity` / `findNumber` / `childRevision` disagree. Empty (never null) elsewhere |\n| `entries[].left` / `.right` | How each side renders the member. `left` is null on `member-added`, `right` on `member-removed` |\n| `leftWarnings[]` / `rightWarnings[]` | Each side's own resolution warnings. `COMPARE_ROOTS_DIFFER` is about the pair and is reported on **`leftWarnings`** |\n| `truncated` / `entriesLimit` | Whether `entries` was capped, and at what. `summary` still reports untruncated totals |\n| `generatedAt` | Server clock, read once for the whole call so the two sides are never resolved microseconds apart |\n\n## Entry kinds\n\n| kind | Meaning |\n| --- | --- |\n| `root-version-differs` | The two sides resolve **different root revisions** — including when the roots are different items. One entry per comparison |\n| `member-added` | Present on the **right** only |\n| `member-removed` | Present on the **left** only |\n| `member-differs` | Present on both; `differingFields` names what disagrees |\n| `member-unchanged` | Present on both and identical. **Only emitted with `includeUnchanged=true`** |\n\n## Watch out for\n\n- **Read access is the gate, not write** — deliberately unlike `pull-preview`, which needs the same write grant the commit does because previewing a pull is initiating one. A comparison initiates nothing, so a read-only user may run it.\n- **There is no decision tier and no actions.** `decision`, `availableActions`, `retargeted` and `claimKind` are **absent**, not defaulted — a comparison decides nothing, so there is no default a client could misread as an answer.\n- **There is no `diffFingerprint`.** The pull carries one so a commit can fail fast on a stale preview. Nothing here is committed, so a digest would be a field nobody could act on.\n- **Exclusion tombstones are filtered from both sides before the join.** A member excluded on the left surfaces as `member-added` against a right that still supplies it — the left does not contain it and the right does.\n- **Provenance is reported, never classified.** A branch that claimed a member without changing it reads as *unchanged* against its own source; `left.provenance` is where you see the claim.\n- **`rightKind` is matched case-insensitively.** `Branch` is a 200. Send lower case — that is the published spelling and what comes back in `right.kind`.\n- **Truncation is a plain prefix and `summary` is left alone.** That is what makes `truncated: true` actionable: re-issue with a larger `entriesLimit` for a longer, stable prefix of the same comparison.\n\n## Error responses\n\n| Status | code | Cause |\n| --- | --- | --- |\n| 400 | `INVALID_REQUEST` | `rightKind` missing or unknown; `rightId` missing; `entriesLimit` not a positive integer (`entriesLimit=0` is refused, **not** silently defaulted); `rightAsOf` sent for a baseline right side |\n| 400 | `ASOF_INVALID` / `ASOF_IN_FUTURE` | Either clock could not be parsed, or names a moment that has not happened |\n| 403 | `FORBIDDEN` | No **read** on an object one of the sides needs |\n| 404 | `NOT_FOUND` | A path id or `rightId` names nothing or the wrong object, or the path carries a trailing segment |\n| 409 | `NOT_RELEASED` | `rightKind=ebom` names a revision that is not Released, or is Cancelled, Expired, or has no release date |\n| 422 | `AMBIGUOUS_CORRELATION` | The correlation join cannot tell which line corresponds to which — the triggers are listed under `ComparisonUnprocessable` in the OpenAPI spec. Its detail says `left side`, `right side`, or `right and left sides` — the comparison's own vocabulary, not pull-preview's `current` / `candidate` |\n| 422 | `CYCLE_DETECTED` | A cycle in the eBOM beneath either side's root. A comparison always reports a cycle under this code, never the traversal's own `EBOM_CYCLE` |\n| 500 | `INTERNAL_ERROR` | Unmodelled server failure |\n"
 									},
 									"response": []
 								},
@@ -10352,7 +12568,7 @@
 												}
 											]
 										},
-										"description": "MBOM against MBOM: two branches resolved independently and joined on the correlation key. Neither side is privileged — that is the whole difference from `pull-preview`, whose two sides are deliberately asymmetric.\n\n**Each side keeps its own pair of clocks and never borrows the other's.** `asOf` governs the left, `rightAsOf` the right, and both resolved instants come back on `left` / `right`. That is why there are two parameters rather than one.\n\nThe two branches need not share a root. If they do not, you get a `COMPARE_ROOTS_DIFFER` warning on **`leftWarnings`** and a comparison in which every member is an addition or a removal for that reason alone — the honest answer for a read, where refusing would not be. You also get a `root-version-differs` entry, which fires whenever the two resolved root **revisions** differ, different root *items* included: that is what stops `identical` reporting two unrelated assemblies as the same configuration.\n\n## Path parameters\n\n| Parameter | Type | Required | Description |\n| --- | --- | --- | --- |\n| `branchId` | Id | **Yes** | The `Branch__c` on the **left** |\n\n## Query parameters\n\n| Parameter | Type | Required | Default | Description |\n| --- | --- | --- | --- | --- |\n| `rightKind` | Enum | **Yes** | — | `branch` \\| `baseline` \\| `source` \\| `ebom`. Matched case-insensitively |\n| `rightId` | Id | **Yes** | — | The record the right side is. Must be the object `rightKind` implies. **Missing is a 400; present but unusable is a 404** |\n| `asOf` | ISO-8601 | No | now | The **left** side's clock. Refused for a baseline left side |\n| `rightAsOf` | ISO-8601 | No | see below | The **right** side's clock. Refused for a baseline right side; defaults to an eBOM revision's own release date |\n| `includeUnchanged` | Boolean | No | `false` | Emit a `member-unchanged` entry per matching key. **Only an explicit `true` turns it on** — `1` and `yes` fall back to false rather than 400ing |\n| `entriesLimit` | Integer | No | 200 | Caps `entries` as a plain prefix. Must be positive; `0` is a 400. **Not raised by `includeUnchanged`** |\n\n## Response fields\n\n| Field | Description |\n| --- | --- |\n| `left` / `right` | What each side WAS: its type, id, label, root item and revision, and its two clocks. Published for both sides because `member-added` means nothing until you know what the right side is |\n| `identical` | True when nothing but `member-unchanged` was emitted. A `root-version-differs` entry alone makes it false |\n| `summary.total` / `summary.byKind` | Counts of entries **emitted** — both move with `includeUnchanged` |\n| `summary.added` / `removed` / `differing` / `unchanged` | Counts of **correlation keys** — none of them move with `includeUnchanged` |\n| `summary.unchanged` | Populated **whether or not the unchanged rows were asked for**. So it does NOT always equal `byKind['member-unchanged']`, which is `0` by default |\n| `entries[]` | One per differing correlation key, ordered by breadcrumb path, then find number, then child item id, then kind |\n| `entries[].differingFields` | On `member-differs` only: which of `quantity` / `findNumber` / `childRevision` disagree. Empty (never null) elsewhere |\n| `entries[].left` / `.right` | How each side renders the member. `left` is null on `member-added`, `right` on `member-removed` |\n| `leftWarnings[]` / `rightWarnings[]` | Each side's own resolution warnings. `COMPARE_ROOTS_DIFFER` is about the pair and is reported on **`leftWarnings`** |\n| `truncated` / `entriesLimit` | Whether `entries` was capped, and at what. `summary` still reports untruncated totals |\n| `generatedAt` | Server clock, read once for the whole call so the two sides are never resolved microseconds apart |\n\n## Entry kinds\n\n| kind | Meaning |\n| --- | --- |\n| `root-version-differs` | The two sides resolve **different root revisions** — including when the roots are different items. One entry per comparison |\n| `member-added` | Present on the **right** only |\n| `member-removed` | Present on the **left** only |\n| `member-differs` | Present on both; `differingFields` names what disagrees |\n| `member-unchanged` | Present on both and identical. **Only emitted with `includeUnchanged=true`** |\n\n## Watch out for\n\n- **Read access is the gate, not write** — deliberately unlike `pull-preview`, which needs the same write grant the commit does because previewing a pull is initiating one. A comparison initiates nothing, so a read-only user may run it.\n- **There is no decision tier and no actions.** `decision`, `availableActions`, `retargeted` and `claimKind` are **absent**, not defaulted — a comparison decides nothing, so there is no default a client could misread as an answer.\n- **There is no `diffFingerprint`.** The pull carries one so a commit can fail fast on a stale preview. Nothing here is committed, so a digest would be a field nobody could act on.\n- **Exclusion tombstones are filtered from both sides before the join.** A member excluded on the left surfaces as `member-added` against a right that still supplies it — the left does not contain it and the right does.\n- **Provenance is reported, never classified.** A branch that claimed a member without changing it reads as *unchanged* against its own source; `left.provenance` is where you see the claim.\n- **`rightKind` is matched case-insensitively.** `Branch` is a 200. Send lower case — that is the published spelling and what comes back in `right.kind`.\n- **Truncation is a plain prefix and `summary` is left alone.** That is what makes `truncated: true` actionable: re-issue with a larger `entriesLimit` for a longer, stable prefix of the same comparison.\n\n## Error responses\n\n| Status | code | Cause |\n| --- | --- | --- |\n| 400 | `INVALID_REQUEST` | `rightKind` missing or unknown; `rightId` missing; `entriesLimit` not a positive integer (`entriesLimit=0` is refused, **not** silently defaulted); `rightAsOf` sent for a baseline right side |\n| 400 | `ASOF_INVALID` / `ASOF_IN_FUTURE` | Either clock could not be parsed, or names a moment that has not happened |\n| 403 | `FORBIDDEN` | No **read** on an object one of the sides needs |\n| 404 | `NOT_FOUND` | A path id or `rightId` names nothing or the wrong object, or the path carries a trailing segment |\n| 409 | `NOT_RELEASED` | `rightKind=ebom` names a revision that is not Released, or is Cancelled, Expired, or has no release date |\n| 422 | `AMBIGUOUS_CORRELATION` | Two edges on one side share a correlation key. Its message says `current side` for the **left** and `candidate side` for the **right** — the join's vocabulary, shared with pull-preview |\n| 422 | `CYCLE_DETECTED` | A cycle in the eBOM beneath either side's root. A comparison always reports a cycle under this code, never the traversal's own `EBOM_CYCLE` |\n| 500 | `INTERNAL_ERROR` | Unmodelled server failure |\n"
+										"description": "MBOM against MBOM: two branches resolved independently and joined on the correlation key. Neither side is privileged — that is the whole difference from `pull-preview`, whose two sides are deliberately asymmetric.\n\n**Each side keeps its own pair of clocks and never borrows the other's.** `asOf` governs the left, `rightAsOf` the right, and both resolved instants come back on `left` / `right`. That is why there are two parameters rather than one.\n\nThe two branches need not share a root. If they do not, you get a `COMPARE_ROOTS_DIFFER` warning on **`leftWarnings`** and a comparison in which every member is an addition or a removal for that reason alone — the honest answer for a read, where refusing would not be. You also get a `root-version-differs` entry, which fires whenever the two resolved root **revisions** differ, different root *items* included: that is what stops `identical` reporting two unrelated assemblies as the same configuration.\n\n## Path parameters\n\n| Parameter | Type | Required | Description |\n| --- | --- | --- | --- |\n| `branchId` | Id | **Yes** | The `Branch__c` on the **left** |\n\n## Query parameters\n\n| Parameter | Type | Required | Default | Description |\n| --- | --- | --- | --- | --- |\n| `rightKind` | Enum | **Yes** | — | `branch` \\| `baseline` \\| `source` \\| `ebom`. Matched case-insensitively |\n| `rightId` | Id | **Yes** | — | The record the right side is. Must be the object `rightKind` implies. **Missing is a 400; present but unusable is a 404** |\n| `asOf` | ISO-8601 | No | now | The **left** side's clock. Refused for a baseline left side |\n| `rightAsOf` | ISO-8601 | No | see below | The **right** side's clock. Refused for a baseline right side; defaults to an eBOM revision's own release date |\n| `includeUnchanged` | Boolean | No | `false` | Emit a `member-unchanged` entry per matching key. **Only an explicit `true` turns it on** — `1` and `yes` fall back to false rather than 400ing |\n| `entriesLimit` | Integer | No | 200 | Caps `entries` as a plain prefix. Must be positive; `0` is a 400. **Not raised by `includeUnchanged`** |\n\n## Response fields\n\n| Field | Description |\n| --- | --- |\n| `left` / `right` | What each side WAS: its type, id, label, root item and revision, and its two clocks. Published for both sides because `member-added` means nothing until you know what the right side is |\n| `identical` | True when nothing but `member-unchanged` was emitted. A `root-version-differs` entry alone makes it false |\n| `summary.total` / `summary.byKind` | Counts of entries **emitted** — both move with `includeUnchanged` |\n| `summary.added` / `removed` / `differing` / `unchanged` | Counts of **correlation keys** — none of them move with `includeUnchanged` |\n| `summary.unchanged` | Populated **whether or not the unchanged rows were asked for**. So it does NOT always equal `byKind['member-unchanged']`, which is `0` by default |\n| `entries[]` | One per differing correlation key, ordered by breadcrumb path, then find number, then child item id, then kind |\n| `entries[].differingFields` | On `member-differs` only: which of `quantity` / `findNumber` / `childRevision` disagree. Empty (never null) elsewhere |\n| `entries[].left` / `.right` | How each side renders the member. `left` is null on `member-added`, `right` on `member-removed` |\n| `leftWarnings[]` / `rightWarnings[]` | Each side's own resolution warnings. `COMPARE_ROOTS_DIFFER` is about the pair and is reported on **`leftWarnings`** |\n| `truncated` / `entriesLimit` | Whether `entries` was capped, and at what. `summary` still reports untruncated totals |\n| `generatedAt` | Server clock, read once for the whole call so the two sides are never resolved microseconds apart |\n\n## Entry kinds\n\n| kind | Meaning |\n| --- | --- |\n| `root-version-differs` | The two sides resolve **different root revisions** — including when the roots are different items. One entry per comparison |\n| `member-added` | Present on the **right** only |\n| `member-removed` | Present on the **left** only |\n| `member-differs` | Present on both; `differingFields` names what disagrees |\n| `member-unchanged` | Present on both and identical. **Only emitted with `includeUnchanged=true`** |\n\n## Watch out for\n\n- **Read access is the gate, not write** — deliberately unlike `pull-preview`, which needs the same write grant the commit does because previewing a pull is initiating one. A comparison initiates nothing, so a read-only user may run it.\n- **There is no decision tier and no actions.** `decision`, `availableActions`, `retargeted` and `claimKind` are **absent**, not defaulted — a comparison decides nothing, so there is no default a client could misread as an answer.\n- **There is no `diffFingerprint`.** The pull carries one so a commit can fail fast on a stale preview. Nothing here is committed, so a digest would be a field nobody could act on.\n- **Exclusion tombstones are filtered from both sides before the join.** A member excluded on the left surfaces as `member-added` against a right that still supplies it — the left does not contain it and the right does.\n- **Provenance is reported, never classified.** A branch that claimed a member without changing it reads as *unchanged* against its own source; `left.provenance` is where you see the claim.\n- **`rightKind` is matched case-insensitively.** `Branch` is a 200. Send lower case — that is the published spelling and what comes back in `right.kind`.\n- **Truncation is a plain prefix and `summary` is left alone.** That is what makes `truncated: true` actionable: re-issue with a larger `entriesLimit` for a longer, stable prefix of the same comparison.\n\n## Error responses\n\n| Status | code | Cause |\n| --- | --- | --- |\n| 400 | `INVALID_REQUEST` | `rightKind` missing or unknown; `rightId` missing; `entriesLimit` not a positive integer (`entriesLimit=0` is refused, **not** silently defaulted); `rightAsOf` sent for a baseline right side |\n| 400 | `ASOF_INVALID` / `ASOF_IN_FUTURE` | Either clock could not be parsed, or names a moment that has not happened |\n| 403 | `FORBIDDEN` | No **read** on an object one of the sides needs |\n| 404 | `NOT_FOUND` | A path id or `rightId` names nothing or the wrong object, or the path carries a trailing segment |\n| 409 | `NOT_RELEASED` | `rightKind=ebom` names a revision that is not Released, or is Cancelled, Expired, or has no release date |\n| 422 | `AMBIGUOUS_CORRELATION` | The correlation join cannot tell which line corresponds to which — the triggers are listed under `ComparisonUnprocessable` in the OpenAPI spec. Its detail says `left side`, `right side`, or `right and left sides` — the comparison's own vocabulary, not pull-preview's `current` / `candidate` |\n| 422 | `CYCLE_DETECTED` | A cycle in the eBOM beneath either side's root. A comparison always reports a cycle under this code, never the traversal's own `EBOM_CYCLE` |\n| 500 | `INTERNAL_ERROR` | Unmodelled server failure |\n"
 									},
 									"response": []
 								},
@@ -10441,7 +12657,7 @@
 												}
 											]
 										},
-										"description": "*\"What has this branch done since we froze it?\"* — the live branch on the left, a baseline of it on the right.\n\n## The baseline side resolves at its own recorded timepoint\n\nA baseline stores a timepoint, not rows, and reading it **replays** the branch at that timepoint — the same resolution `GET /mbom/baselines/:baselineId/tree` performs, pinned by the same two bounds, so a comparison sees exactly the rows that endpoint renders.\n\nBecause of that, **`rightAsOf` is refused, not ignored** (`400 INVALID_REQUEST`). Ignoring it would hand you the baseline's own answer while you believed you had asked a temporal question. `asOf` is still accepted here, because the *left* side is a live branch.\n\n> To put the baseline on the **left** instead — comparing one build against another, or > against a newer eBOM — use `GET /v4/mbom/baselines/:baselineId/comparison`, which is the > same endpoint with the sides swapped. There `asOf` is the parameter that gets refused.\n\n## `summary.unchanged` is populated even though you asked for no unchanged rows\n\nThat is the point of it: the default comparison emits no entry for an identical member, and you still need to know how much of the configuration matched without paying for the rows. So `summary.unchanged` and `summary.byKind['member-unchanged']` are **not** the same number here — the second is `0` because nothing was emitted.\n\n## Path parameters\n\n| Parameter | Type | Required | Description |\n| --- | --- | --- | --- |\n| `branchId` | Id | **Yes** | The `Branch__c` on the **left** |\n\n## Query parameters\n\n| Parameter | Type | Required | Default | Description |\n| --- | --- | --- | --- | --- |\n| `rightKind` | Enum | **Yes** | — | `branch` \\| `baseline` \\| `source` \\| `ebom`. Matched case-insensitively |\n| `rightId` | Id | **Yes** | — | The record the right side is. Must be the object `rightKind` implies. **Missing is a 400; present but unusable is a 404** |\n| `asOf` | ISO-8601 | No | now | The **left** side's clock. Refused for a baseline left side |\n| `rightAsOf` | ISO-8601 | No | see below | The **right** side's clock. Refused for a baseline right side; defaults to an eBOM revision's own release date |\n| `includeUnchanged` | Boolean | No | `false` | Emit a `member-unchanged` entry per matching key. **Only an explicit `true` turns it on** — `1` and `yes` fall back to false rather than 400ing |\n| `entriesLimit` | Integer | No | 200 | Caps `entries` as a plain prefix. Must be positive; `0` is a 400. **Not raised by `includeUnchanged`** |\n\n## Response fields\n\n| Field | Description |\n| --- | --- |\n| `left` / `right` | What each side WAS: its type, id, label, root item and revision, and its two clocks. Published for both sides because `member-added` means nothing until you know what the right side is |\n| `identical` | True when nothing but `member-unchanged` was emitted. A `root-version-differs` entry alone makes it false |\n| `summary.total` / `summary.byKind` | Counts of entries **emitted** — both move with `includeUnchanged` |\n| `summary.added` / `removed` / `differing` / `unchanged` | Counts of **correlation keys** — none of them move with `includeUnchanged` |\n| `summary.unchanged` | Populated **whether or not the unchanged rows were asked for**. So it does NOT always equal `byKind['member-unchanged']`, which is `0` by default |\n| `entries[]` | One per differing correlation key, ordered by breadcrumb path, then find number, then child item id, then kind |\n| `entries[].differingFields` | On `member-differs` only: which of `quantity` / `findNumber` / `childRevision` disagree. Empty (never null) elsewhere |\n| `entries[].left` / `.right` | How each side renders the member. `left` is null on `member-added`, `right` on `member-removed` |\n| `leftWarnings[]` / `rightWarnings[]` | Each side's own resolution warnings. `COMPARE_ROOTS_DIFFER` is about the pair and is reported on **`leftWarnings`** |\n| `truncated` / `entriesLimit` | Whether `entries` was capped, and at what. `summary` still reports untruncated totals |\n| `generatedAt` | Server clock, read once for the whole call so the two sides are never resolved microseconds apart |\n\n## Entry kinds\n\n| kind | Meaning |\n| --- | --- |\n| `root-version-differs` | The two sides resolve **different root revisions** — including when the roots are different items. One entry per comparison |\n| `member-added` | Present on the **right** only |\n| `member-removed` | Present on the **left** only |\n| `member-differs` | Present on both; `differingFields` names what disagrees |\n| `member-unchanged` | Present on both and identical. **Only emitted with `includeUnchanged=true`** |\n\n## Watch out for\n\n- **Read access is the gate, not write** — deliberately unlike `pull-preview`, which needs the same write grant the commit does because previewing a pull is initiating one. A comparison initiates nothing, so a read-only user may run it.\n- **There is no decision tier and no actions.** `decision`, `availableActions`, `retargeted` and `claimKind` are **absent**, not defaulted — a comparison decides nothing, so there is no default a client could misread as an answer.\n- **There is no `diffFingerprint`.** The pull carries one so a commit can fail fast on a stale preview. Nothing here is committed, so a digest would be a field nobody could act on.\n- **Exclusion tombstones are filtered from both sides before the join.** A member excluded on the left surfaces as `member-added` against a right that still supplies it — the left does not contain it and the right does.\n- **Provenance is reported, never classified.** A branch that claimed a member without changing it reads as *unchanged* against its own source; `left.provenance` is where you see the claim.\n- **`rightKind` is matched case-insensitively.** `Branch` is a 200. Send lower case — that is the published spelling and what comes back in `right.kind`.\n- **Truncation is a plain prefix and `summary` is left alone.** That is what makes `truncated: true` actionable: re-issue with a larger `entriesLimit` for a longer, stable prefix of the same comparison.\n\n## Error responses\n\n| Status | code | Cause |\n| --- | --- | --- |\n| 400 | `INVALID_REQUEST` | `rightKind` missing or unknown; `rightId` missing; `entriesLimit` not a positive integer (`entriesLimit=0` is refused, **not** silently defaulted); `rightAsOf` sent for a baseline right side |\n| 400 | `ASOF_INVALID` / `ASOF_IN_FUTURE` | Either clock could not be parsed, or names a moment that has not happened |\n| 403 | `FORBIDDEN` | No **read** on an object one of the sides needs |\n| 404 | `NOT_FOUND` | A path id or `rightId` names nothing or the wrong object, or the path carries a trailing segment |\n| 409 | `NOT_RELEASED` | `rightKind=ebom` names a revision that is not Released, or is Cancelled, Expired, or has no release date |\n| 422 | `AMBIGUOUS_CORRELATION` | Two edges on one side share a correlation key. Its message says `current side` for the **left** and `candidate side` for the **right** — the join's vocabulary, shared with pull-preview |\n| 422 | `CYCLE_DETECTED` | A cycle in the eBOM beneath either side's root. A comparison always reports a cycle under this code, never the traversal's own `EBOM_CYCLE` |\n| 500 | `INTERNAL_ERROR` | Unmodelled server failure |\n"
+										"description": "*\"What has this branch done since we froze it?\"* — the live branch on the left, a baseline of it on the right.\n\n## The baseline side resolves at its own recorded timepoint\n\nA baseline stores a timepoint, not rows, and reading it **replays** the branch at that timepoint — the same resolution `GET /mbom/baselines/:baselineId/tree` performs, pinned by the same two bounds, so a comparison sees exactly the rows that endpoint renders.\n\nBecause of that, **`rightAsOf` is refused, not ignored** (`400 INVALID_REQUEST`). Ignoring it would hand you the baseline's own answer while you believed you had asked a temporal question. `asOf` is still accepted here, because the *left* side is a live branch.\n\n> To put the baseline on the **left** instead — comparing one build against another, or > against a newer eBOM — use `GET /v4/mbom/baselines/:baselineId/comparison`, which is the > same endpoint with the sides swapped. There `asOf` is the parameter that gets refused.\n\n## `summary.unchanged` is populated even though you asked for no unchanged rows\n\nThat is the point of it: the default comparison emits no entry for an identical member, and you still need to know how much of the configuration matched without paying for the rows. So `summary.unchanged` and `summary.byKind['member-unchanged']` are **not** the same number here — the second is `0` because nothing was emitted.\n\n## Path parameters\n\n| Parameter | Type | Required | Description |\n| --- | --- | --- | --- |\n| `branchId` | Id | **Yes** | The `Branch__c` on the **left** |\n\n## Query parameters\n\n| Parameter | Type | Required | Default | Description |\n| --- | --- | --- | --- | --- |\n| `rightKind` | Enum | **Yes** | — | `branch` \\| `baseline` \\| `source` \\| `ebom`. Matched case-insensitively |\n| `rightId` | Id | **Yes** | — | The record the right side is. Must be the object `rightKind` implies. **Missing is a 400; present but unusable is a 404** |\n| `asOf` | ISO-8601 | No | now | The **left** side's clock. Refused for a baseline left side |\n| `rightAsOf` | ISO-8601 | No | see below | The **right** side's clock. Refused for a baseline right side; defaults to an eBOM revision's own release date |\n| `includeUnchanged` | Boolean | No | `false` | Emit a `member-unchanged` entry per matching key. **Only an explicit `true` turns it on** — `1` and `yes` fall back to false rather than 400ing |\n| `entriesLimit` | Integer | No | 200 | Caps `entries` as a plain prefix. Must be positive; `0` is a 400. **Not raised by `includeUnchanged`** |\n\n## Response fields\n\n| Field | Description |\n| --- | --- |\n| `left` / `right` | What each side WAS: its type, id, label, root item and revision, and its two clocks. Published for both sides because `member-added` means nothing until you know what the right side is |\n| `identical` | True when nothing but `member-unchanged` was emitted. A `root-version-differs` entry alone makes it false |\n| `summary.total` / `summary.byKind` | Counts of entries **emitted** — both move with `includeUnchanged` |\n| `summary.added` / `removed` / `differing` / `unchanged` | Counts of **correlation keys** — none of them move with `includeUnchanged` |\n| `summary.unchanged` | Populated **whether or not the unchanged rows were asked for**. So it does NOT always equal `byKind['member-unchanged']`, which is `0` by default |\n| `entries[]` | One per differing correlation key, ordered by breadcrumb path, then find number, then child item id, then kind |\n| `entries[].differingFields` | On `member-differs` only: which of `quantity` / `findNumber` / `childRevision` disagree. Empty (never null) elsewhere |\n| `entries[].left` / `.right` | How each side renders the member. `left` is null on `member-added`, `right` on `member-removed` |\n| `leftWarnings[]` / `rightWarnings[]` | Each side's own resolution warnings. `COMPARE_ROOTS_DIFFER` is about the pair and is reported on **`leftWarnings`** |\n| `truncated` / `entriesLimit` | Whether `entries` was capped, and at what. `summary` still reports untruncated totals |\n| `generatedAt` | Server clock, read once for the whole call so the two sides are never resolved microseconds apart |\n\n## Entry kinds\n\n| kind | Meaning |\n| --- | --- |\n| `root-version-differs` | The two sides resolve **different root revisions** — including when the roots are different items. One entry per comparison |\n| `member-added` | Present on the **right** only |\n| `member-removed` | Present on the **left** only |\n| `member-differs` | Present on both; `differingFields` names what disagrees |\n| `member-unchanged` | Present on both and identical. **Only emitted with `includeUnchanged=true`** |\n\n## Watch out for\n\n- **Read access is the gate, not write** — deliberately unlike `pull-preview`, which needs the same write grant the commit does because previewing a pull is initiating one. A comparison initiates nothing, so a read-only user may run it.\n- **There is no decision tier and no actions.** `decision`, `availableActions`, `retargeted` and `claimKind` are **absent**, not defaulted — a comparison decides nothing, so there is no default a client could misread as an answer.\n- **There is no `diffFingerprint`.** The pull carries one so a commit can fail fast on a stale preview. Nothing here is committed, so a digest would be a field nobody could act on.\n- **Exclusion tombstones are filtered from both sides before the join.** A member excluded on the left surfaces as `member-added` against a right that still supplies it — the left does not contain it and the right does.\n- **Provenance is reported, never classified.** A branch that claimed a member without changing it reads as *unchanged* against its own source; `left.provenance` is where you see the claim.\n- **`rightKind` is matched case-insensitively.** `Branch` is a 200. Send lower case — that is the published spelling and what comes back in `right.kind`.\n- **Truncation is a plain prefix and `summary` is left alone.** That is what makes `truncated: true` actionable: re-issue with a larger `entriesLimit` for a longer, stable prefix of the same comparison.\n\n## Error responses\n\n| Status | code | Cause |\n| --- | --- | --- |\n| 400 | `INVALID_REQUEST` | `rightKind` missing or unknown; `rightId` missing; `entriesLimit` not a positive integer (`entriesLimit=0` is refused, **not** silently defaulted); `rightAsOf` sent for a baseline right side |\n| 400 | `ASOF_INVALID` / `ASOF_IN_FUTURE` | Either clock could not be parsed, or names a moment that has not happened |\n| 403 | `FORBIDDEN` | No **read** on an object one of the sides needs |\n| 404 | `NOT_FOUND` | A path id or `rightId` names nothing or the wrong object, or the path carries a trailing segment |\n| 409 | `NOT_RELEASED` | `rightKind=ebom` names a revision that is not Released, or is Cancelled, Expired, or has no release date |\n| 422 | `AMBIGUOUS_CORRELATION` | The correlation join cannot tell which line corresponds to which — the triggers are listed under `ComparisonUnprocessable` in the OpenAPI spec. Its detail says `left side`, `right side`, or `right and left sides` — the comparison's own vocabulary, not pull-preview's `current` / `candidate` |\n| 422 | `CYCLE_DETECTED` | A cycle in the eBOM beneath either side's root. A comparison always reports a cycle under this code, never the traversal's own `EBOM_CYCLE` |\n| 500 | `INTERNAL_ERROR` | Unmodelled server failure |\n"
 									},
 									"response": []
 								},
@@ -10537,7 +12753,7 @@
 												}
 											]
 										},
-										"description": "eBOM against MBOM: the branch on the left, a **raw walk** beneath one released eBOM revision on the right, with no branch in the picture at all.\n\nPoint `rightId` at the revision the branch already resolves against and you are asking \"how far has my MBOM drifted from engineering's?\". Point it at a **newer** released revision and you are asking what accepting that revision would mean — a read-only preview of the same question `pull-preview` answers, but symmetric, undecided, and available to a read-only user.\n\n> It is **not** a substitute for `pull-preview`. A pull classifies (`claim-orphaned` > blocks a commit; `claim-retained` says the branch wins) and produces a `diffFingerprint` > you commit against. A comparison classifies nothing and commits nothing.\n\n## This request sends `includeUnchanged=true`\n\nWhich turns the response into the **complete merged BOM** — one entry per correlation key across both sides, the shape a side-by-side tree UI needs from a single call. It costs no extra query.\n\nTwo things move when you set it, and four do not:\n\n| | With `includeUnchanged=false` | With `includeUnchanged=true` |\n| --- | --- | --- |\n| `summary.total` | differing entries only | **+ one per matching key** |\n| `summary.byKind['member-unchanged']` | `0` | **the unchanged count** |\n| `summary.added` / `removed` / `differing` / `unchanged` | unchanged | unchanged |\n\nIt does **not** raise `entriesLimit`, deliberately: a 500-edge BOM truncates at 200 and says so, rather than silently returning a response an order of magnitude larger than you asked for. Raising it is one parameter.\n\n## Path parameters\n\n| Parameter | Type | Required | Description |\n| --- | --- | --- | --- |\n| `branchId` | Id | **Yes** | The `Branch__c` on the **left** |\n\n## Query parameters\n\n| Parameter | Type | Required | Default | Description |\n| --- | --- | --- | --- | --- |\n| `rightKind` | Enum | **Yes** | — | `branch` \\| `baseline` \\| `source` \\| `ebom`. Matched case-insensitively |\n| `rightId` | Id | **Yes** | — | The record the right side is. Must be the object `rightKind` implies. **Missing is a 400; present but unusable is a 404** |\n| `asOf` | ISO-8601 | No | now | The **left** side's clock. Refused for a baseline left side |\n| `rightAsOf` | ISO-8601 | No | see below | The **right** side's clock. Refused for a baseline right side; defaults to an eBOM revision's own release date |\n| `includeUnchanged` | Boolean | No | `false` | Emit a `member-unchanged` entry per matching key. **Only an explicit `true` turns it on** — `1` and `yes` fall back to false rather than 400ing |\n| `entriesLimit` | Integer | No | 200 | Caps `entries` as a plain prefix. Must be positive; `0` is a 400. **Not raised by `includeUnchanged`** |\n\n## Response fields\n\n| Field | Description |\n| --- | --- |\n| `left` / `right` | What each side WAS: its type, id, label, root item and revision, and its two clocks. Published for both sides because `member-added` means nothing until you know what the right side is |\n| `identical` | True when nothing but `member-unchanged` was emitted. A `root-version-differs` entry alone makes it false |\n| `summary.total` / `summary.byKind` | Counts of entries **emitted** — both move with `includeUnchanged` |\n| `summary.added` / `removed` / `differing` / `unchanged` | Counts of **correlation keys** — none of them move with `includeUnchanged` |\n| `summary.unchanged` | Populated **whether or not the unchanged rows were asked for**. So it does NOT always equal `byKind['member-unchanged']`, which is `0` by default |\n| `entries[]` | One per differing correlation key, ordered by breadcrumb path, then find number, then child item id, then kind |\n| `entries[].differingFields` | On `member-differs` only: which of `quantity` / `findNumber` / `childRevision` disagree. Empty (never null) elsewhere |\n| `entries[].left` / `.right` | How each side renders the member. `left` is null on `member-added`, `right` on `member-removed` |\n| `leftWarnings[]` / `rightWarnings[]` | Each side's own resolution warnings. `COMPARE_ROOTS_DIFFER` is about the pair and is reported on **`leftWarnings`** |\n| `truncated` / `entriesLimit` | Whether `entries` was capped, and at what. `summary` still reports untruncated totals |\n| `generatedAt` | Server clock, read once for the whole call so the two sides are never resolved microseconds apart |\n\n## Entry kinds\n\n| kind | Meaning |\n| --- | --- |\n| `root-version-differs` | The two sides resolve **different root revisions** — including when the roots are different items. One entry per comparison |\n| `member-added` | Present on the **right** only |\n| `member-removed` | Present on the **left** only |\n| `member-differs` | Present on both; `differingFields` names what disagrees |\n| `member-unchanged` | Present on both and identical. **Only emitted with `includeUnchanged=true`** |\n\n## Watch out for\n\n- **Read access is the gate, not write** — deliberately unlike `pull-preview`, which needs the same write grant the commit does because previewing a pull is initiating one. A comparison initiates nothing, so a read-only user may run it.\n- **There is no decision tier and no actions.** `decision`, `availableActions`, `retargeted` and `claimKind` are **absent**, not defaulted — a comparison decides nothing, so there is no default a client could misread as an answer.\n- **There is no `diffFingerprint`.** The pull carries one so a commit can fail fast on a stale preview. Nothing here is committed, so a digest would be a field nobody could act on.\n- **Exclusion tombstones are filtered from both sides before the join.** A member excluded on the left surfaces as `member-added` against a right that still supplies it — the left does not contain it and the right does.\n- **Provenance is reported, never classified.** A branch that claimed a member without changing it reads as *unchanged* against its own source; `left.provenance` is where you see the claim.\n- **`rightKind` is matched case-insensitively.** `Branch` is a 200. Send lower case — that is the published spelling and what comes back in `right.kind`.\n- **Truncation is a plain prefix and `summary` is left alone.** That is what makes `truncated: true` actionable: re-issue with a larger `entriesLimit` for a longer, stable prefix of the same comparison.\n\n## Error responses\n\n| Status | code | Cause |\n| --- | --- | --- |\n| 400 | `INVALID_REQUEST` | `rightKind` missing or unknown; `rightId` missing; `entriesLimit` not a positive integer (`entriesLimit=0` is refused, **not** silently defaulted); `rightAsOf` sent for a baseline right side |\n| 400 | `ASOF_INVALID` / `ASOF_IN_FUTURE` | Either clock could not be parsed, or names a moment that has not happened |\n| 403 | `FORBIDDEN` | No **read** on an object one of the sides needs |\n| 404 | `NOT_FOUND` | A path id or `rightId` names nothing or the wrong object, or the path carries a trailing segment |\n| 409 | `NOT_RELEASED` | `rightKind=ebom` names a revision that is not Released, or is Cancelled, Expired, or has no release date |\n| 422 | `AMBIGUOUS_CORRELATION` | Two edges on one side share a correlation key. Its message says `current side` for the **left** and `candidate side` for the **right** — the join's vocabulary, shared with pull-preview |\n| 422 | `CYCLE_DETECTED` | A cycle in the eBOM beneath either side's root. A comparison always reports a cycle under this code, never the traversal's own `EBOM_CYCLE` |\n| 500 | `INTERNAL_ERROR` | Unmodelled server failure |\n"
+										"description": "eBOM against MBOM: the branch on the left, a **raw walk** beneath one released eBOM revision on the right, with no branch in the picture at all.\n\nPoint `rightId` at the revision the branch already resolves against and you are asking \"how far has my MBOM drifted from engineering's?\". Point it at a **newer** released revision and you are asking what accepting that revision would mean — a read-only preview of the same question `pull-preview` answers, but symmetric, undecided, and available to a read-only user.\n\n> It is **not** a substitute for `pull-preview`. A pull classifies (`claim-orphaned` > blocks a commit; `claim-retained` says the branch wins) and produces a `diffFingerprint` > you commit against. A comparison classifies nothing and commits nothing.\n\n## This request sends `includeUnchanged=true`\n\nWhich turns the response into the **complete merged BOM** — one entry per correlation key across both sides, the shape a side-by-side tree UI needs from a single call. It costs no extra query.\n\nTwo things move when you set it, and four do not:\n\n| | With `includeUnchanged=false` | With `includeUnchanged=true` |\n| --- | --- | --- |\n| `summary.total` | differing entries only | **+ one per matching key** |\n| `summary.byKind['member-unchanged']` | `0` | **the unchanged count** |\n| `summary.added` / `removed` / `differing` / `unchanged` | unchanged | unchanged |\n\nIt does **not** raise `entriesLimit`, deliberately: a 500-edge BOM truncates at 200 and says so, rather than silently returning a response an order of magnitude larger than you asked for. Raising it is one parameter.\n\n## Path parameters\n\n| Parameter | Type | Required | Description |\n| --- | --- | --- | --- |\n| `branchId` | Id | **Yes** | The `Branch__c` on the **left** |\n\n## Query parameters\n\n| Parameter | Type | Required | Default | Description |\n| --- | --- | --- | --- | --- |\n| `rightKind` | Enum | **Yes** | — | `branch` \\| `baseline` \\| `source` \\| `ebom`. Matched case-insensitively |\n| `rightId` | Id | **Yes** | — | The record the right side is. Must be the object `rightKind` implies. **Missing is a 400; present but unusable is a 404** |\n| `asOf` | ISO-8601 | No | now | The **left** side's clock. Refused for a baseline left side |\n| `rightAsOf` | ISO-8601 | No | see below | The **right** side's clock. Refused for a baseline right side; defaults to an eBOM revision's own release date |\n| `includeUnchanged` | Boolean | No | `false` | Emit a `member-unchanged` entry per matching key. **Only an explicit `true` turns it on** — `1` and `yes` fall back to false rather than 400ing |\n| `entriesLimit` | Integer | No | 200 | Caps `entries` as a plain prefix. Must be positive; `0` is a 400. **Not raised by `includeUnchanged`** |\n\n## Response fields\n\n| Field | Description |\n| --- | --- |\n| `left` / `right` | What each side WAS: its type, id, label, root item and revision, and its two clocks. Published for both sides because `member-added` means nothing until you know what the right side is |\n| `identical` | True when nothing but `member-unchanged` was emitted. A `root-version-differs` entry alone makes it false |\n| `summary.total` / `summary.byKind` | Counts of entries **emitted** — both move with `includeUnchanged` |\n| `summary.added` / `removed` / `differing` / `unchanged` | Counts of **correlation keys** — none of them move with `includeUnchanged` |\n| `summary.unchanged` | Populated **whether or not the unchanged rows were asked for**. So it does NOT always equal `byKind['member-unchanged']`, which is `0` by default |\n| `entries[]` | One per differing correlation key, ordered by breadcrumb path, then find number, then child item id, then kind |\n| `entries[].differingFields` | On `member-differs` only: which of `quantity` / `findNumber` / `childRevision` disagree. Empty (never null) elsewhere |\n| `entries[].left` / `.right` | How each side renders the member. `left` is null on `member-added`, `right` on `member-removed` |\n| `leftWarnings[]` / `rightWarnings[]` | Each side's own resolution warnings. `COMPARE_ROOTS_DIFFER` is about the pair and is reported on **`leftWarnings`** |\n| `truncated` / `entriesLimit` | Whether `entries` was capped, and at what. `summary` still reports untruncated totals |\n| `generatedAt` | Server clock, read once for the whole call so the two sides are never resolved microseconds apart |\n\n## Entry kinds\n\n| kind | Meaning |\n| --- | --- |\n| `root-version-differs` | The two sides resolve **different root revisions** — including when the roots are different items. One entry per comparison |\n| `member-added` | Present on the **right** only |\n| `member-removed` | Present on the **left** only |\n| `member-differs` | Present on both; `differingFields` names what disagrees |\n| `member-unchanged` | Present on both and identical. **Only emitted with `includeUnchanged=true`** |\n\n## Watch out for\n\n- **Read access is the gate, not write** — deliberately unlike `pull-preview`, which needs the same write grant the commit does because previewing a pull is initiating one. A comparison initiates nothing, so a read-only user may run it.\n- **There is no decision tier and no actions.** `decision`, `availableActions`, `retargeted` and `claimKind` are **absent**, not defaulted — a comparison decides nothing, so there is no default a client could misread as an answer.\n- **There is no `diffFingerprint`.** The pull carries one so a commit can fail fast on a stale preview. Nothing here is committed, so a digest would be a field nobody could act on.\n- **Exclusion tombstones are filtered from both sides before the join.** A member excluded on the left surfaces as `member-added` against a right that still supplies it — the left does not contain it and the right does.\n- **Provenance is reported, never classified.** A branch that claimed a member without changing it reads as *unchanged* against its own source; `left.provenance` is where you see the claim.\n- **`rightKind` is matched case-insensitively.** `Branch` is a 200. Send lower case — that is the published spelling and what comes back in `right.kind`.\n- **Truncation is a plain prefix and `summary` is left alone.** That is what makes `truncated: true` actionable: re-issue with a larger `entriesLimit` for a longer, stable prefix of the same comparison.\n\n## Error responses\n\n| Status | code | Cause |\n| --- | --- | --- |\n| 400 | `INVALID_REQUEST` | `rightKind` missing or unknown; `rightId` missing; `entriesLimit` not a positive integer (`entriesLimit=0` is refused, **not** silently defaulted); `rightAsOf` sent for a baseline right side |\n| 400 | `ASOF_INVALID` / `ASOF_IN_FUTURE` | Either clock could not be parsed, or names a moment that has not happened |\n| 403 | `FORBIDDEN` | No **read** on an object one of the sides needs |\n| 404 | `NOT_FOUND` | A path id or `rightId` names nothing or the wrong object, or the path carries a trailing segment |\n| 409 | `NOT_RELEASED` | `rightKind=ebom` names a revision that is not Released, or is Cancelled, Expired, or has no release date |\n| 422 | `AMBIGUOUS_CORRELATION` | The correlation join cannot tell which line corresponds to which — the triggers are listed under `ComparisonUnprocessable` in the OpenAPI spec. Its detail says `left side`, `right side`, or `right and left sides` — the comparison's own vocabulary, not pull-preview's `current` / `candidate` |\n| 422 | `CYCLE_DETECTED` | A cycle in the eBOM beneath either side's root. A comparison always reports a cycle under this code, never the traversal's own `EBOM_CYCLE` |\n| 500 | `INTERNAL_ERROR` | Unmodelled server failure |\n"
 									},
 									"response": []
 								}
