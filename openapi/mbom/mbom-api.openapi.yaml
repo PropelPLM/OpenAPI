@@ -4768,6 +4768,7 @@ components:
             decision: informational
             availableActions: []
             retargeted: null
+            revisionAdvances: null
             claimKind: null
             message: 'The source assembly moves to a newer released revision.'
             target:
@@ -4785,6 +4786,7 @@ components:
             decision: informational
             availableActions: []
             retargeted: null
+            revisionAdvances: null
             claimKind: null
             message: 'This member resolves differently at the newer source timepoint. Nothing to decide: a revision is an outcome of the timepoint, not a value you can set.'
             target:
@@ -4826,8 +4828,9 @@ components:
           - entryId: 'e3f19a4c8b2d6071'
             kind: claim-retained
             decision: informational
-            availableActions: []
+            availableActions: [accept-fields]
             retargeted: false
+            revisionAdvances: false
             claimKind: claim
             message: "Your change to this member is kept, and the newer revision's version of it is suppressed."
             target:
@@ -4871,6 +4874,7 @@ components:
             decision: informational
             availableActions: []
             retargeted: null
+            revisionAdvances: null
             claimKind: null
             message: 'The newer revision adds this member. It comes in automatically.'
             target:
@@ -4901,6 +4905,7 @@ components:
             decision: required
             availableActions: [convert-to-native, remove]
             retargeted: null
+            revisionAdvances: null
             claimKind: claim
             message: 'The newer revision removes a member you changed. Choose whether to keep it as your own content or remove it.'
             target:
@@ -4931,6 +4936,7 @@ components:
             decision: informational
             availableActions: []
             retargeted: null
+            revisionAdvances: null
             claimKind: null
             message: 'The newer revision now supplies exactly what you added locally, so your local addition is retired automatically.'
             target:
@@ -4975,20 +4981,19 @@ components:
         generatedAt: '2026-04-05T17:22:03.518Z'
 
     PullPreviewRevisionMoves:
-      summary: '🚧 MVP-30378 (planned) — a pinned claim offered accept-source-revision, and a tracking claim flagged revisionAdvances'
+      summary: A retargeted pinned claim offered accept-fields, and a tracking claim flagged revisionAdvances
       description: |
-        **🚧 Planned — MVP-30378, not yet implemented.** Assy-100 moves from rev-1 to rev-2, and
-        upstream re-revs two lines the branch claimed:
+        Assy-100 moves from rev-1 to rev-2, and upstream re-revs two lines the branch claimed:
 
         - **Motor-002**, claimed *pinned* to rev-1. The candidate would resolve rev-2, so the entry
-          is `claim-retained` with `retargeted: true`, and it offers the optional
-          `accept-source-revision`. `decision` stays `informational`.
+          is `claim-retained` with `retargeted: true`, and it offers the optional `accept-fields`
+          (`{"childItemRevisionId": "candidate"}` takes rev-2; `"release"` makes it track).
+          `decision` stays `informational`.
         - **Bracket-005**, claimed *tracking* with its quantity unchanged. It is
-          `claim-superseded`, since only quantity and find number decide that. It carries
-          `revisionAdvances: true` because after the commit it renders rev-4.
+          `claim-superseded`, since only quantity and find number decide that, and offers
+          `release`. It carries `revisionAdvances: true` because after the commit it renders rev-4.
 
         `candidate` is the raw upstream line.
-      x-planned: { ticket: MVP-30378, assumptions: [A-30378-3, A-30378-4, A-30378-10] }
       value:
         sourceId: a1Cg8000000AbCeEAK
         branchId: a1Bg8000000AbCdEAK
@@ -5038,7 +5043,7 @@ components:
           - entryId: '8a3e5f09c2d71b64'
             kind: claim-retained
             decision: informational
-            availableActions: [accept-source-revision]
+            availableActions: [accept-fields]
             retargeted: true
             revisionAdvances: false
             claimKind: claim
@@ -5081,7 +5086,7 @@ components:
           - entryId: '3b91c7e0d5a2f846'
             kind: claim-superseded
             decision: informational
-            availableActions: []
+            availableActions: [release]
             retargeted: null
             revisionAdvances: true
             claimKind: claim
@@ -5128,18 +5133,17 @@ components:
         generatedAt: '2026-04-05T17:22:03.518Z'
 
     PullPreviewPerFieldDecisions:
-      summary: '🚧 MVP-30379 (planned) — the three kinds that offer optional per-field decisions'
+      summary: The three kinds that offer optional per-field decisions
       description: |
-        **🚧 Planned — MVP-30379, not yet implemented.** Three entries, none of them required:
+        Three entries, none of them required:
 
         - **Motor-002**, `claim-retained`. It is pinned to rev-1 while upstream moved to rev-2,
-          and its quantity 4 differs from upstream's 6. It offers `accept-fields` and, being
-          retargeted, `accept-source-revision`.
+          and its quantity 4 differs from upstream's 6. It offers `accept-fields`, under which
+          both `quantity` and `childItemRevisionId` diverge.
         - **Label-400**, `member-add-collision`. It is a branch `add` at quantity 1, where upstream
           now supplies quantity 2. It offers `accept-fields`.
         - **Bracket-005**, `claim-superseded`. It is a tracking claim that matches upstream. It
           offers `release`, which would revert it to `base`.
-      x-planned: { ticket: MVP-30379, assumptions: [A-30379-3, A-30379-7] }
       value:
         sourceId: a1Cg8000000AbCeEAK
         branchId: a1Bg8000000AbCdEAK
@@ -5172,7 +5176,7 @@ components:
           - entryId: '8a3e5f09c2d71b64'
             kind: claim-retained
             decision: informational
-            availableActions: [accept-fields, accept-source-revision]
+            availableActions: [accept-fields]
             retargeted: true
             revisionAdvances: false
             claimKind: claim
@@ -5396,72 +5400,55 @@ components:
         sourceId: a1Cg8000000AbCeEAK
         newSourceRevisionId: a1Dg8000000AbChEAK
         acceptedRootRevisionId: a0Ag8000000Ab02EAC
-        acceptedAt: '2026-04-06T14:02:51.317Z'
+        acceptedAt: '2026-04-06T14:02:51.000Z'
         applied:
           - entryId: 'f4880c6b3e1a9d75'
             kind: claim-orphaned
             action: convert-to-native
+            acceptedFields: null
             edgeId: a1Eg8000000AbD3EAK
           - entryId: 'e3f19a4c8b2d6071'
             kind: claim-retained
             action: null
+            acceptedFields: null
             edgeId: a1Eg8000000AbD1EAK
           - entryId: '2d6be1470f83a9c5'
             kind: member-add-converged
             action: retired
+            acceptedFields: null
             edgeId: a1Eg8000000AbD5EAK
 
-    PullCommitAcceptedSourceRevision:
-      summary: '🚧 MVP-30378 (planned) — the pinned claim now holds the candidate revision'
-      description: |
-        **🚧 Planned — MVP-30378, not yet implemented.** The commit that follows
-        `PullPreviewRevisionMoves` with one `accept-source-revision` decision. The superseded
-        tracking claim reports `action: null` as today. Nothing was written for it, and it renders
-        rev-4 because it follows T_R.
-      x-planned: { ticket: MVP-30378, assumptions: [A-30378-11] }
-      value:
-        sourceId: a1Cg8000000AbCeEAK
-        newSourceRevisionId: a1Dg8000000AbChEAK
-        acceptedRootRevisionId: a0Ag8000000Ab02EAC
-        acceptedAt: '2026-04-06T14:02:51.317Z'
-        applied:
-          - entryId: '8a3e5f09c2d71b64'
-            kind: claim-retained
-            action: accept-source-revision
-            edgeId: a1Eg8000000AbD1EAK
-          - entryId: '3b91c7e0d5a2f846'
-            kind: claim-superseded
-            action: null
-            edgeId: a1Eg8000000AbD2EAK
-
     PullCommitAcceptedFields:
-      summary: '🚧 MVP-30379 (planned) — per-field decisions applied'
+      summary: Per-field decisions applied
       description: |
-        **🚧 Planned — MVP-30379, not yet implemented.** The commit that follows
-        `PullPreviewPerFieldDecisions`:
+        The commit that follows `PullPreviewPerFieldDecisions`:
 
         - Motor-002 took the revision (`childItemRevisionId: candidate`, a pin to rev-2) and kept
           quantity 4.
         - Label-400 took upstream's quantity.
-        - Bracket-005's claim was released, and the row is `base` from now on.
-      x-planned: { ticket: MVP-30379, assumptions: [A-30379-3, A-30379-8] }
+        - Bracket-005's claim was released (reverted), and the row is `base` from now on.
+
+        `acceptedFields` is echoed in canonical form whatever casing the request used.
       value:
         sourceId: a1Cg8000000AbCeEAK
         newSourceRevisionId: a1Dg8000000AbChEAK
         acceptedRootRevisionId: a0Ag8000000Ab02EAC
-        acceptedAt: '2026-04-06T14:02:51.317Z'
+        acceptedAt: '2026-04-06T14:02:51.000Z'
         applied:
           - entryId: '8a3e5f09c2d71b64'
             kind: claim-retained
             action: accept-fields
+            acceptedFields: { childItemRevisionId: candidate }
             edgeId: a1Eg8000000AbD1EAK
           - entryId: 'c7d42a9e0b15f386'
             kind: member-add-collision
             action: accept-fields
+            acceptedFields: { quantity: candidate }
             edgeId: a1Eg8000000AbD5EAK
           - entryId: '3b91c7e0d5a2f846'
             kind: claim-superseded
             action: release
+            acceptedFields: null
             edgeId: a1Eg8000000AbD2EAK
 
     PullCommitAlreadyCurrent:
@@ -5469,7 +5456,7 @@ components:
         sourceId: a1Cg8000000AbCeEAK
         newSourceRevisionId: a1Dg8000000AbCiEAK
         acceptedRootRevisionId: a0Ag8000000Ab02EAC
-        acceptedAt: '2026-04-06T16:11:09.882Z'
+        acceptedAt: '2026-04-06T16:11:09.000Z'
         applied: []
 
     # The four comparison examples below are ONE fixture read four ways, so they can be read
