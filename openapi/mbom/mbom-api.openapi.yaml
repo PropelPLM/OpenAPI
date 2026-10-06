@@ -1042,6 +1042,7 @@ paths:
                         ciId: null
                         edgeId: null
                         forked: null
+                        claimed: null
                 cycle:
                   value:
                     code: CYCLE_DETECTED
@@ -3931,7 +3932,7 @@ components:
         | code | Cause | Remedy |
         |---|---|---|
         | `STALE_REVISION` | `diffFingerprint` mismatch, or an `entryId` that no longer names an entry in the freshly re-resolved diff | re-run `pull-preview` and resubmit |
-        | `DISPOSITION_REQUIRED` | a `claim-orphaned` entry has no decision | supply one for every required entry |
+        | `DISPOSITION_REQUIRED` | a `claim-orphaned` entry has no decision — the only kind that can raise it. (A live `replace` substitute whose superseded line upstream keeps is `claim-retained` and never raises it, MVP-30378.) | supply one for every required entry |
         | `NOT_RELEASED` / `CANDIDATE_NOT_NEWER` | revalidated at commit time and no longer qualifies | pick another candidate |
         | `CONCURRENT_WRITE` | another transaction holds the branch's write lock — a delta batch, a baseline cut or another commit | send the same request again |
       content:
@@ -3974,11 +3975,13 @@ components:
            without a counterpart on **one** side as the **same kind** of entry, so under one
            `entryId`, where the diff could report only one of them. Rows that produce no entry
            (`nested` rows, tombstones, branch-native rows) do not count, and neither do two rows
-           of different kinds. So a `replace` substitute beside a line of the same child that
-           upstream drops completes — the substitute `claim-orphaned`, the line `member-removed`
-           — but with that line **claimed** both are `claim-orphaned`, and the pull refuses. A
-           branch edit clears it: exclude the substitute, or revert the claim on the dropped line,
-           which then reads as `member-removed`.
+           of different kinds. A `replace` substitute beside a **claimed** line of its new child
+           that upstream drops completes while upstream keeps the substitute's superseded line —
+           the substitute is `claim-retained` and the claimed line the one `claim-orphaned`
+           (MVP-30378; this used to refuse). Only when upstream drops **both** lines are both
+           `claim-orphaned`, and the pull refuses. A branch edit clears it: exclude the
+           substitute, or revert the claim on the dropped line, which then reads as
+           `member-removed`.
 
         One parent item rendering at two revisions is **not** one of these: the parent revision
         separates those lines.
@@ -4092,6 +4095,10 @@ components:
             isExcluded: false
             isReplaced: false
             isEditable: true
+            hasChosenRevision: false
+            wasClaimed: false
+            revisionChosenById: null
+            revisionChosenAt: null
             childRows: []
           - edgeId: null
             edgeKey: a0Bg8000000Ab11EAC
@@ -4109,6 +4116,10 @@ components:
             isExcluded: false
             isReplaced: false
             isEditable: true
+            hasChosenRevision: false
+            wasClaimed: false
+            revisionChosenById: null
+            revisionChosenAt: null
             childRows: []
           - edgeId: a1Eg8000000AbD3EAK
             edgeKey: a0Bg8000000Ab12EAC
@@ -4126,6 +4137,10 @@ components:
             isExcluded: true
             isReplaced: false
             isEditable: true
+            hasChosenRevision: false
+            wasClaimed: false
+            revisionChosenById: null
+            revisionChosenAt: null
             childRows: []
           - edgeId: a1Eg8000000AbD9EAK
             edgeKey: 'new-a1Bg8000000AbCdEAK-a02g8000000Ab01EAC-a02g8000000Ab90EAC'
@@ -4143,6 +4158,10 @@ components:
             isExcluded: false
             isReplaced: false
             isEditable: true
+            hasChosenRevision: false
+            wasClaimed: false
+            revisionChosenById: null
+            revisionChosenAt: null
             childRows: []
         warnings: []
 
@@ -4168,6 +4187,10 @@ components:
             isExcluded: false
             isReplaced: false
             isEditable: true
+            hasChosenRevision: false
+            wasClaimed: false
+            revisionChosenById: null
+            revisionChosenAt: null
             childRows:
               - edgeId: null
                 edgeKey: a0Bg8000000Ab15EAC
@@ -4178,6 +4201,10 @@ components:
                 isExcluded: false
                 isReplaced: false
                 isEditable: true
+                hasChosenRevision: false
+                wasClaimed: false
+                revisionChosenById: null
+                revisionChosenAt: null
                 childRows: []
         warnings: []
 
@@ -4220,6 +4247,10 @@ components:
             isExcluded: false
             isReplaced: false
             isEditable: true
+            hasChosenRevision: true
+            wasClaimed: false
+            revisionChosenById: 005g8000000AbZ1AAK
+            revisionChosenAt: '2026-04-05T17:20:12.000Z'
             childRows: []
           - edgeId: null
             edgeKey: a0Bg8000000Ab16EAC
@@ -4237,6 +4268,10 @@ components:
             isExcluded: false
             isReplaced: false
             isEditable: false
+            hasChosenRevision: false
+            wasClaimed: false
+            revisionChosenById: null
+            revisionChosenAt: null
             childRows: []
         warnings:
           - warningCode: PINNED_SUBTREE_HIDES_EDITS
@@ -4246,16 +4281,15 @@ components:
             governingTimestamps: []
 
     BranchTreeOverrideBadges:
-      summary: '🚧 MVP-30375 (planned) — isPinned follows the choice, not the rendered revision'
+      summary: hasChosenRevision follows the choice, not the rendered revision
       description: |
-        **🚧 Planned — MVP-30375, not yet implemented.** Four rows:
+        Four rows:
 
         1. A claim pinned to the **same** revision its source line resolves to. It is badged,
-           although it renders no pinned structure.
+           although it renders no pinned structure, and names who chose the revision and when.
         2. A tracking claim. It is unbadged, although it renders a released revision.
         3. A floating `new` row. It is unbadged.
         4. A converted row that stamped a revision. It is badged, and it carries `wasClaimed`.
-      x-planned: { ticket: MVP-30375, assumptions: [A-30375-1, A-30375-2, A-30375-4] }
       value:
         asOf: '2026-04-05T17:22:03.518Z'
         rootRevisionId: a0Ag8000000Ab01EAC
@@ -4277,10 +4311,10 @@ components:
             isExcluded: false
             isReplaced: false
             isEditable: true
-            isPinned: true
+            hasChosenRevision: true
             wasClaimed: false
-            pinnedById: null
-            pinnedAt: null
+            revisionChosenById: 005g8000000AbZ1AAK
+            revisionChosenAt: '2026-04-05T17:22:04.000Z'
             childRows: []
           - edgeId: a1Eg8000000AbD2EAK
             edgeKey: a0Bg8000000Ab11EAC
@@ -4298,10 +4332,10 @@ components:
             isExcluded: false
             isReplaced: false
             isEditable: true
-            isPinned: false
+            hasChosenRevision: false
             wasClaimed: false
-            pinnedById: null
-            pinnedAt: null
+            revisionChosenById: null
+            revisionChosenAt: null
             childRows: []
           - edgeId: a1Eg8000000AbD9EAK
             edgeKey: 'new-a1Bg8000000AbCdEAK-a02g8000000Ab01EAC-a02g8000000Ab90EAC'
@@ -4319,10 +4353,10 @@ components:
             isExcluded: false
             isReplaced: false
             isEditable: true
-            isPinned: false
+            hasChosenRevision: false
             wasClaimed: false
-            pinnedById: null
-            pinnedAt: null
+            revisionChosenById: null
+            revisionChosenAt: null
             childRows: []
           - edgeId: a1Eg8000000AbD3EAK
             edgeKey: a0Bg8000000Ab12EAC
@@ -4340,20 +4374,18 @@ components:
             isExcluded: false
             isReplaced: false
             isEditable: true
-            isPinned: true
+            hasChosenRevision: true
             wasClaimed: true
-            pinnedById: null
-            pinnedAt: null
+            revisionChosenById: 005g8000000AbZ2AAK
+            revisionChosenAt: '2026-04-05T17:20:51.000Z'
             childRows: []
         warnings: []
 
     BranchTreeRetiredStoredRevision:
-      summary: '🚧 MVP-30376 (planned) — a pinned claim whose chosen revision was cancelled'
+      summary: A pinned claim whose chosen revision was cancelled
       description: |
-        **🚧 Planned — MVP-30376, not yet implemented.** The claim was pinned to Motor-002 rev-1,
-        and rev-1 was later cancelled. The row still renders rev-1. The warning names the row's
-        child item and the dead revision.
-      x-planned: { ticket: MVP-30376, assumptions: [A-30376-1, A-30376-3] }
+        The claim was pinned to Motor-002 rev-1, and rev-1 was later cancelled. The row still
+        renders rev-1. The warning names the row's child item and the dead revision.
       value:
         asOf: '2026-04-05T17:22:03.518Z'
         rootRevisionId: a0Ag8000000Ab01EAC
@@ -4375,6 +4407,10 @@ components:
             isExcluded: false
             isReplaced: false
             isEditable: true
+            hasChosenRevision: true
+            wasClaimed: false
+            revisionChosenById: 005g8000000AbZ1AAK
+            revisionChosenAt: '2026-03-02T10:41:27.000Z'
             childRows: []
         warnings:
           - warningCode: STORED_REVISION_RETIRED
@@ -4405,6 +4441,10 @@ components:
             isExcluded: false
             isReplaced: false
             isEditable: true
+            hasChosenRevision: false
+            wasClaimed: false
+            revisionChosenById: null
+            revisionChosenAt: null
             childRows: []
         warnings: []
 
@@ -4425,6 +4465,7 @@ components:
             ciId: a1Gg8000000AbF1EAK
             edgeId: a1Eg8000000AbD1EAK
             forked: null
+            claimed: null
           - index: 1
             clientRef: row-bracket
             op: claim
@@ -4434,6 +4475,7 @@ components:
             ciId: a1Gg8000000AbF2EAK
             edgeId: a1Eg8000000AbD2EAK
             forked: null
+            claimed: null
 
     DeltaBatchPartial:
       value:
@@ -4452,6 +4494,7 @@ components:
             ciId: a1Gg8000000AbF2EAK
             edgeId: a1Eg8000000AbD2EAK
             forked: null
+            claimed: null
           - index: 1
             clientRef: will-fail
             op: update
@@ -4461,6 +4504,7 @@ components:
             ciId: null
             edgeId: null
             forked: null
+            claimed: null
 
     DeltaBatchForked:
       value:
@@ -4479,14 +4523,14 @@ components:
             ciId: a1Gg8000000AbF1EAK
             edgeId: a1Eg8000000AbD1EAK
             forked: true
+            claimed: null
 
     DeltaBatchAutoClaimed:
-      summary: '🚧 MVP-30377 (planned) — update with autoClaim on a base line'
+      summary: update with autoClaim on a base line
       description: |
-        **🚧 Planned — MVP-30377, not yet implemented.** One operation claimed the line and revised
-        its quantity. `claimed: true` is the after-the-fact disclosure. `forked` is null because
-        nothing was forked: a claim mints its first revision.
-      x-planned: { ticket: MVP-30377, assumptions: [A-30377-2, A-30377-3] }
+        One operation claimed the line and revised its quantity. `claimed: true` is the
+        after-the-fact disclosure. `forked` is null because nothing was forked: a claim mints its
+        first revision.
       value:
         branchId: a1Bg8000000AbCdEAK
         atomic: true
@@ -4506,12 +4550,10 @@ components:
             claimed: true
 
     DeltaBatchRevisionSet:
-      summary: '🚧 MVP-30378 (planned) — set-revision on a claiming edge'
+      summary: An update that changed a claim's stored revision
       description: |
-        **🚧 Planned — MVP-30378, not yet implemented.** A new payload revision was appended, with
-        the row's quantity and find number carried forward. `forked` is null because
-        `set-revision` never edits in place, so there is no in-place alternative to report against.
-      x-planned: { ticket: MVP-30378, assumptions: [A-30378-1, A-30378-8] }
+        A new payload revision was appended, with the row's quantity and find number carried
+        forward. A revision change always forks, even over a Draft revision, so `forked` is `true`.
       value:
         branchId: a1Bg8000000AbCdEAK
         atomic: true
@@ -4521,13 +4563,14 @@ components:
         results:
           - index: 0
             clientRef: take-rev-2
-            op: set-revision
+            op: update
             success: true
             errorCode: null
             message: null
             ciId: a1Gg8000000AbF1EAK
             edgeId: a1Eg8000000AbD1EAK
-            forked: null
+            forked: true
+            claimed: null
 
     DeltaBatchAtomicFailure:
       value:
@@ -4543,6 +4586,7 @@ components:
             ciId: null
             edgeId: null
             forked: null
+            claimed: null
           - index: 2
             clientRef: also-fails
             op: exclude
@@ -4552,6 +4596,7 @@ components:
             ciId: null
             edgeId: null
             forked: null
+            claimed: null
 
     DeltaBatchRevisionChoiceRequired:
       summary: A claim that sent neither childItemRevisionId nor trackChildRevision
@@ -4568,6 +4613,7 @@ components:
             ciId: null
             edgeId: null
             forked: null
+            claimed: null
 
     ConcurrentWrite:
       summary: Another transaction holds the branch's write lock
@@ -4589,6 +4635,7 @@ components:
             ciId: null
             edgeId: null
             forked: null
+            claimed: null
 
     BaselineTreeClean:
       value:
@@ -4612,6 +4659,10 @@ components:
             isExcluded: false
             isReplaced: false
             isEditable: true
+            hasChosenRevision: false
+            wasClaimed: false
+            revisionChosenById: null
+            revisionChosenAt: null
             childRows: []
         warnings: []
 
@@ -4629,11 +4680,11 @@ components:
             governingTimestamps: []
 
     BaselineTreePinnedAuthor:
-      summary: '🚧 MVP-30375 (planned) — a pinned baseline row names who pinned it, and when'
+      summary: A pinned baseline row names who chose its revision, and when
       description: |
-        **🚧 Planned — MVP-30375, not yet implemented.** `pinnedById` / `pinnedAt` come from the
-        payload revision that carries the row's current value.
-      x-planned: { ticket: MVP-30375, assumptions: [A-30375-4] }
+        `revisionChosenById` / `revisionChosenAt` are the creator and creation time of the branch
+        revision (`CI_Rev__c`) the row resolves through — the same values the branch tree read
+        reports for the row.
       value:
         baselineId: a1Fg8000000AbE1EAK
         label: Pilot build 1
@@ -4655,20 +4706,18 @@ components:
             isExcluded: false
             isReplaced: false
             isEditable: true
-            isPinned: true
+            hasChosenRevision: true
             wasClaimed: false
-            pinnedById: 005g8000000AbZ1AAK
-            pinnedAt: '2026-04-05T17:22:04.000Z'
+            revisionChosenById: 005g8000000AbZ1AAK
+            revisionChosenAt: '2026-04-05T17:22:04.000Z'
             childRows: []
         warnings: []
 
     BaselineTreePinDrift:
-      summary: '🚧 MVP-30375 (planned) — BASELINE_PIN_DRIFT'
+      summary: BASELINE_PIN_DRIFT
       description: |
-        **🚧 Planned — MVP-30375, not yet implemented.** The cut recorded one pinned row. The
-        re-derived read finds none, while the row and claim counts still match. `rows` is omitted
-        here.
-      x-planned: { ticket: MVP-30375, assumptions: [A-30375-5] }
+        The cut recorded one row with a chosen revision. The re-derived read finds none, while the
+        row and claim counts still match. `rows` is omitted here.
       value:
         baselineId: a1Fg8000000AbE1EAK
         label: Pilot build 1
