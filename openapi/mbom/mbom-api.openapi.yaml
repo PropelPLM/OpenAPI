@@ -2973,11 +2973,11 @@ components:
         resolutionTimePoint:
           type: string
           format: date-time
-          description: What the baseline resolves against. **Stamped once, never re-derived.**
+          description: What the baseline resolves against. **Stamped once, never re-derived.** Reported to the whole second (MVP-30375), as a later read of the same record returns it.
         takenAt:
           type: string
           format: date-time
-          description: The wall-clock moment of the cut. Kept apart from `resolutionTimePoint` so a clock correction cannot change what a baseline resolves to.
+          description: The wall-clock moment of the cut. Kept apart from `resolutionTimePoint` so a clock correction cannot change what a baseline resolves to. Reported to the whole second (MVP-30375).
         memberCount:
           type: integer
           minimum: 0
@@ -2987,9 +2987,9 @@ components:
             canary behind `BASELINE_COUNT_DRIFT`; `BASELINE_PROVENANCE_DRIFT` is fed by the
             `claiming`-row count recorded alongside it.
 
-            > **🚧 Planned — MVP-30375, not yet implemented.** The cut also records a count of
-            > explicitly pinned rows, feeding `BASELINE_PIN_DRIFT`. Like the `claiming` count, it is
-            > stored and **not** returned here: there is no `pinnedCount`. [assumes A-30375-3]
+            The cut also records a count of rows holding a chosen revision, feeding
+            `BASELINE_PIN_DRIFT` (MVP-30375). Like the `claiming` count, it is stored and **not**
+            returned here: there is no `pinnedCount`.
 
     BaselineTree:
       type: object
@@ -3011,14 +3011,11 @@ components:
         warnings:
           type: array
           description: |
-            **Drift only** — `BASELINE_COUNT_DRIFT` and `BASELINE_PROVENANCE_DRIFT`. Mixed-revision
-            and collision warnings from the underlying resolution are not forwarded.
-
-            > **🚧 Planned — MVP-30375, not yet implemented.** A third drift code,
-            > `BASELINE_PIN_DRIFT`. [assumes A-30375-5]
-
-            > **🚧 Planned — MVP-30376, not yet implemented.** `STORED_REVISION_RETIRED` is **not**
-            > forwarded here: it is advice about the branch, not drift. [assumes A-30376-2]
+            **Drift only** — `BASELINE_COUNT_DRIFT`, `BASELINE_PROVENANCE_DRIFT` and
+            `BASELINE_PIN_DRIFT`. Mixed-revision, collision, hidden-edit and
+            `STORED_REVISION_RETIRED` warnings from the underlying resolution are not forwarded:
+            they are advice about a branch, not drift. (A comparison's baseline side does carry
+            `STORED_REVISION_RETIRED`.)
           items: { $ref: '#/components/schemas/TreeWarning' }
 
     # -------------------------------------------------- pull
@@ -3043,61 +3040,40 @@ components:
     Decision:
       type: string
       description: |
-        Whether this entry needs the caller to decide anything. **Only two values** — there is no
-        third, optional-but-defaultable tier. The only decision point anywhere in a pull is disposing
-        an orphaned claim; everything else, including new, removed and colliding upstream content,
-        applies automatically.
-
-        > **🚧 Planned — MVP-30378, not yet implemented.** Still two values. An `informational`
-        > entry may now **offer** an optional action in `availableActions`, and the default when
-        > none is sent is today's outcome. `required` still means `claim-orphaned` only: a pull
-        > has exactly one required kind. [assumes A-30378-10]
+        Whether this entry needs the caller to decide anything. **Only two values.** `required`
+        means `claim-orphaned` only — a pull has exactly one required kind, and disposing an
+        orphaned claim is its only mandatory decision point. An `informational` entry may still
+        **offer** an optional action in `availableActions` (MVP-30379: `accept-fields`,
+        `release`); undecided, its outcome is the default — the branch's value wins.
       enum: [informational, required]
 
     Action:
       type: string
       description: |
-        An action the commit endpoint can apply. Both values only ever apply to `claim-orphaned`;
-        a decision naming any other kind is rejected with `INVALID_REQUEST`.
+        An action the commit endpoint can apply. A decision is valid only when its entry
+        **offers** the action in `availableActions`; otherwise `INVALID_REQUEST`. Matched
+        case-insensitively; echoed in its canonical lowercase spelling.
 
-        - `convert-to-native` — sever the claim's provenance link, keeping its branch-owned
-          content, which then resolves on the branch clock. ("Native" is the framework's existing
-          term for branch-owned content with no upstream provenance.)
-        - `remove` — append a deletion marker (an exclude delta). Nothing is hard-deleted.
-        - `accept-source-revision` — **🚧 Planned — MVP-30378, not yet implemented.** Offered
-          only on `claim-retained` with `retargeted: true`, and optional. The commit pins the
-          claim to the **candidate's** revision through a `set-revision`, never an `update`. The
-          claim keeps its quantity and find number, and stays pinned. The decision carries
-          nothing but `entryId` and `action`. [assumes A-30378-3, A-30378-11]
+        - `convert-to-native` — `claim-orphaned` only. Sever the claim's provenance link, keeping
+          its branch-owned content, which then resolves on the branch clock. ("Native" is the
+          framework's existing term for branch-owned content with no upstream provenance.)
+        - `remove` — `claim-orphaned` only. Append a deletion marker (an exclude delta). Nothing
+          is hard-deleted.
+        - `accept-fields` — optional, on `claim-retained` (not a `replace` substitute) and
+          `member-add-collision` (MVP-30379). Takes the fields named in `acceptedFields`; the rest
+          keep the branch's values. Compiles to exactly **one** `update` on the entry's edge.
+        - `release` — optional, on `claim-superseded` only (MVP-30379), where the claim now
+          matches upstream anyway. A `revert` of the claim, pinned or tracking alike: the branch
+          stops owning the row, which renders upstream's line. Takes no `acceptedFields`.
 
-        - `accept-fields` — **🚧 Planned — MVP-30379, not yet implemented.** Optional, on
-          `claim-retained` and `member-add-collision`. It takes the fields named in
-          `acceptedFields`, and the rest keep the branch's values. On `claim-retained` it equals
-          `accept-source-revision` when the only accepted field is
-          `childItemRevisionId: candidate`, and both are accepted. It compiles to **one**
-          operation per row, never two on one edge:
-          - `update` for `quantity` / `findNumber` alone
-          - `set-revision` for the revision
-          - `set-revision` carrying the quantity or find number too, when both are accepted
+        `accept-source-revision` and `track-source-revision` were built during MVP-30378 and
+        retired before release; they are `accept-fields` with `{"childItemRevisionId":
+        "candidate"}` and `{"childItemRevisionId": "release"}`, and sending either is refused as
+        an action the entry does not offer.
 
-          [assumes A-30379-1, A-30379-5, A-30379-6]
-        - `release` — **🚧 Planned — MVP-30379, not yet implemented.** Optional, on
-          `claim-superseded` only, where the claim now matches upstream anyway. It is the conscious
-          way to stop holding a value. On a **pinned** claim it clears the revision, and the claim
-          stays, tracking. On a **tracking** claim it releases the claim itself, compiled as a
-          `revert`, and the row falls back to `base`. Takes no `acceptedFields`.
-          [assumes A-30379-3]
-
-        | Value | Status |
-        |---|---|
-        | `convert-to-native`, `remove` | ✅ shipped — `claim-orphaned` only |
-        | `accept-source-revision` | 🚧 MVP-30378 — today it answers `INVALID_REQUEST` |
-        | `accept-fields`, `release` | 🚧 MVP-30379 — today they answer `INVALID_REQUEST` |
-
-        > **🚧 Planned — MVP-30378, not yet implemented.** A decision is valid when its entry
-        > **offers** its action in `availableActions`, instead of only on `claim-orphaned`.
-        > [assumes A-30378-11]
-      enum: [convert-to-native, remove, accept-source-revision, accept-fields, release]
+        `retired` appears only in `AppliedEntry.action`, for a `member-add-converged` entry the
+        commit retired automatically; it is never sent.
+      enum: [convert-to-native, remove, accept-fields, release]
 
     PullPreview:
       type: object
@@ -3133,10 +3109,10 @@ components:
         warnings:
           type: array
           description: |
-            Non-blocking conditions about what would render *after* the pull — typically `MIXED_REVISION`, and `PINNED_SUBTREE_HIDES_EDITS` for a branch edit a post-pull pin will hide. Always present; empty rather than absent.
+            Non-blocking conditions about what would render *after* the pull (with no optional decision taken) — typically `MIXED_REVISION`, and `PINNED_SUBTREE_HIDES_EDITS` for a branch edit a post-pull pin will hide. Always present; empty rather than absent.
 
-            **🚧 Planned — MVP-30376, not yet implemented.** `STORED_REVISION_RETIRED` is not
-            raised here. The branch tree read is the one that raises it. [assumes A-30376-2]
+            `STORED_REVISION_RETIRED` is not raised here; the branch tree read and the comparison
+            raise it.
           items: { $ref: '#/components/schemas/TreeWarning' }
         truncated:
           type: boolean
@@ -3157,7 +3133,10 @@ components:
 
             It covers a **clock-free** projection of the entries, because a claiming row's
             `governingTimestamp` *is* the read clock — folding it in would make every commit stale on
-            arrival.
+            arrival. The projection includes each entry's `availableActions` and
+            `revisionAdvances`, so a preview taken by a build before MVP-30378 / MVP-30379 answers
+            `STALE_REVISION` once on a commit after the deploy. It does **not** cover the commit's
+            `decisions[]`.
           examples: ['sha256:9f2c41ab7e08d3b6']
         generatedAt:
           type: string
@@ -3227,16 +3206,20 @@ components:
         availableActions:
           type: array
           description: |
-            Empty except on `claim-orphaned`, whose two dispositions are the only actions this API offers anywhere.
+            The decisions the commit accepts for this entry. Always present.
 
-            **🚧 Planned — MVP-30378, not yet implemented.** Also `[accept-source-revision]` on a
-            `claim-retained` entry with `retargeted: true`. It is optional: the entry's `decision`
-            stays `informational`. [assumes A-30378-3, A-30378-10]
+            | kind | availableActions |
+            |---|---|
+            | `claim-orphaned` | `["convert-to-native", "remove"]` — required |
+            | `claim-retained` (not a `replace` substitute) | `["accept-fields"]` — optional |
+            | `claim-retained` with `claimKind: replace` | `[]` |
+            | `member-add-collision` | `["accept-fields"]` — optional |
+            | `claim-superseded` | `["release"]` — optional |
+            | every other kind | `[]` |
 
-            **🚧 Planned — MVP-30379, not yet implemented.** Optional per-field decisions on three
-            kinds. `claim-retained` gains `accept-fields`, beside `accept-source-revision` when
-            retargeted. `member-add-collision` gains `accept-fields`. `claim-superseded` gains
-            `release`. Every other kind is unchanged. [assumes A-30379-7]
+            An optional action never changes `decision` (it stays `informational`) or
+            `summary.required`. `accept-fields` is offered without checking that some field could
+            legally be taken.
           items: { $ref: '#/components/schemas/Action' }
         retargeted:
           oneOf: [{ type: boolean }, { type: 'null' }]
@@ -3252,17 +3235,16 @@ components:
             higher-stakes case — a branch silently keeping a superseded revision after upstream moved
             on — without parsing `message`.
 
-            The child *revision*, not the child *item*: see the endpoint description.
-
-            **🚧 Planned — MVP-30378, not yet implemented.** A `true` here is what makes the entry
-            offer `accept-source-revision`. [assumes A-30378-3]
+            The child *revision*, not the child *item*: see the endpoint description. Always
+            `false` for a `replace` substitute (MVP-30378), and never `true` on a tracking claim.
+            Only a retargeted pinned claim's revision **diverges** for `accept-fields`.
         revisionAdvances:
           oneOf: [{ type: boolean }, { type: 'null' }]
-          x-planned: { ticket: MVP-30378, assumptions: [A-30378-4] }
           description: |
-            **🚧 Planned — MVP-30378, not yet implemented.** Present on `claim-retained` and
-            `claim-superseded`, and `null` on every other kind, deliberately not defaulted, like
-            `retargeted`.
+            Present on `claim-retained` and `claim-superseded` (MVP-30378), and `null` (key
+            present) on every other kind, including `claim-orphaned` — deliberately not defaulted,
+            like `retargeted`. Informational only: it changes no `kind`, `decision`,
+            `availableActions` or commit requirement.
 
             `true` when this is a **tracking** claim, one that stores no revision, and the revision
             it renders moves with this pull: after the commit it renders the candidate's line
@@ -3272,8 +3254,9 @@ components:
 
             **Never true together with `retargeted`.** `retargeted` is about a *pinned* claim that
             upstream moved away from. A pin does not move, so its `revisionAdvances` is `false`.
-            A tracking claim is never retargeted. The value is covered by `diffFingerprint`.
-            A `base` row's advance is still `member-version-advance`, unchanged.
+            A tracking claim is never retargeted. A `replace` substitute is `false`. The value is
+            covered by `diffFingerprint`. A `base` row's advance is still `member-version-advance`,
+            unchanged.
         claimKind:
           oneOf: [{ type: string, enum: [claim, replace] }, { type: 'null' }]
           description: |
@@ -3438,17 +3421,17 @@ components:
           type: array
           description: |
             One entry per `claim-orphaned` entry from the preview. **Every one must appear**, or
-            the commit is rejected with `DISPOSITION_REQUIRED`; naming any other kind is rejected
-            with `INVALID_REQUEST`. Send `[]` (or omit) when the preview had no required entries.
+            the commit is rejected with `DISPOSITION_REQUIRED`. Send `[]` (or omit) when the preview
+            had no required entries.
 
-            > **🚧 Planned — MVP-30378, not yet implemented.** It may also carry **optional**
-            > decisions: `accept-source-revision` on a retargeted `claim-retained` entry. These are
-            > never required, and an entry left undecided keeps today's outcome.
-            > `DISPOSITION_REQUIRED` still keys on `claim-orphaned` alone. [assumes A-30378-10]
+            It may also carry **optional** decisions (MVP-30379): `accept-fields` (with
+            `acceptedFields`) on `claim-retained` / `member-add-collision`, and `release` on
+            `claim-superseded`. An entry left undecided keeps the branch's value.
+            `DISPOSITION_REQUIRED` keys on `claim-orphaned` alone. A decision whose `action` its
+            entry does not offer in `availableActions` is `400 INVALID_REQUEST`.
 
-            > **🚧 Planned — MVP-30379, not yet implemented.** It may also carry `accept-fields`
-            > (with `acceptedFields`) on `claim-retained` / `member-add-collision`, and `release` on
-            > `claim-superseded`. These are optional too. [assumes A-30379-7]
+            At most **200** decisions: each compiles to one delta operation in one batch, and more
+            is `413 BATCH_TOO_LARGE`, refused whole.
           items:
             type: object
             required: [entryId, action]
@@ -3464,27 +3447,30 @@ components:
                   converted row. Same meaning and validation as `DeltaOperation.childItemRevisionId`
                   on a `convert-to-native` operation, which this is copied onto. "Keep what it
                   shows" is the orphaned entry's own `current.detail.childItemRevisionId`, sent
-                  back. Ignored on `remove`.
+                  back. **Refused** beside any other action — `400 INVALID_REQUEST`
+                  (`childItemRevisionId and trackChildRevision are only taken with
+                  convert-to-native, not with <action>`); before MVP-30379 it was silently ignored.
               trackChildRevision:
                 oneOf: [{ type: boolean }, { type: 'null' }]
                 description: |
                   `convert-to-native` only (MVP-30357): `true` stores no revision, so the converted
                   row floats at the read clock like an `add`. A `convert-to-native` decision carries
                   **exactly one** of this and `childItemRevisionId`, or the commit answers
-                  `422 REVISION_CHOICE_REQUIRED` before any delta or acceptance is written. Ignored
-                  on `remove`. **🚧 Planned — MVP-30378, not yet implemented.** Also ignored on
-                  `accept-source-revision`, whose revision is always the candidate's.
-                  [assumes A-30378-11]
+                  `422 REVISION_CHOICE_REQUIRED` before any delta or acceptance is written.
+
+                  `true` beside any other action is refused `400 INVALID_REQUEST` (MVP-30379; it
+                  used to be ignored). `false` or absent chooses nothing and is accepted beside
+                  every action, so a client that serialises boolean defaults keeps working.
               acceptedFields:
                 type: object
                 minProperties: 1
                 additionalProperties: false
-                x-planned: { ticket: MVP-30379, assumptions: [A-30379-1, A-30379-2, A-30379-7] }
                 description: |
-                  **🚧 Planned — MVP-30379, not yet implemented.** `accept-fields` only, and
-                  required there. Each key is a field of the entry and each value says what to do
-                  with it. **Name only what you are taking.** An omitted field keeps the branch's
-                  own value, which is today's outcome.
+                  `accept-fields` only, and required there (MVP-30379); refused beside any other
+                  action. Each key is a field of the entry and each value says what to do with it.
+                  **Name only what you are taking.** An omitted field keeps the branch's own value.
+                  Keys and values are matched **case-insensitively** and echoed in the canonical
+                  form shown here; a key named twice in different case is refused.
 
                   | Value | Meaning | Stores |
                   |---|---|---|
@@ -3494,21 +3480,22 @@ components:
                   `candidate` and `release` render identically on this pull and differently on
                   later ones.
 
-                  Refused with `400 INVALID_REQUEST`:
+                  Refused with `400 INVALID_REQUEST` (full texts on the commit's 400 response):
 
                   - any key other than the three below, including `childItem` and the old spelling
                     `childItemRevision`
-                  - an empty object
+                  - a null or empty object
+                  - a value other than `candidate` / `release`
                   - a field that does not **actually diverge**, meaning the value the branch holds
                     does not differ from the candidate's. A tracking claim holds no revision, so
                     its revision never diverges, even when `current` and `candidate` render
                     different revisions.
-                  - `release` on a value the branch does not hold
-                  - `release` on `quantity` or `findNumber`, which have no clock to fall back to.
-                    Use `revert`, or `release` on `claim-superseded`.
+                  - `candidate` on a field the candidate line leaves blank, or a candidate quantity
+                    of 0 or less
+                  - `release` on a revision the branch does not hold (a floating collision)
+                  - `release` on `quantity` or `findNumber`, which have no source value to fall
+                    back to on their own. Use `revert`, or `release` on `claim-superseded`.
                   - `acceptedFields` on any action other than `accept-fields`
-
-                  [assumes A-30379-1, A-30379-2, A-30379-7]
                 properties:
                   quantity: { type: string, enum: [candidate] }
                   findNumber: { type: string, enum: [candidate] }
@@ -3525,11 +3512,15 @@ components:
           allOf: [{ $ref: '#/components/schemas/SalesforceId' }]
           description: The `Branch_Source_Rev__c` this commit created — an **insert**, never an update.
         acceptedRootRevisionId: { $ref: '#/components/schemas/SalesforceId' }
-        acceptedAt: { type: string, format: date-time }
+        acceptedAt:
+          type: string
+          format: date-time
+          description: When the acceptance was committed, reported to the whole second (MVP-30375), as a later read of the same record returns it.
         applied:
           type: array
           description: |
-            Every entry that took an explicit decision, plus every `claim-retained`,
+            Every entry that took an explicit decision (including a decided
+            `member-add-collision`), plus every `claim-retained`,
             `claim-superseded` and `member-add-converged` outcome — the set a caller needs to
             reconcile its held preview against what actually happened. (Re-previewing immediately
             after a commit is always `hasChanges: false`, so this is the only place to learn it.)
@@ -3540,9 +3531,10 @@ components:
     AppliedEntry:
       type: object
       description: |
-        One outcome the commit is reporting back. Four kinds appear here and no others:
-        `claim-orphaned` (the decision you supplied), `claim-retained` and
-        `claim-superseded` (informational), and `member-add-converged` (retired by the commit).
+        One outcome the commit is reporting back. Five kinds appear here and no others:
+        `claim-orphaned` (the decision you supplied), `claim-retained` and `claim-superseded`
+        (always, decided or not), `member-add-converged` (retired by the commit), and
+        `member-add-collision` — **only when a decision was taken on it** (MVP-30379).
 
         A re-preview straight after a commit is always `hasChanges: false`, so this array is the
         only place the retained and superseded outcomes can be read.
@@ -3552,32 +3544,37 @@ components:
         kind:
           type: string
           enum: [claim-orphaned, claim-retained, claim-superseded, member-add-converged, member-add-collision]
-          description: |
-            | Value | Status |
-            |---|---|
-            | `claim-orphaned`, `claim-retained`, `claim-superseded`, `member-add-converged` | ✅ shipped |
-            | `member-add-collision` | 🚧 MVP-30379 — only when an `accept-fields` decision was taken on it |
-
-            [assumes A-30379-8]
+          description: '`member-add-collision` appears only when an `accept-fields` decision was taken on it; an undecided collision is not echoed.'
         action:
           oneOf: [{ type: string }, { type: 'null' }]
           description: |
-            What was done:
+            What was done, in the decision's **canonical** lowercase spelling (`remove`, not
+            `Remove`, whatever the request's casing):
 
             - `convert-to-native` or `remove` — the decision supplied for a `claim-orphaned`
               entry.
+            - `accept-fields` — on a `claim-retained` or `member-add-collision` entry that took
+              that optional decision; see `acceptedFields`.
+            - `release` — on a `claim-superseded` entry that took that optional decision; the
+              claim was reverted.
             - `retired` — on `member-add-converged`. The commit appended a `Revert` delta dropping
               the branch's now-redundant local assertion. No decision is accepted for this kind.
-            - `null` — on `claim-retained` and `claim-superseded`, where nothing was written.
-            - `accept-source-revision` — **🚧 Planned — MVP-30378, not yet implemented.** On a
-              `claim-retained` entry that took that optional decision. The claim is now pinned to
-              the candidate's revision. [assumes A-30378-11]
-            - `accept-fields` / `release` — **🚧 Planned — MVP-30379, not yet implemented.** On the
-              `claim-retained`, `member-add-collision` or `claim-superseded` entry that took that
-              decision. [assumes A-30379-8]
+            - `null` — on an undecided `claim-retained` or `claim-superseded`, where nothing was
+              written.
+        acceptedFields:
+          oneOf:
+            - type: object
+              additionalProperties: { type: string, enum: [candidate, release] }
+            - type: 'null'
+          description: |
+            The `accept-fields` decision's map in canonical form (MVP-30379) — field names
+            `quantity` / `findNumber` / `childItemRevisionId`, values `candidate` / `release`,
+            whatever the request's casing. `null` for every other action and for undecided entries.
+          examples:
+            - { quantity: candidate, childItemRevisionId: candidate }
         edgeId:
           oneOf: [{ $ref: '#/components/schemas/SalesforceId' }, { type: 'null' }]
-          description: The branch-owned `Assembly_CI__c` this entry's target names, if any.
+          description: The branch-owned `Assembly_CI__c` this entry's target names, if any. For a live `replace` substitute's `claim-retained`, the substitute's edge.
 
     # -------------------------------------------------- comparison
 
@@ -3650,12 +3647,17 @@ components:
             `COMPARE_ROOTS_DIFFER`, which is about the pair and is reported here, first, because it
             reframes everything below it.
 
+            A branch or baseline side carries its resolution's complete warning set, including
+            `STORED_REVISION_RETIRED` (MVP-30376); a baseline side adds its drift canaries,
+            including `BASELINE_PIN_DRIFT` (MVP-30375). A source or `ebom` side stores no revisions
+            and carries neither.
+
             Split per side rather than by adding a `side` field to `TreeWarning`, which would put a
             new null key on every existing tree endpoint's warnings.
           items: { $ref: '#/components/schemas/TreeWarning' }
         rightWarnings:
           type: array
-          description: Warnings about the **right** side's own resolution. Always present; empty rather than absent.
+          description: Warnings about the **right** side's own resolution, populated as `leftWarnings` is (without `COMPARE_ROOTS_DIFFER`). Always present; empty rather than absent.
           items: { $ref: '#/components/schemas/TreeWarning' }
         truncated:
           type: boolean
