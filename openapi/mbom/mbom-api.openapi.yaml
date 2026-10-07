@@ -128,7 +128,7 @@ info:
 
     | Status | Meaning |
     |---|---|
-    | **202** | *Reserved.* A whole-configuration output or a pull commit accepted as a background job (`status: accepted`, `jobId`). Never answered in this version; handle it now so a later version breaks nothing. |
+    | **202** | *Reserved.* A whole-configuration output, a pull preview or a pull commit accepted as a background job (`status: accepted`, `jobId`). Never answered in this version; handle it now so a later version breaks nothing. |
     | **400** | The request could not be read, or a value is out of range. Fix the request. |
     | **403** | No permission. The body carries the label only — never the object that was denied. |
     | **404** | The path, an id in the body, or a `parentRowKey` names nothing. |
@@ -1890,6 +1890,18 @@ paths:
         `previewId` names this preview. Send it on the commit. Today it is checked like
         `diffFingerprint`; a later version may hold a large diff server-side under it.
 
+        ## Size
+
+        Pull preview and commit support structures up to 15 levels deep. A deeper structure may
+        answer `413 STRUCTURE_TOO_LARGE`.
+
+        **`202 Accepted` is reserved** for a later version that previews a very large pull as a
+        background job: the body would carry `status: accepted` and a `jobId`. This version always
+        answers `200` with `status: completed`, but a client should treat `status` as the outcome
+        rather than assume `200`.
+
+        ## Target rows
+
         Each entry tied to a row of the branch's current tree names it in `target.rowKey`, the
         same key the [branch tree read](#operation/getBranchTree) uses, so a client can show the
         entry in the tree. It is null for `member-added` (the branch has no such row yet) and for
@@ -2054,6 +2066,9 @@ paths:
         is written. Splitting the decisions does not help, because a pull commit is atomic and an
         undecided `claim-orphaned` entry blocks it. A later version may answer such a commit
         `202 Accepted` instead, taking the same request body.
+
+        Pull preview and commit support structures up to 15 levels deep. A deeper structure may
+        answer `413 STRUCTURE_TOO_LARGE`.
 
         ## Claim reconciliation: reported, never persisted
 
@@ -3820,8 +3835,17 @@ components:
 
     PullPreview:
       type: object
-      required: [sourceId, branchId, sourceType, currentSourceVersion, hasChanges, summary, entries, warnings, page, previewId, diffFingerprint, generatedAt]
+      required: [status, jobId, sourceId, branchId, sourceType, currentSourceVersion, hasChanges, summary, entries, warnings, page, previewId, diffFingerprint, generatedAt]
       properties:
+        status:
+          allOf: [{ $ref: '#/components/schemas/OutputStatus' }]
+          description: |
+            `completed` — the preview is computed and every field below is filled in. Always
+            `completed` in this version. `accepted` (with HTTP 202 and a `jobId`) is reserved for a
+            background preview.
+        jobId:
+          oneOf: [{ type: string }, { type: 'null' }]
+          description: Reserved; always null in this version.
         sourceId: { $ref: '#/components/schemas/SalesforceId' }
         branchId:
           allOf: [{ $ref: '#/components/schemas/SalesforceId' }]
@@ -4672,8 +4696,9 @@ components:
         returns part of a structure as if it were the whole.
 
         A smaller page does not help: the limit is about the configuration, not the response.
-        Contact your administrator. A configuration this large is a candidate for splitting into
-        smaller MBOMs.
+        Depth counts as well as size: pull preview and commit support structures up to 15 levels
+        deep, and a deeper structure may answer `413 STRUCTURE_TOO_LARGE`. Contact your
+        administrator. A configuration this large is a candidate for splitting into smaller MBOMs.
       content:
         application/json:
           schema: { $ref: '#/components/schemas/RestError' }
@@ -6236,6 +6261,8 @@ components:
 
     PullPreviewWithChanges:
       value:
+        status: completed
+        jobId: null
         sourceId: a1Cg8000000AbCeEAK
         branchId: a1Bg8000000AbCdEAK
         branchLabel: MBOM-GDL
@@ -6516,6 +6543,8 @@ components:
 
         `candidate` is the raw upstream line.
       value:
+        status: completed
+        jobId: null
         sourceId: a1Cg8000000AbCeEAK
         branchId: a1Bg8000000AbCdEAK
         branchLabel: MBOM-GDL
@@ -6676,6 +6705,8 @@ components:
         - **Bracket-005**, `claim-superseded`. It is a tracking claim that matches upstream. It
           offers `release`, which would revert it to `base`.
       value:
+        status: completed
+        jobId: null
         sourceId: a1Cg8000000AbCeEAK
         branchId: a1Bg8000000AbCdEAK
         branchLabel: MBOM-GDL
@@ -6853,6 +6884,8 @@ components:
 
     PullPreviewNoChanges:
       value:
+        status: completed
+        jobId: null
         sourceId: a1Cg8000000AbCeEAK
         branchId: a1Bg8000000AbCdEAK
         branchLabel: MBOM-GDL
@@ -6889,6 +6922,8 @@ components:
         `previewId` and `diffFingerprint` describe the **whole** diff and are the same on every
         page.
       value:
+        status: completed
+        jobId: null
         sourceId: a1Cg8000000AbCeEAK
         branchId: a1Bg8000000AbCdEAK
         branchLabel: MBOM-GDL
