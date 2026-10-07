@@ -135,7 +135,7 @@ info:
     | **409** | Well formed, and **retryable after changing state** — claim it first, restore it first, reload, re-preview. |
     | **413** | Too large for one transaction. `BATCH_TOO_LARGE`: more than 200 operations in one delta batch — split the request. `STRUCTURE_TOO_LARGE`: the structure the request has to resolve exceeds what one transaction can process — no retry of the same request will succeed. |
     | **422** | Well formed, but **impossible against the model**. Retrying unchanged will never succeed (a cycle is still a cycle). |
-    | **500** | Unmodelled server failure. Carries the exception type and message, never the stack trace. |
+    | **500** | Unmodelled server failure. Carries the error type only — never its message or the stack trace. |
 
     The 409/422 split is deliberate: a client that retries on a generic 4xx would spin forever on a
     cycle, and the two cases want different UI.
@@ -203,11 +203,10 @@ servers:
         default: PDLM/
         enum:
           - PDLM/
-          - ksplm/
           - ''
         description: |
           The managed-package namespace prefixing the REST path. `PDLM/` for the MBOM/BOM package,
-          giving `/services/apexrest/PDLM/api/v4/mbom/...`. `ksplm/` for the core PLM package.
+          giving `/services/apexrest/PDLM/api/v4/mbom/...`.
           Empty only for a genuinely unmanaged deployment.
 
           `GET {base}/v4` returns `"v4 live"` when the base URL and namespace resolve.
@@ -396,8 +395,9 @@ paths:
           revision, or two pins. Each occurrence follows its own revision: a pinned occurrence
           renders that revision's `nested` rows beneath it, and an unpinned occurrence keeps the
           source's lines. An edit on a suppressed line is hidden only when no occurrence still
-          renders that line, and `PINNED_SUBTREE_HIDES_EDITS` then names every pinned revision
-          that hid it. `MIXED_REVISION` is still reported, on the
+          renders that line, and `PINNED_SUBTREE_HIDES_EDITS` is then raised once per pinned row
+          and hidden item, each warning carrying the pinned row's `rowKey` and the hidden item.
+          `MIXED_REVISION` is still reported, on the
           [findings](#operation/getBranchFindings), never blocking. A branch `add` under such an
           item binds to the item, not to one rendering: it appears under **every** occurrence,
           with no warning of its own, and survives the parent advancing to a newer revision. Each
@@ -441,7 +441,8 @@ paths:
         ## Paging and expanding
 
         Rows come in **depth-first pre-order**: every row is followed by its own descendants before
-        its next sibling. Siblings are ordered by find number, then child item number.
+        its next sibling. Siblings with no find number come first; the rest are ordered by find
+        number, then child item number, then a stable server-defined tie-break.
 
         | Request | Returns |
         |---|---|
@@ -468,7 +469,7 @@ paths:
         |---|---|
         | `STORED_REVISION_RETIRED` | the row whose stored revision was Cancelled or Expired |
         | `MEMBER_ADD_COLLISION` | the collapsed row (`isCollapsedCollision: true`) |
-        | `PINNED_SUBTREE_HIDES_EDITS` | the pinned row whose structure hides the edits |
+        | `PINNED_SUBTREE_HIDES_EDITS` | the pinned row whose structure hides the edits — one per pinned row and hidden item |
         | `NESTED_CYCLE_PRUNED` | the row whose nested structure was dropped |
         | `REDLINE_AMBIGUOUS` | with `compare=`, each row the redline could not pair |
 
@@ -502,9 +503,12 @@ paths:
         Note that the comparison names its kinds from the **target's** point of view, so `added`
         here matches `member-removed` there.
 
-        - **A removed row is rendered** under this tree's occurrence of its parent, with the
-          target's own subtree beneath it, all `removed`. Its `detail` is the target's. It is not a
-          row of this branch: `edgeId`, `ciId` and `version` are null, and `isEditable` is false.
+        - **A removed row is rendered** under every occurrence of its parent item in this tree,
+          with the target's own subtree beneath it, all `removed`. Its `detail` is the target's. It
+          is not a row of this branch: `edgeId`, `ciId` and `version` are null, and `isEditable` is
+          false. A row beneath a removed row carries the comparison's `entryId` for its position
+          when the comparison reports that position as `member-added`, and a null `entryId` when
+          the comparison pairs that position elsewhere in this tree.
         - **An excluded row is `removed` itself**, not duplicated: the branch renders its tombstone,
           and the target still has the line.
         - **`hasChildren`** is true when either side has children, so a row whose children were
@@ -696,8 +700,10 @@ paths:
         `202 Accepted` with `status: accepted` and a `jobId`. Handle `status` now.
 
         Lines are ordered by child item number, then revision label, then secondary unique key,
-        and paged by `limit` (default 500) and `cursor`. Every page of one request resolves the
-        same state.
+        and paged by `limit` (default 500) and `cursor`. Each page continues after the last line
+        the previous page returned, and the set of lines is fixed by the state the first page
+        resolved. A Draft row's quantity edited in place between pages shows in the totals of
+        later pages.
 
         ## Access
 
@@ -811,7 +817,7 @@ paths:
         | `MIXED_REVISION` | an item rendered at more than one revision anywhere in the tree | null |
         | `STORED_REVISION_RETIRED` | a row whose stored revision was Cancelled or Expired | the row |
         | `MEMBER_ADD_COLLISION` | a position asserted by both the branch and its source | the collapsed row |
-        | `PINNED_SUBTREE_HIDES_EDITS` | branch edits a pinned row's structure hides | the pinned row |
+        | `PINNED_SUBTREE_HIDES_EDITS` | branch edits a pinned row's structure hides — one per pinned row and hidden item | the pinned row |
         | `NESTED_CYCLE_PRUNED` | a nested structure dropped because it reached a cycle | the row it hangs from |
 
         `MIXED_REVISION` findings come first, then the row warnings in tree order. Paged by `limit`
@@ -992,7 +998,8 @@ paths:
         that targets that row, and the operation succeeds only if the row has not changed since
         you read it. If it has, **that operation** fails with `409 STALE_REVISION`; reload the row
         and decide again. Other rows in the batch are not affected, so two people editing
-        different rows of one MBOM never conflict.
+        different rows of one MBOM never conflict. The `version` is compared with the row as of
+        the batch's `asOf` — the same state the operation is validated against.
 
         - **Optional.** An operation without `version` is not checked: the last writer wins.
           A grid sends it on every edit; an integration that owns the branch may omit it.
@@ -1844,7 +1851,7 @@ paths:
         Pins are judged **per occurrence**, as the tree renders them. A line behind a
         pin on one occurrence that another, unpinned occurrence of the same item still renders is
         not hidden: it is reported there like any other line, as `member-added` when it is new.
-        A hidden-edit warning names every pinned revision that hides the edit.
+        A hidden-edit warning is raised once per pinned row and hidden item.
 
         A live `replace` substitute hidden behind a post-pull pin gets no entry while hidden — only
         a `PINNED_SUBTREE_HIDES_EDITS` naming the substitute's item — and is `claim-retained` once
@@ -1875,8 +1882,10 @@ paths:
 
         `summary`, `diffFingerprint` and `previewId` describe the **complete** diff on every page,
         so a caller knows the size of the diff before paging, and can commit from any page. Follow
-        `page.nextCursor` for the rest. Every page of one preview resolves the same diff, even if the
-        branch is edited between pages.
+        `page.nextCursor` for the rest. Each page continues after the last entry the previous page
+        returned, so no entry is skipped or repeated, and the set of positions is fixed by the state
+        the first page resolved. A Draft row's quantity or find number edited in place between pages
+        shows its newer value on later pages.
 
         `previewId` names this preview. Send it on the commit. Today it is checked like
         `diffFingerprint`; a later version may hold a large diff server-side under it.
@@ -2354,8 +2363,11 @@ paths:
         pull's `entryId`-hash order: a pull preview is read as a flat decision list, while a
         comparison is read against a tree, and hash order scatters siblings.
 
-        Entries come in pages of `limit` (default 200); follow `page.nextCursor` for the rest. Every
-        page of one comparison resolves the same two sides. The default page size is **not**
+        Entries come in pages of `limit` (default 200); follow `page.nextCursor` for the rest. Each
+        page continues after the last entry the previous page returned, so no entry is skipped or
+        repeated, and the set of positions is fixed by the state the first page resolved. A Draft
+        row's quantity or find number edited in place between pages shows its newer value on later
+        pages. The default page size is **not**
         raised by `includeUnchanged=true`, deliberately: a 500-edge BOM comes back over three
         pages rather than as one response an order of magnitude larger than the caller expected.
 
@@ -2657,8 +2669,8 @@ components:
       required: false
       description: |
         `page.nextCursor` from the previous page. The cursor carries the request it continues, so
-        every other parameter except `limit` is ignored beside it, and the page resolves the same
-        state as the first one. Opaque; never expires; never parse it. A cursor this endpoint did
+        every other parameter except `limit` is ignored beside it, and the page continues the state
+        the first one resolved; each endpoint says what an edit made between pages shows. Opaque; never expires; never parse it. A cursor this endpoint did
         not issue for this record is `400 INVALID_REQUEST`.
       schema:
         type: string
@@ -2959,8 +2971,8 @@ components:
           enum: [added, removed, modified, unchanged]
           description: |
             - `added` — this tree has the row; the target does not.
-            - `removed` — the target has the row; this tree does not (rendered from the target), or
-              this tree excluded it.
+            - `removed` — the target has the row; this tree does not (rendered from the target,
+              under every occurrence of its parent item in this tree), or this tree excluded it.
             - `modified` — both have it, and `changedFields` differ.
             - `unchanged` — both have it, identical.
         changedFields:
@@ -2977,7 +2989,7 @@ components:
             - { quantity: 2 }
         entryId:
           oneOf: [{ type: string }, { type: 'null' }]
-          description: The `entryId` the comparison of the same pair gives this position, so the redline and the change list can be linked. Null on `unchanged` rows and on `REDLINE_AMBIGUOUS` rows.
+          description: The `entryId` the comparison of the same pair gives this position, so the redline and the change list can be linked. Null on `unchanged` rows and on `REDLINE_AMBIGUOUS` rows. A row beneath a `removed` row is itself `removed`; it carries the comparison's entry for its position when the comparison reports that position as `member-added`, and is null when the comparison pairs that position elsewhere in this tree.
 
     TreeRow:
       type: object
@@ -3018,7 +3030,8 @@ components:
             Opaque token for the row's current state. Send it back as
             `DeltaOperation.version` to have an edit refused with `409 STALE_REVISION` if anyone
             changed the row since you read it. It changes on every change to the row, including an
-            in-place quantity edit. Populated on every editable row of a branch tree read; null
+            in-place quantity edit. A `base` row's `version` also changes when a pull changes that
+            row's content: its quantity, find number or the child revision it resolves to. Populated on every editable row of a branch tree read; null
             on `nested` rows, on `compare`'s removed rows, and on source and baseline rows. Never
             parse it.
           examples: ['v1.Ab31kQ9x']
@@ -3186,8 +3199,9 @@ components:
               rendered elsewhere), or an `add` under an item only the suppressed structure
               supplied. Not raised for an exclusion of a line upstream has already removed (what
               `remove` leaves on a `claim-orphaned` line): it removes nothing that exists.
-              Rendered, never refused. Raised on the branch tree read (on the pinned row, whose
-              `rowKey` it carries), on the findings, and on the pull preview, where it describes
+              Rendered, never refused. Raised once per pinned row and hidden item: on the branch
+              tree read (on the pinned row, whose `rowKey` it carries, with the hidden item in
+              `itemId`), on the findings, and on the pull preview, where it describes
               the tree **after** the commit (with no optional decision taken).
               The remedy is an `update` on the pinned row: clear it with
               `trackChildRevision: true`, or pin it to the source line's own revision. Either keeps
@@ -3255,8 +3269,8 @@ components:
           type: array
           description: |
             Present on `MIXED_REVISION` — the revisions in play — and on
-            `PINNED_SUBTREE_HIDES_EDITS`, where it lists the pinned revisions whose structure hid
-            the edit (each is the `detail.childItemRevisionId` of a pinned row), with
+            `PINNED_SUBTREE_HIDES_EDITS`, where it holds the revision of the pinned row whose
+            structure hid the edit (that row's `detail.childItemRevisionId`), with
             `governingTimestamps` left empty; and on `STORED_REVISION_RETIRED`, where it holds
             exactly one id, the Cancelled or Expired stored revision, with `governingTimestamps`
             left empty. Every other code leaves it empty.
@@ -3329,7 +3343,9 @@ components:
           description: |
             The target row's `version` from a branch tree read. When sent, the
             operation applies only if the row is unchanged since that read; otherwise it fails
-            with `409 STALE_REVISION`. Omitted or null: no check — the last writer wins. Taken by
+            with `409 STALE_REVISION`. It is compared with the row as of the request's `asOf`,
+            the same state the operation is validated against. Omitted or null: no check — the
+            last writer wins. Taken by
             every operation that targets an existing row; ignored on `add`. See the endpoint's
             `version` section.
           examples: ['v1.Ab31kQ9x']
@@ -4570,9 +4586,9 @@ components:
         The MBOM's error shape. Keyed **`code`**, not the framework's `errorCode`.
 
         A 403 body carries the label **only**: naming the object a caller was just denied would hand
-        them the schema they have no access to. It goes to the debug log instead. A 500 *does* carry
-        the exception type and message — an unmodelled fault has to be diagnosable and its caller is
-        our own UI or an integration — but never the stack trace.
+        them the schema they have no access to. It goes to the debug log instead. A 500 carries
+        the error type only — enough to tell which class of fault occurred — and never its message
+        or the stack trace; the full detail goes to the debug log.
       required: [code, message]
       properties:
         code:
@@ -4815,8 +4831,8 @@ components:
 
     InternalError:
       description: |
-        500. Unhandled server-side failure. The body carries `INTERNAL_ERROR` plus the exception
-        type and message, and never the stack trace. Never answered as a 200.
+        500. Unhandled server-side failure. The body carries `INTERNAL_ERROR` plus the error type
+        only — never its message or the stack trace. Never answered as a 200.
       content:
         application/json:
           schema: { $ref: '#/components/schemas/RestError' }
@@ -4824,7 +4840,7 @@ components:
             unexpected:
               value:
                 code: INTERNAL_ERROR
-                message: 'System.NullPointerException: Attempt to de-reference a null object'
+                message: 'System.NullPointerException'
 
   # ---------------------------------------------------------------- examples
 
