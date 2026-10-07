@@ -48,8 +48,8 @@ info:
     | a *substitute* (from `replace`) | **`asOf`** — its child floats |
 
     A direct consequence is that **one item can render at two different revisions in the same
-    tree**. That is expected, not a fault, and is reported as a `MIXED_REVISION` warning beside the
-    data rather than an error instead of it.
+    tree**. That is expected, not a fault, and is reported as a `MIXED_REVISION` finding (see
+    [findings](#operation/getBranchFindings)) rather than as an error.
 
     #### A third answer: a chosen revision (MVP-30357)
 
@@ -101,7 +101,8 @@ info:
     the resolution depends on has moved since — `BASELINE_COUNT_DRIFT` for the row count,
     `BASELINE_PROVENANCE_DRIFT` for how many of those rows are the branch's own claims, and
     `BASELINE_PIN_DRIFT` for how many hold an explicitly chosen revision (MVP-30375; baselines cut
-    before it store no such count and never raise it).
+    before it store no such count and never raise it). They are reported by the baseline's
+    [findings](#operation/getBaselineFindings).
 
     ### 8. "Pull", not "merge"
 
@@ -129,16 +130,47 @@ info:
 
     | Status | Meaning |
     |---|---|
+    | **202** | *Reserved.* A whole-configuration output or a pull commit accepted as a background job (`status: accepted`, `jobId`). Never answered in this version; handle it now so a later version breaks nothing. |
     | **400** | The request could not be read, or a value is out of range. Fix the request. |
     | **403** | No permission. The body carries the label only — never the object that was denied. |
-    | **404** | The path, or an id in the body, names nothing. |
-    | **409** | Well formed, and **retryable after changing state** — claim it first, restore it first, re-preview. |
-    | **413** | More than 200 operations in one delta batch. |
+    | **404** | The path, an id in the body, or a `parentRowKey` names nothing. |
+    | **409** | Well formed, and **retryable after changing state** — claim it first, restore it first, reload, re-preview. |
+    | **413** | Too large for one transaction. `BATCH_TOO_LARGE`: more than 200 operations in one delta batch — split the request. `STRUCTURE_TOO_LARGE`: the structure the request has to resolve exceeds what one transaction can process — no retry of the same request will succeed. |
     | **422** | Well formed, but **impossible against the model**. Retrying unchanged will never succeed (a cycle is still a cycle). |
     | **500** | Unmodelled server failure. Carries the exception type and message, never the stack trace. |
 
     The 409/422 split is deliberate: a client that retries on a generic 4xx would spin forever on a
     cycle, and the two cases want different UI.
+
+    ---
+
+    ## Paging, row identity and snapshots (MVP-30540)
+
+    No read in this API returns a whole configuration in one response. Every structure read and
+    every change list is paged, and a client must not assume that one response is the whole tree.
+
+    - **Pages.** A paged response carries `page: {limit, hasMore, nextCursor}`. Send `nextCursor`
+      back as `cursor` to get the next page. A cursor continues the request that issued it: the
+      query is read from the cursor, so every other parameter except `limit` is ignored beside it.
+      Cursors are opaque, do not expire, and must not be parsed. **There is no total row count.**
+      `hasMore` is the only end-of-data signal.
+    - **Rows.** Every tree row carries a server-issued `rowKey`, its parent's `parentRowKey`, a
+      `level` (1 for the root's children) and `hasChildren`. Two occurrences of one item get two
+      different `rowKey`s, so a client re-nests rows by `parentRowKey`, never by item id. Children
+      are fetched by `rowKey`; the client never composes a resolution input.
+    - **`rowKey`** encodes the row's occurrence path from the root. It is URL-safe, at most 16
+      characters per level, and **stable** while that occurrence exists: across edits, across
+      snapshots, and across sessions. It changes only when the occurrence itself changes, for
+      example when a pull moves a parent to a revision whose BOM lines are new records.
+    - **`snapshot`.** Every structure read returns an opaque `snapshot` naming the state it
+      resolved. Send it back on child and page requests and they resolve the same rows, even if
+      the branch is edited in between. It pins **which rows exist and where**. A Draft row's
+      quantity or find number edited in place after the snapshot shows its newer value; a row's
+      `version` is what detects that (see the [delta endpoint](#operation/applyDeltaBatch)).
+    - **Whole-configuration outputs are their own resources.** The flattened view and the
+      findings (whole-configuration warnings) are separate endpoints, not modes of the tree read.
+      Each answers `200` today, and may answer `202 Accepted` + `jobId` for a large configuration
+      in a later version.
 
     ---
 
@@ -166,7 +198,30 @@ info:
     | [MVP-30376](https://propelplm.atlassian.net/browse/MVP-30376) | A `STORED_REVISION_RETIRED` warning, one per row whose stored child revision is now Cancelled or Expired, on the branch tree read and on both sides of a comparison. The revision still renders. |
     | [MVP-30377](https://propelplm.atlassian.net/browse/MVP-30377) | `DeltaOperation.autoClaim` on `update`, which claims and revises a `base` edge in one operation and carries the same revision choice as `claim`. `DeltaResult.claimed` reports it. |
     | [MVP-30378](https://propelplm.atlassian.net/browse/MVP-30378) | `update` changes (`childItemRevisionId`) or clears (`trackChildRevision: true`) a row's stored child revision — there is no separate operation. `update` addressed by `assemblyCiId` reaches a row hidden behind a pin. `DiffEntry.revisionAdvances`. A live `replace` substitute whose superseded line upstream keeps is `claim-retained`, no longer `claim-orphaned`. |
-    | [MVP-30379](https://propelplm.atlassian.net/browse/MVP-30379) | Per-field pull decisions: `accept-fields` with `PullCommitRequest.decisions[].acceptedFields` (`candidate` / `release` per field) on `claim-retained` and `member-add-collision`, and `release` on `claim-superseded`. `AppliedEntry.acceptedFields`. `claim-orphaned` stays the only required decision. A pull commit of more than 200 writing decisions answers `413`. |
+    | [MVP-30379](https://propelplm.atlassian.net/browse/MVP-30379) | Per-field pull decisions: `accept-fields` with `PullCommitRequest.decisions[].acceptedFields` (`candidate` / `release` per field) on `claim-retained` and `member-add-collision`, and `release` on `claim-superseded`. `AppliedEntry.acceptedFields`. `claim-orphaned` stays the only required decision. A pull commit of more than 200 writing decisions answers `413` (lifted by MVP-30540). |
+
+    ## Changes in MVP-30540: the paged read model
+
+    [MVP-30540](https://propelplm.atlassian.net/browse/MVP-30540) reshapes the reads so the API can
+    grow to very large configurations without a breaking change. **Which rows a read resolves to,
+    and their values, do not change.** A tree of up to 500 rows read with no new parameter still
+    comes back in one page, with the same rows.
+
+    | Endpoint | What is added | What is retired (ignored if sent) |
+    |---|---|---|
+    | All three tree reads | `parentRowKey`, `depth`, `limit`, `cursor`, `snapshot`; `snapshot` and `page` on the response; `rowKey`, `parentRowKey`, `level`, `hasChildren`, `ciId`, `warningCodes` on every row; item numbers, names and revision labels filled in; `413 STRUCTURE_TOO_LARGE` | `flat`; nested `childRows` |
+    | Branch and baseline tree reads | `compare=` — a redlined tree, each row carrying `redline` | — |
+    | Branch tree read | `version` on every row; `warnings` lists only warnings about the rows returned | `MIXED_REVISION` moves to findings |
+    | Baseline tree read | — | the drift warnings move to findings |
+    | `POST /branches/{id}/deltas` | per-operation `version` (`409 STALE_REVISION` on a mismatch); `snapshot` and `invalidatedParentRowKeys` on the response; `413 STRUCTURE_TOO_LARGE` | — |
+    | `POST /branches/{id}/baselines` | `413 STRUCTURE_TOO_LARGE` | — |
+    | Pull preview | `limit`, `cursor`, `page`, `decision` filter, `previewId`, `target.rowKey`; `required` entries first; `413` | `entriesLimit`, `truncated` |
+    | Pull commit | `previewId`; `status`, `jobId` on the response; no fixed decision limit; `413 STRUCTURE_TOO_LARGE` | the 200-decision `413 BATCH_TOO_LARGE` |
+    | Both comparisons | `limit`, `cursor`, `page`, `target.rowKey`; `413` | `entriesLimit`, `truncated` |
+    | **New** | `GET /{branches,sources,baselines}/{id}/flattened`; `GET /{branches,baselines}/{id}/findings` | — |
+
+    A `QueryException` caused by a structure too large to query is now `413 STRUCTURE_TOO_LARGE`,
+    no longer `403 FORBIDDEN`.
 
   contact:
     name: Propel PLM Engineering
@@ -191,6 +246,7 @@ info:
     autoClaim: MVP-30377
     revisionEdit: MVP-30378
     perFieldDecisions: MVP-30379
+    pagedReadModel: MVP-30540
   x-design-doc: docs/architecture/mbom/mbom-pull-api.md
   x-demo-plan: docs/architecture/mbom/mbom-demo-test-plan.md
 
@@ -392,19 +448,20 @@ paths:
           that revision's eBOM beneath it as read-only `nested` rows, and the source's lines under
           it are suppressed. A branch edit sitting on one of those suppressed lines — a claim,
           exclusion, update or substitute, or an `add` under an item only the suppressed structure
-          supplied — takes no effect, and the read says so with `PINNED_SUBTREE_HIDES_EDITS`
-          rather than failing.
+          supplied — takes no effect, and the read says so with `PINNED_SUBTREE_HIDES_EDITS` on
+          the pinned row rather than failing.
         - **Each occurrence renders its own structure (MVP-30214).** One item can render in two
           places at two revisions — one occurrence pinned and another still at the source's
           revision, or two pins. Each occurrence follows its own revision: a pinned occurrence
           renders that revision's `nested` rows beneath it, and an unpinned occurrence keeps the
           source's lines. An edit on a suppressed line is hidden only when no occurrence still
           renders that line, and `PINNED_SUBTREE_HIDES_EDITS` then names every pinned revision
-          that hid it. `MIXED_REVISION` still fires, never blocking. A branch `add` under such an
+          that hid it. `MIXED_REVISION` is still reported, on the
+          [findings](#operation/getBranchFindings), never blocking. A branch `add` under such an
           item binds to the item, not to one rendering: it appears under **every** occurrence,
-          with no warning of its own, and survives the parent advancing to a newer revision. No
-          field is added to the row. The occurrences themselves are told apart by `edgeKey` and
-          `detail.parentItemId`; their children are not, in the flat shape (see below).
+          with no warning of its own, and survives the parent advancing to a newer revision. Each
+          occurrence, and each of its children, has its own `rowKey`, so a client places every row
+          under the right occurrence by `parentRowKey`.
         - **A row whose source line is gone renders only where the source's structure does
           (MVP-30214).** A claim or exclusion on a line upstream has since removed (see
           `claim-orphaned` on the pull) still hangs under its parent item, but only beneath an
@@ -435,28 +492,88 @@ paths:
         - **Unreachable rows are dropped.** A delta can name a parent item that is not in the tree —
           a subassembly whose item had nothing released at T_R drops out, and a claim beneath it
           survives the overlay as a row with an absent parent. This read walks down from the root and
-          keeps only what it can reach, in **both** shapes.
+          keeps only what it can reach.
         - **`warnings` and `rows` are always present**, empty rather than absent. A client that has
           to distinguish "no warnings" from "the key is missing" writes null checks at every call
           site, and one of them is eventually forgotten.
 
-        ## Flat vs. nested, and a real trap
+        ## Paging and expanding
 
-        `flat=true` (the **default**) returns one row per edge, each carrying `detail.parentItemId` and an
-        empty `childRows` — losslessly re-nestable by the client. `flat=false` nests via `childRows`.
+        Rows come in **depth-first pre-order**: every row is followed by its own descendants before
+        its next sibling. Siblings are ordered by find number, then child item number.
 
-        The one exception is an item that renders at two revisions, each occurrence with its own
-        structure (above). The children of both occurrences name the same `parentItemId`, and a
-        flat row does not say which revision's line it is, so re-nesting by `parentItemId` hangs
-        every occurrence's children under each. Read such a tree with `flat=false`, which places
-        each row under the occurrence it belongs to.
+        | Request | Returns |
+        |---|---|
+        | no `parentRowKey`, `depth` omitted | the whole tree, paged by `limit` (default 500) |
+        | no `parentRowKey`, `depth=1` | the root's children only — the first level of a grid |
+        | `parentRowKey=<rowKey>`, `depth=1` | that row's children — expanding one row in a grid |
+        | `parentRowKey=<rowKey>`, `depth` omitted | that row's whole subtree, not the row itself |
 
-        **The nested shape duplicates a shared subassembly; the flat shape does not.** The traversal
-        walks a DAG and emits a shared subtree once; nesting re-materialises it under every parent
-        that uses it, because that is what a BOM tree looks like to a person expanding it. So the two
-        shapes carry the same *content* but not the same row **count** — never treat a nested row
-        count as a total — and a deeply shared DAG can hit heap nested while rendering comfortably
-        flat.
+        `hasChildren` says whether a children request for the row would return anything. A shared
+        subassembly appears under every occurrence that renders it, each copy with its own
+        `rowKey`, because that is what a BOM tree looks like to a person expanding it.
+
+        Send the response's `snapshot` with every child and page request belonging to one view, so
+        they all resolve the same rows. Without it, a child request resolves the branch as it is
+        now, at `asOf`. A `rowKey` stays valid across snapshots while its occurrence exists; one
+        that no longer names a row answers `404 NOT_FOUND`.
+
+        ## Warnings on this read
+
+        `warnings` lists only warnings about **rows in this response**, each naming its row by
+        `rowKey`, and each row lists its own codes in `warningCodes`:
+
+        | Code | Raised on |
+        |---|---|
+        | `STORED_REVISION_RETIRED` | the row whose stored revision was Cancelled or Expired |
+        | `MEMBER_ADD_COLLISION` | the collapsed row (`isCollapsedCollision: true`) |
+        | `PINNED_SUBTREE_HIDES_EDITS` | the pinned row whose structure hides the edits |
+        | `NESTED_CYCLE_PRUNED` | the row whose nested structure was dropped |
+        | `REDLINE_AMBIGUOUS` | with `compare=`, each row the redline could not pair |
+
+        Warnings about the configuration as a whole — `MIXED_REVISION` — are not computed by a page
+        and are not on this read. The [findings](#operation/getBranchFindings) report them, with every
+        row-level warning beside them.
+
+        ## Redlines: `compare=`
+
+        `compare` adds a **redline** to every row: how this tree differs from a second
+        configuration. Rows are paired with the same correlation join the
+        [comparison](#operation/compareBranch) uses, so a redline and the comparison's entry for the
+        same position always agree, and `redline.entryId` is that entry's `entryId`.
+
+        | `compare` | Compares against |
+        |---|---|
+        | `source` | what this branch's own source supplies — "what has this MBOM changed?" |
+        | `baseline:{baselineId}` | a baseline, at its own recorded timepoint |
+        | `branch:{branchId}` | another branch, now |
+        | `ebom:{itemRevisionId}` | a released eBOM revision, at its release date |
+
+        `redline.status` reads **this tree against the target**:
+
+        | status | Meaning | Matching comparison kind |
+        |---|---|---|
+        | `added` | this tree has the row; the target does not | `member-removed` |
+        | `removed` | the target has the row; this tree does not | `member-added` |
+        | `modified` | both have it; `changedFields` lists what differs and `oldValues` holds the target's values | `member-differs` |
+        | `unchanged` | both have it, identical | `member-unchanged` |
+
+        Note that the comparison names its kinds from the **target's** point of view, so `added`
+        here matches `member-removed` there.
+
+        - **A removed row is rendered** under this tree's occurrence of its parent, with the
+          target's own subtree beneath it, all `removed`. Its `detail` is the target's. It is not a
+          row of this branch: `edgeId`, `ciId` and `version` are null, and `isEditable` is false.
+        - **An excluded row is `removed` itself**, not duplicated: the branch renders its tombstone,
+          and the target still has the line.
+        - **`hasChildren`** is true when either side has children, so a row whose children were
+          all removed still expands.
+        - **A position the join cannot pair degrades.** Rather than answering
+          `AMBIGUOUS_CORRELATION` as the comparison does, the read renders the rows unpaired, as
+          `added` and `removed`, each carrying `REDLINE_AMBIGUOUS`. A grid should not blank out
+          over one odd line.
+        - **`snapshot` pins both sides**, so a child page joins against the same target state.
+        - The target is described once, on the response, as `compareTarget`.
 
         ## Reads create nothing
 
@@ -465,23 +582,31 @@ paths:
       parameters:
         - $ref: '#/components/parameters/BranchId'
         - $ref: '#/components/parameters/AsOf'
-        - $ref: '#/components/parameters/Flat'
+        - $ref: '#/components/parameters/ParentRowKey'
+        - $ref: '#/components/parameters/Depth'
+        - $ref: '#/components/parameters/TreeLimit'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Snapshot'
+        - $ref: '#/components/parameters/Compare'
       responses:
         '200':
-          description: The resolved tree.
+          description: One page of the resolved tree.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/StructureTree' }
               examples:
-                flat:
-                  summary: Flat (default) — base, claiming, new and excluded rows
-                  $ref: '#/components/examples/BranchTreeFlat'
-                nested:
-                  summary: Nested (`flat=false`)
-                  $ref: '#/components/examples/BranchTreeNested'
-                mixedRevision:
-                  summary: With a `MIXED_REVISION` warning
-                  $ref: '#/components/examples/BranchTreeMixedRevision'
+                wholeTree:
+                  summary: The whole tree in one page — base, claiming, new and excluded rows
+                  $ref: '#/components/examples/BranchTreeWhole'
+                firstLevelPaged:
+                  summary: '`depth=1&limit=2` — the first level of a grid, with more to come'
+                  $ref: '#/components/examples/BranchTreeFirstLevel'
+                children:
+                  summary: '`parentRowKey=…&depth=1&snapshot=…` — expanding one row'
+                  $ref: '#/components/examples/BranchTreeChildren'
+                redlined:
+                  summary: '`compare=source` — what this MBOM changed'
+                  $ref: '#/components/examples/BranchTreeRedlined'
                 pinnedClaim:
                   summary: A claim pinned to another revision — its structure nested beneath, and a hidden edit warned
                   $ref: '#/components/examples/BranchTreePinnedClaim'
@@ -495,6 +620,10 @@ paths:
           description: |
             `ASOF_INVALID` — `asOf` could not be parsed. `ASOF_IN_FUTURE` — `asOf` is later than now;
             there is no configuration at a timepoint that has not happened.
+
+            `INVALID_REQUEST` — `limit` or `depth` is not a positive integer (or `all` for
+            `depth`); `cursor` or `snapshot` is not one this endpoint issued for this branch; or
+            `compare` is not one of the four forms.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/RestError' }
@@ -503,12 +632,35 @@ paths:
                   value:
                     code: ASOF_INVALID
                     message: 'The timepoint could not be read. Use an ISO-8601 timestamp, for example 2026-02-01T00:00:00Z. (yesterday)'
+                badCursor:
+                  value:
+                    code: INVALID_REQUEST
+                    message: 'That request could not be read. Check that the body is valid JSON and that every required value is supplied. (cursor was not issued by this endpoint for this branch)'
         '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFoundPath' }
+        '404':
+          description: |
+            `NOT_FOUND` — the path id names no branch (see `NotFoundPath`); `parentRowKey` names no
+            row in the state being read; or a `compare` target names nothing, or the wrong object.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RestError' }
+              examples:
+                unknownRowKey:
+                  value:
+                    code: NOT_FOUND
+                    message: 'That record does not exist, or you do not have access to it. (parentRowKey a0Bg8000000Ab77 names no row in this tree)'
+        '409':
+          description: '`NOT_RELEASED` — `compare=ebom:{id}` names a revision that is not Released, or is Cancelled, Expired, or has no release date.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RestError' }
+        '413': { $ref: '#/components/responses/StructureTooLarge' }
         '422':
           description: |
             `EBOM_CYCLE` — the source eBOM itself contains a cycle, so its structure cannot be
-            resolved. Fix the eBOM; retrying is pointless.
+            resolved. Fix the eBOM; retrying is pointless. With `compare`, a cycle beneath the
+            target's root is `CYCLE_DETECTED`, as on the comparison. A redline never answers
+            `AMBIGUOUS_CORRELATION`; it degrades instead (see above).
           content:
             application/json:
               schema: { $ref: '#/components/schemas/RestError' }
@@ -524,19 +676,24 @@ paths:
         branch's claims, excludes and replaces deliberately **not** overlaid.
 
         Use it to answer "what did I change relative to upstream?" by diffing this against
-        `GET /mbom/branches/{branchId}/tree`. Every row comes back `provenance: base`.
+        `GET /mbom/branches/{branchId}/tree`, or read the branch with `compare=source`. Every row
+        comes back `provenance: base`.
 
-        ## Why there is no `flat` parameter
-
-        A source's own structure has no deltas overlaid on it, so there is no nesting decision to
-        make. An unexpected `flat` is **ignored rather than rejected**, so one parameter set can be
-        sent to both tree reads.
+        Paging, `rowKey`s and `snapshot` work exactly as on the
+        [branch tree read](#operation/getBranchTree). There is no `compare` here, and every row's
+        `version` is null, because a source row cannot be edited through this source. A source
+        stores no revisions, so its rows raise no row warnings except `NESTED_CYCLE_PRUNED`.
       parameters:
         - $ref: '#/components/parameters/SourceId'
         - $ref: '#/components/parameters/AsOf'
+        - $ref: '#/components/parameters/ParentRowKey'
+        - $ref: '#/components/parameters/Depth'
+        - $ref: '#/components/parameters/TreeLimit'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Snapshot'
       responses:
         '200':
-          description: The source's own structure.
+          description: One page of the source's own structure.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/StructureTree' }
@@ -544,17 +701,261 @@ paths:
                 source:
                   $ref: '#/components/examples/SourceTree'
         '400':
-          description: '`ASOF_INVALID` or `ASOF_IN_FUTURE` — see the branch tree read.'
+          description: '`ASOF_INVALID`, `ASOF_IN_FUTURE` or `INVALID_REQUEST` — see the branch tree read.'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/RestError' }
         '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFoundPath' }
+        '404':
+          description: '`NOT_FOUND` — the path id names no source, or `parentRowKey` names no row.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RestError' }
+        '413': { $ref: '#/components/responses/StructureTooLarge' }
         '422':
           description: '`EBOM_CYCLE` — the source eBOM contains a cycle.'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/RestError' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  # ==================================================================== whole-configuration outputs
+
+  /mbom/branches/{branchId}/flattened:
+    get:
+      tags: [Structure]
+      operationId: getBranchFlattened
+      summary: Read a branch's flattened structure — one line per part, quantities summed
+      description: |
+        The branch's structure collapsed to **one line per part**: every occurrence of a part
+        anywhere in the tree, with its quantity multiplied down the path from the root and summed.
+        This is what a planner or a costing integration needs ("how many of each part does one
+        build take?") and what the eBOM grid's flattened view shows.
+
+        ## What is one line
+
+        A line is one **child item + rendered revision + secondary unique key**:
+
+        - **Quantities multiply, then sum.** A part used 2 per subassembly, in a subassembly used 3
+          per root, counts 6. The same part elsewhere in the tree adds to that line.
+        - **One item at two revisions is two lines**, each carrying `MIXED_REVISION` in
+          `warningCodes`. The quantities are never merged across revisions.
+        - **Only what the configuration contains** is counted. An excluded row, and everything its
+          exclusion prunes, adds nothing. Read-only `nested` rows count: they are real structure.
+        - The root item is not a line; it is the thing being built.
+
+        For an MBOM with no branch edits, the lines equal the eBOM grid's flattened view of the same
+        root revision at the same time.
+
+        ## A whole-configuration output
+
+        Every line depends on every occurrence in the tree, so even the first page needs the whole
+        structure. That is why this is its own resource rather than a mode of the tree read. It
+        answers `200` today. A later version may answer a very large configuration
+        `202 Accepted` with `status: accepted` and a `jobId`. Handle `status` now.
+
+        Lines are ordered by child item number, then revision label, then secondary unique key,
+        and paged by `limit` (default 500) and `cursor`. Every page of one request resolves the
+        same state.
+
+        ## Access
+
+        Read access, as the branch tree read. No DML.
+      parameters:
+        - $ref: '#/components/parameters/BranchId'
+        - $ref: '#/components/parameters/AsOf'
+        - $ref: '#/components/parameters/TreeLimit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of flattened lines.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FlattenedStructure' }
+              examples:
+                flattened:
+                  $ref: '#/components/examples/BranchFlattened'
+        '400':
+          description: '`ASOF_INVALID`, `ASOF_IN_FUTURE`, or `INVALID_REQUEST` for an unusable `limit` or `cursor` — as on the branch tree read.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RestError' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFoundPath' }
+        '413': { $ref: '#/components/responses/StructureTooLarge' }
+        '422':
+          description: '`EBOM_CYCLE` — the source eBOM contains a cycle.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RestError' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /mbom/sources/{sourceId}/flattened:
+    get:
+      tags: [Structure]
+      operationId: getSourceFlattened
+      summary: Read what a source supplies, flattened
+      description: |
+        The [flattened view](#operation/getBranchFlattened) of what one source supplies, with no
+        branch deltas applied — the flattened counterpart of the
+        [source tree read](#operation/getSourceTree). Same lines, ordering, paging and status.
+      parameters:
+        - $ref: '#/components/parameters/SourceId'
+        - $ref: '#/components/parameters/AsOf'
+        - $ref: '#/components/parameters/TreeLimit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of flattened lines.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FlattenedStructure' }
+        '400':
+          description: '`ASOF_INVALID`, `ASOF_IN_FUTURE` or `INVALID_REQUEST` — as on the branch flattened read.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RestError' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFoundPath' }
+        '413': { $ref: '#/components/responses/StructureTooLarge' }
+        '422':
+          description: '`EBOM_CYCLE` — the source eBOM contains a cycle.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RestError' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /mbom/baselines/{baselineId}/flattened:
+    get:
+      tags: [Baselines]
+      operationId: getBaselineFlattened
+      summary: Read the parts a baseline captured, flattened
+      description: |
+        The [flattened view](#operation/getBranchFlattened) of a baseline, re-resolved at the
+        baseline's own timepoint — the flattened counterpart of the
+        [baseline tree read](#operation/getBaselineTree). `asOf` is refused (`400 INVALID_REQUEST`)
+        for the reason given there.
+      parameters:
+        - $ref: '#/components/parameters/BaselineId'
+        - $ref: '#/components/parameters/TreeLimit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of flattened lines.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/FlattenedStructure' }
+        '400':
+          description: '`INVALID_REQUEST` — `asOf` was supplied, or `limit` or `cursor` is unusable.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RestError' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFoundPath' }
+        '413': { $ref: '#/components/responses/StructureTooLarge' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /mbom/branches/{branchId}/findings:
+    get:
+      tags: [Structure]
+      operationId: getBranchFindings
+      summary: Read every warning about a branch's configuration
+      description: |
+        Every warning the branch's resolution raises, over the **whole** configuration. A tree read
+        reports only warnings about the rows it returns. This is where to look for conditions
+        that no single page can see, and for the complete list of row warnings in one place.
+
+        | warningCode | About | `rowKey` |
+        |---|---|---|
+        | `MIXED_REVISION` | an item rendered at more than one revision anywhere in the tree | null |
+        | `STORED_REVISION_RETIRED` | a row whose stored revision was Cancelled or Expired | the row |
+        | `MEMBER_ADD_COLLISION` | a position asserted by both the branch and its source | the collapsed row |
+        | `PINNED_SUBTREE_HIDES_EDITS` | branch edits a pinned row's structure hides | the pinned row |
+        | `NESTED_CYCLE_PRUNED` | a nested structure dropped because it reached a cycle | the row it hangs from |
+
+        `MIXED_REVISION` findings come first, then the row warnings in tree order. Paged by `limit`
+        (default 200) and `cursor`; an empty `findings` is the healthy answer.
+
+        Like the [flattened view](#operation/getBranchFlattened), this is a whole-configuration
+        output: `200` today, and possibly `202 Accepted` + `jobId` for a very large configuration
+        in a later version.
+      parameters:
+        - $ref: '#/components/parameters/BranchId'
+        - $ref: '#/components/parameters/AsOf'
+        - $ref: '#/components/parameters/ListLimit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of findings.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Findings' }
+              examples:
+                mixedRevision:
+                  summary: An item at two revisions, and a dead stored revision
+                  $ref: '#/components/examples/BranchFindings'
+        '400':
+          description: '`ASOF_INVALID`, `ASOF_IN_FUTURE`, or `INVALID_REQUEST` for an unusable `limit` or `cursor`.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RestError' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFoundPath' }
+        '413': { $ref: '#/components/responses/StructureTooLarge' }
+        '422':
+          description: '`EBOM_CYCLE` — the source eBOM contains a cycle.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RestError' }
+        '500': { $ref: '#/components/responses/InternalError' }
+
+  /mbom/baselines/{baselineId}/findings:
+    get:
+      tags: [Baselines]
+      operationId: getBaselineFindings
+      summary: Check a baseline for drift
+      description: |
+        Re-resolves the baseline and compares what it finds against the counts its cut recorded.
+        Each mismatch is one finding. An empty `findings` means no drift was detected.
+
+        | warningCode | What moved |
+        |---|---|
+        | `BASELINE_COUNT_DRIFT` | the baseline re-derived a **different number of rows** than its cut recorded |
+        | `BASELINE_PROVENANCE_DRIFT` | a **different number of `claiming`** rows |
+        | `BASELINE_PIN_DRIFT` | a **different number of rows holding a chosen revision** (MVP-30375) |
+
+        The full meaning of each canary, and what none of them can see, is described on the
+        [baseline tree read](#operation/getBaselineTree). A baseline is a record of a decision
+        already taken, so the advice warnings a branch raises (`MIXED_REVISION` and the row
+        warnings) are not reported here. `asOf` is refused (`400 INVALID_REQUEST`).
+      parameters:
+        - $ref: '#/components/parameters/BaselineId'
+        - $ref: '#/components/parameters/ListLimit'
+        - $ref: '#/components/parameters/Cursor'
+      responses:
+        '200':
+          description: One page of findings — at most three.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Findings' }
+              examples:
+                clean:
+                  summary: No drift
+                  $ref: '#/components/examples/BaselineFindingsClean'
+                countDrift:
+                  summary: Count drift after a direct edit to an already-released eBOM
+                  $ref: '#/components/examples/BaselineFindingsDrift'
+                pinDrift:
+                  summary: BASELINE_PIN_DRIFT
+                  $ref: '#/components/examples/BaselineFindingsPinDrift'
+        '400':
+          description: '`INVALID_REQUEST` — `asOf` was supplied, or `limit` or `cursor` is unusable.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RestError' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFoundPath' }
+        '413': { $ref: '#/components/responses/StructureTooLarge' }
         '500': { $ref: '#/components/responses/InternalError' }
 
   # ==================================================================== editing
@@ -645,6 +1046,37 @@ paths:
         `convert-to-native`, and any `claim` / `add` / `exclude` / `replace` that has to mint a new
         edge identity.
 
+        ## `version` — detecting that someone else changed the row (MVP-30540)
+
+        Every row of a branch tree read carries an opaque `version`. Send it back on the operation
+        that targets that row, and the operation succeeds only if the row has not changed since
+        you read it. If it has, **that operation** fails with `409 STALE_REVISION`; reload the row
+        and decide again. Other rows in the batch are not affected, so two people editing
+        different rows of one MBOM never conflict.
+
+        - **Optional.** An operation without `version` is checked as before: the last writer wins.
+          A grid sends it on every edit; an integration that owns the branch may omit it.
+        - **Any change counts**: another user's claim, exclusion, restore, revert, conversion,
+          substitution, revision change, or an in-place quantity or find-number edit. A pull
+          commit that changes the row counts too.
+        - **Taken by every operation that targets an existing row**: `claim`, `update`,
+          `exclude`, `restore`, `replace` (the row being replaced), `revert` and
+          `convert-to-native`. Ignored on `add`, which creates a row.
+        - **Checked once the row is found**, before any other state guard, so a stale view gets
+          `STALE_REVISION` ("reload") rather than a misleading `CLAIM_REQUIRED` or
+          `ALREADY_CLAIMED`.
+        - Under `atomic: true` a mismatch fails the whole batch, as any validation failure does.
+          Send `atomic: false` to apply the edits that are still current and get the stale ones
+          back.
+
+        ## After the write: `snapshot` and `invalidatedParentRowKeys`
+
+        A successful response carries the `snapshot` of the branch **after** the write, and
+        `invalidatedParentRowKeys`: the rows whose children a client should fetch again, because a
+        row beneath them was added, removed or changed. An empty string in the list stands for the
+        root. Re-reading those rows' children with the new `snapshot` brings a grid up to date
+        without reloading the whole tree.
+
         ## `Idempotency-Key`
 
         Read and passed through, and **ignored this phase**. It is accepted so a client can start
@@ -702,13 +1134,14 @@ paths:
         2. `REVISION_CHOICE_REQUIRED`: both `childItemRevisionId` and `trackChildRevision: true`
            (any row, before the lookup).
         3. `NOT_FOUND`
-        4. `NOT_EDITABLE`: a nested row.
-        5. `CLAIM_REQUIRED`: a `base` row without `autoClaim`.
-        6. For an `autoClaim` claim of a `base` row: `REVISION_CHOICE_REQUIRED` (neither choice),
+        4. `STALE_REVISION`: a `version` was sent and the row has changed since (MVP-30540).
+        5. `NOT_EDITABLE`: a nested row.
+        6. `CLAIM_REQUIRED`: a `base` row without `autoClaim`.
+        7. For an `autoClaim` claim of a `base` row: `REVISION_CHOICE_REQUIRED` (neither choice),
            `INVALID_REQUEST` (a past `asOf`, as on `claim`), `REVISION_ITEM_MISMATCH`,
            `INVALID_REQUEST` (another operation in the batch already changed the row's
            membership).
-        7. For an owned row: `NOT_SUPPLIED` (a tombstone), `STALE_REVISION`,
+        8. For an owned row: `NOT_SUPPLIED` (a tombstone), `STALE_REVISION` (a past `asOf`),
            `REVISION_ITEM_MISMATCH`, `INVALID_REQUEST` (the row was already revised — or, for a
            revision change, had its membership changed — earlier in the batch).
 
@@ -818,6 +1251,15 @@ paths:
                       assemblyCiId: a1Eg8000000AbD1EAK
                       quantity: 4
                       findNumber: 10
+              updateWithVersion:
+                summary: Revise a row only if nobody changed it since it was read
+                value:
+                  operations:
+                    - op: update
+                      clientRef: grid-row-7
+                      assemblyCiId: a1Eg8000000AbD1EAK
+                      version: 'v1.Ab31kQ9x'
+                      quantity: 5
               updateAutoClaim:
                 summary: Claim a base line (tracking) and change its quantity in one operation
                 value:
@@ -973,7 +1415,7 @@ paths:
             | `ALREADY_PRESENT` | `add` of a (parent, child) the branch already carries locally; or an op on a **replaced** row | edit the existing row; or act on the substitute |
             | `NO_CLAIM` | `revert` on a row the branch asserts nothing about; `convert-to-native` on a row that is already `new` | nothing to undo or sever |
             | `NOT_SUPPLIED` | `revert` on a row no source supplies — falling back would make it vanish | `exclude` instead |
-            | `STALE_REVISION` | `update` against a revision superseded since your view | reload and retry |
+            | `STALE_REVISION` | an operation's `version` no longer matches the row; or an `update` at a past `asOf` against a revision superseded since | reload and retry |
             | `NOT_EDITABLE` | the target is inside the subtree of a locally added or substituted assembly, or of a row holding a revision other than its source line's | only source-supplied content is editable |
             | `CONCURRENT_WRITE` | another transaction holds this branch's write lock | send the same request again |
 
@@ -986,10 +1428,17 @@ paths:
               examples:
                 claimRequired:
                   $ref: '#/components/examples/DeltaBatchAtomicFailure'
+                staleVersion:
+                  $ref: '#/components/examples/DeltaBatchStaleVersion'
                 concurrentWrite:
                   $ref: '#/components/examples/ConcurrentWrite'
         '413':
-          description: '`BATCH_TOO_LARGE` — more than 200 operations. Split the change.'
+          description: |
+            `BATCH_TOO_LARGE` — more than 200 operations. Split the change.
+
+            `STRUCTURE_TOO_LARGE` — the branch is too large to validate the batch against in one
+            transaction. Nothing is written. Splitting the batch does not help; see
+            `StructureTooLarge`.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/RestError' }
@@ -998,6 +1447,8 @@ paths:
                   value:
                     code: BATCH_TOO_LARGE
                     message: 'A single request can carry at most 200 operations. Split the change into smaller batches. (240 operations, maximum 200)'
+                structureTooLarge:
+                  $ref: '#/components/examples/StructureTooLarge'
         '422':
           description: |
             Impossible against the model.
@@ -1170,6 +1621,7 @@ paths:
               examples:
                 concurrentWrite:
                   $ref: '#/components/examples/ConcurrentWrite'
+        '413': { $ref: '#/components/responses/StructureTooLarge' }
         '422':
           description: '`EBOM_CYCLE` — the source eBOM contains a cycle, so nothing can be resolved to cut.'
           content:
@@ -1194,19 +1646,23 @@ paths:
         caller believe they had asked a temporal question and got a temporal answer. Sending `asOf`
         is a `400 INVALID_REQUEST`.
 
-        `flat` **is** honoured, because that is a shape and not a clock.
+        Paging, `rowKey`s, `snapshot` and `compare` work exactly as on the
+        [branch tree read](#operation/getBranchTree). A baseline never changes, so `snapshot` only
+        matters with `compare`, where it pins the target.
 
         ## Differences from the branch read
 
         - **Excluded rows are filtered out.** A tree read renders a tombstone so the editor can see
           what was removed; a baseline is the record of what the branch *contained*.
-        - **`edgeId` and `edgeKey` are suppressed, and the per-row governing clock is collapsed** —
-          every row's `governingTimestamp` is the baseline's own `resolutionTimePoint`, never null. A
-          baseline row does not pretend to answer questions it cannot. `isReplaced` **is**
-          populated: leaving it null would render a substituted part identically to an ordinary one.
-        - **`warnings` carries drift only.** A `MIXED_REVISION` or `PINNED_SUBTREE_HIDES_EDITS`
-          warning is advice about a branch someone is still editing; a baseline is a record of a
-          decision already taken, so neither is forwarded.
+        - **`edgeId`, `edgeKey`, `ciId` and `version` are null, and the per-row governing clock is
+          collapsed** — every row's `governingTimestamp` is the baseline's own
+          `resolutionTimePoint`, never null. A baseline row does not pretend to answer questions it
+          cannot, and cannot be edited. `isReplaced` **is** populated: leaving it null would render
+          a substituted part identically to an ordinary one.
+        - **No advice warnings.** A `MIXED_REVISION`, `PINNED_SUBTREE_HIDES_EDITS`,
+          `MEMBER_ADD_COLLISION` or `STORED_REVISION_RETIRED` warning is advice about a branch
+          someone is still editing; a baseline is a record of a decision already taken, so none is
+          raised here. `warnings` is empty except for `REDLINE_AMBIGUOUS` under `compare`.
         - **Pinned rows reproduce exactly.** A row pinned to another revision re-resolves with that
           revision's `nested` structure beneath it and the source's lines suppressed, just as the
           branch read rendered it at the cut (MVP-30357). Before that, a baseline recorded the pin
@@ -1217,7 +1673,11 @@ paths:
           populated exactly as on the branch read. `wasClaimed` is evaluated as of the baseline's
           own timepoint.
 
-        ## The drift canaries
+        ## The drift canaries — reported by the findings
+
+        A drift canary compares counts over the **whole** baseline, which no page computes, so the
+        canaries are reported by [`GET /baselines/{baselineId}/findings`](#operation/getBaselineFindings),
+        not by this read.
 
         | warningCode | What moved |
         |---|---|
@@ -1238,28 +1698,29 @@ paths:
         counter.
       parameters:
         - $ref: '#/components/parameters/BaselineId'
-        - $ref: '#/components/parameters/Flat'
+        - $ref: '#/components/parameters/ParentRowKey'
+        - $ref: '#/components/parameters/Depth'
+        - $ref: '#/components/parameters/TreeLimit'
+        - $ref: '#/components/parameters/Cursor'
+        - $ref: '#/components/parameters/Snapshot'
+        - $ref: '#/components/parameters/Compare'
       responses:
         '200':
-          description: The re-resolved rows. Empty `rows` for a baseline that resolved to nothing is a `200`, not an error.
+          description: One page of the re-resolved rows. Empty `rows` for a baseline that resolved to nothing is a `200`, not an error.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/BaselineTree' }
               examples:
-                clean:
-                  summary: No drift
-                  $ref: '#/components/examples/BaselineTreeClean'
-                drifted:
-                  summary: Count drift after a direct edit to an already-released eBOM
-                  $ref: '#/components/examples/BaselineTreeDrift'
+                rows:
+                  summary: The rows a baseline captured
+                  $ref: '#/components/examples/BaselineTreeRows'
                 pinnedAuthor:
                   summary: Who chose each row's revision, and when
                   $ref: '#/components/examples/BaselineTreePinnedAuthor'
-                pinDrift:
-                  summary: BASELINE_PIN_DRIFT
-                  $ref: '#/components/examples/BaselineTreePinDrift'
         '400':
-          description: '`INVALID_REQUEST` — `asOf` was supplied. A baseline is already resolved.'
+          description: |
+            `INVALID_REQUEST` — `asOf` was supplied (a baseline is already resolved); or `limit`,
+            `depth`, `cursor`, `snapshot` or `compare` is unusable, as on the branch tree read.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/RestError' }
@@ -1269,7 +1730,22 @@ paths:
                     code: INVALID_REQUEST
                     message: 'That request could not be read. Check that the body is valid JSON and that every required value is supplied. (a baseline is already resolved, so asOf has nothing to answer; read the branch if you want a timepoint)'
         '403': { $ref: '#/components/responses/Forbidden' }
-        '404': { $ref: '#/components/responses/NotFoundPath' }
+        '404':
+          description: '`NOT_FOUND` — the path id names no baseline, `parentRowKey` names no row, or a `compare` target names nothing.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RestError' }
+        '409':
+          description: '`NOT_RELEASED` — `compare=ebom:{id}` names a revision that is not Released.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RestError' }
+        '413': { $ref: '#/components/responses/StructureTooLarge' }
+        '422':
+          description: '`CYCLE_DETECTED` — a cycle beneath the `compare` target''s root.'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/RestError' }
         '500': { $ref: '#/components/responses/InternalError' }
 
   # ==================================================================== pull
@@ -1468,15 +1944,24 @@ paths:
         `member-added`. `retargeted: true` therefore means a different child **revision**, not a
         different child item.
 
-        ## Truncation
+        ## Paging (MVP-30540)
 
-        `entriesLimit` caps how many **informational** entries come back. **`required` entries are
-        never truncated** — they block the commit, so hiding one would silently conceal a blocker.
-        `summary` always reports the *untruncated* totals, and `diffFingerprint` always covers the
-        complete diff, so a truncated response is still safe to commit from.
+        Entries come in pages of `limit` (default 200). **Every `required` entry comes before any
+        informational one**, so the first page shows the blockers. `decision=required` returns the
+        required entries only — the whole set a commit must decide.
 
-        This call is pure and deterministic, so retrieving more needs no cursor: re-issue with a
-        larger `entriesLimit` and get back a longer, stable prefix of the same diff.
+        `summary`, `diffFingerprint` and `previewId` describe the **complete** diff on every page,
+        so a caller knows the size of the diff before paging, and can commit from any page. Follow
+        `page.nextCursor` for the rest. Every page of one preview resolves the same diff, even if the
+        branch is edited between pages.
+
+        `previewId` names this preview. Send it on the commit. Today it is checked like
+        `diffFingerprint`; a later version may hold a large diff server-side under it.
+
+        Each entry tied to a row of the branch's current tree names it in `target.rowKey`, the
+        same key the [branch tree read](#operation/getBranchTree) uses, so a client can show the
+        entry in the tree. It is null for `member-added` (the branch has no such row yet) and for
+        `source-version-advance` (about the root).
 
         ## Access
 
@@ -1496,12 +1981,21 @@ paths:
             must not resolve to a timestamp at or earlier than the source's current T_R.
           schema:
             $ref: '#/components/schemas/SalesforceId'
-        - $ref: '#/components/parameters/EntriesLimit'
+        - name: decision
+          in: query
+          required: false
+          description: |
+            `required` returns only the entries a commit must decide; `informational` only the
+            rest. Omitted returns both, required first. Anything else is `400 INVALID_REQUEST`.
+            `summary` always covers the whole diff.
+          schema: { $ref: '#/components/schemas/Decision' }
+        - $ref: '#/components/parameters/ListLimit'
+        - $ref: '#/components/parameters/Cursor'
       responses:
         '200':
           description: |
-            The computed diff, returned bare. Also returned, with `hasChanges: false` and no entries,
-            when the branch is already current.
+            One page of the computed diff, returned bare. Also returned, with `hasChanges: false`
+            and no entries, when the branch is already current.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/PullPreview' }
@@ -1512,9 +2006,9 @@ paths:
                 alreadyCurrent:
                   summary: Branch already on the newest released revision
                   $ref: '#/components/examples/PullPreviewNoChanges'
-                truncated:
-                  summary: Informational entries capped; the required one survives
-                  $ref: '#/components/examples/PullPreviewTruncated'
+                paged:
+                  summary: '`limit=2` — the required entry first, more to come'
+                  $ref: '#/components/examples/PullPreviewPaged'
                 revisionMoves:
                   summary: A retargeted pinned claim offered accept-fields; a tracking claim flagged revisionAdvances
                   $ref: '#/components/examples/PullPreviewRevisionMoves'
@@ -1523,8 +2017,9 @@ paths:
                   $ref: '#/components/examples/PullPreviewPerFieldDecisions'
         '400':
           description: |
-            `INVALID_REQUEST` — `entriesLimit` was not a positive integer. Present-but-unusable is a
-            400 rather than a silent fallback to the default.
+            `INVALID_REQUEST` — `limit` is not a positive integer up to 2000, `decision` is not
+            `required` or `informational`, or `cursor` was not issued by this endpoint for this
+            source. Present-but-unusable is a 400 rather than a silent fallback to the default.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/RestError' }
@@ -1532,7 +2027,7 @@ paths:
                 badLimit:
                   value:
                     code: INVALID_REQUEST
-                    message: 'That request could not be read. Check that the body is valid JSON and that every required value is supplied. (entriesLimit 0)'
+                    message: 'That request could not be read. Check that the body is valid JSON and that every required value is supplied. (limit 0)'
         '403': { $ref: '#/components/responses/Forbidden' }
         '404':
           description: '`NOT_FOUND` — the source, or `candidateRootRevisionId`, does not exist.'
@@ -1545,6 +2040,7 @@ paths:
                     code: NOT_FOUND
                     message: 'That record does not exist, or you do not have access to it. (a1Bg8000000AbCdEAK is not a Branch_Source__c)'
         '409': { $ref: '#/components/responses/PullConflictPreview' }
+        '413': { $ref: '#/components/responses/StructureTooLarge' }
         '422': { $ref: '#/components/responses/PullUnprocessable' }
         '500': { $ref: '#/components/responses/InternalError' }
 
@@ -1559,14 +2055,20 @@ paths:
         dispositions and any optional decisions, and retires any `member-add-converged` local
         edge — **all under one savepoint**.
 
-        Returns **`201 Created`**, not 200: a new acceptance record genuinely exists.
+        Returns **`201 Created`**, not 200: a new acceptance record genuinely exists. The body's
+        `status` is `completed`.
+
+        **`202 Accepted` is reserved** for a later version that commits a very large pull as a
+        background job: the body would carry `status: accepted` and a `jobId`. This version always
+        commits synchronously, but a client should treat `status` as the outcome rather than assume
+        `201`.
 
         ## The diff is never trusted from the client
 
         This endpoint **re-resolves the same diff server-side**, through the same code path the
         preview used, and answers `STALE_REVISION` the moment the re-resolved `diffFingerprint`
-        disagrees with what you echoed back, or an `entryId` in `decisions[]` no longer names an
-        entry in it. Re-preview and resubmit.
+        disagrees with what you echoed back, a `previewId` you sent no longer names that diff, or
+        an `entryId` in `decisions[]` no longer names an entry in it. Re-preview and resubmit.
 
         A useful side effect: every preview-time failure mode (`NOT_RELEASED`,
         `CANDIDATE_ROOT_MISMATCH`, `CANDIDATE_NOT_NEWER`, `CYCLE_DETECTED`, `NOT_FOUND`) applies here
@@ -1608,15 +2110,22 @@ paths:
         A tracking claim stores no revision, so `childItemRevisionId` is never assertable on one,
         even when `current` and `candidate` render different revisions.
 
-        ### Batch limit
+        ### No fixed decision limit (MVP-30540)
 
-        Every decision that writes compiles to exactly one delta operation, all in **one** batch
-        capped at 200 operations. A commit whose `decisions[]` holds more than 200 entries is
-        refused whole with `413 BATCH_TOO_LARGE` — nothing written, never chunked, because a pull
-        commit is atomic. Commit 200, re-preview, decide the rest. The acceptance record and the
-        converged-collision retirement do not count toward the 200, but the retirement runs as its
-        **own** batch with its own 200-operation cap, so a pull with more than 200
-        `member-add-converged` entries is refused `413` too, whatever is decided.
+        Every decision that writes compiles to exactly one delta operation, applied inside the
+        commit's one savepoint. **There is no fixed count**: a pull needing a thousand
+        `claim-orphaned` decisions sends a thousand, in one commit. The same holds for the automatic
+        retirement of `member-add-converged` entries.
+
+        The limit is what one transaction can process. When the pull's resolutions and writes
+        would exceed it, the commit is refused whole with `413 STRUCTURE_TOO_LARGE`, and nothing
+        is written. Splitting the decisions does not help, because a pull commit is atomic and an
+        undecided `claim-orphaned` entry blocks it. A later version may answer such a commit
+        `202 Accepted` instead, taking the same request body.
+
+        *Before MVP-30540 a commit carrying more than 200 decisions answered
+        `413 BATCH_TOO_LARGE`, which made a pull with more than 200 required decisions impossible
+        to commit.*
 
         ## Claim reconciliation: reported, never persisted
 
@@ -1686,6 +2195,7 @@ paths:
                 value:
                   candidateRootRevisionId: a0Ag8000000Ab02EAC
                   diffFingerprint: 'sha256:9f2c41ab7e08d3b6'
+                  previewId: 'pv1.Xk3q9fA2c41ab7e0'
                   decisions:
                     - entryId: f4880c6b3e1a9d75
                       action: convert-to-native
@@ -1747,7 +2257,7 @@ paths:
                   decisions: []
       responses:
         '201':
-          description: The pull was committed. A new `Branch_Source_Rev__c` now exists.
+          description: 'The pull was committed (`status: completed`). A new `Branch_Source_Rev__c` now exists.'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/PullCommitResult' }
@@ -1806,21 +2316,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/RestError' }
         '409': { $ref: '#/components/responses/PullConflictCommit' }
-        '413':
-          description: |
-            `BATCH_TOO_LARGE` — too many operations (MVP-30379). Either `decisions[]` holds more
-            than 200 entries (each compiles to one operation), or the automatic retirement of
-            `member-add-converged` entries would exceed 200. Nothing is written. The decision count
-            is checked **first**, before the branch lock and the re-preview, so it wins over every
-            other refusal (including `STALE_REVISION` and `NOT_FOUND`).
-          content:
-            application/json:
-              schema: { $ref: '#/components/schemas/RestError' }
-              examples:
-                tooManyDecisions:
-                  value:
-                    code: BATCH_TOO_LARGE
-                    message: 'A single request can carry at most 200 operations. Split the change into smaller batches. (240 operations, maximum 200)'
+        '413': { $ref: '#/components/responses/StructureTooLarge' }
         '422': { $ref: '#/components/responses/PullUnprocessable' }
         '500': { $ref: '#/components/responses/InternalError' }
 
@@ -1936,27 +2432,27 @@ paths:
         carries only the kinds it observed. A comparison is read by a client rendering a fixed set
         of counters, and an absent key would make every one of them a null check.
 
-        Counts are always over the **untruncated** comparison.
+        Counts are always over the **whole** comparison, on every page.
 
-        ## Ordering and truncation
+        ## Ordering and paging
 
         Entries are ordered by **breadcrumb path, then find number, then child item id, then kind**,
         with `entryId` last purely as a total-order guarantee. A deliberate divergence from the
         pull's `entryId`-hash order: a pull preview is read as a flat decision list, while a
         comparison is read against a tree, and hash order scatters siblings.
 
-        `entriesLimit` caps `entries` as a **plain prefix** — unlike the pull, a comparison has no
-        `required` tier that trimming could silently hide. `summary` is left alone, which is what
-        makes `truncated: true` actionable rather than merely true; re-issue with a larger limit to
-        get a longer, stable prefix of the same comparison.
+        Entries come in pages of `limit` (default 200); follow `page.nextCursor` for the rest. Every
+        page of one comparison resolves the same two sides. The default page size is **not**
+        raised by `includeUnchanged=true`, deliberately: a 500-edge BOM comes back over three
+        pages rather than as one response an order of magnitude larger than the caller expected.
 
-        The default cap is **not** raised by `includeUnchanged=true`, deliberately: a 500-edge BOM
-        truncates at 200 and says so, rather than silently returning a response an order of
-        magnitude larger than the caller expected.
+        Each entry names the left side's row in `target.rowKey`, the same key the left side's tree
+        read uses, so a client can show the entry in the tree. It is null for `member-added` (the
+        left side has no such row) and for `root-version-differs`.
 
-        > Truncation is applied by the REST layer. The service beneath it always returns a complete
-        > comparison, so a Flow or an LWC controller calling it directly sees every entry with
-        > `truncated: false` and `entriesLimit: null`. Over HTTP both fields are always filled in.
+        To see the same differences laid over the tree itself, read the left side's tree with
+        `compare=` (see the [branch tree read](#operation/getBranchTree)). Both use one join, so
+        they always agree.
 
         ## Access
 
@@ -1976,7 +2472,8 @@ paths:
         - $ref: '#/components/parameters/AsOf'
         - $ref: '#/components/parameters/RightAsOf'
         - $ref: '#/components/parameters/IncludeUnchanged'
-        - $ref: '#/components/parameters/EntriesLimit'
+        - $ref: '#/components/parameters/ListLimit'
+        - $ref: '#/components/parameters/Cursor'
       responses:
         '200':
           description: 'The comparison. An identical pair is a `200` with `identical: true`, not an empty response and not an error.'
@@ -1993,16 +2490,16 @@ paths:
                 includingUnchanged:
                   summary: The same comparison with `includeUnchanged=true`
                   $ref: '#/components/examples/ComparisonIncludingUnchanged'
-                truncated:
-                  summary: The same comparison at `entriesLimit=2`
-                  $ref: '#/components/examples/ComparisonTruncated'
+                paged:
+                  summary: The same comparison at `limit=2`
+                  $ref: '#/components/examples/ComparisonPaged'
         '400':
           description: |
             `INVALID_REQUEST` — `rightKind` is missing or is not one of the four values;
-            `rightId` was not supplied; `entriesLimit` is not a positive integer (`entriesLimit=0`
-            is refused, **not** silently defaulted); or `rightAsOf` was supplied for a baseline
-            right side, which resolves at its own recorded timepoint and could not honour a
-            different one.
+            `rightId` was not supplied; `limit` is not a positive integer up to 2000 (`limit=0` is
+            refused, **not** silently defaulted); `cursor` was not issued by this endpoint; or
+            `rightAsOf` was supplied for a baseline right side, which resolves at its own recorded
+            timepoint and could not honour a different one.
 
             `ASOF_INVALID` / `ASOF_IN_FUTURE` — either clock could not be parsed, or names a moment
             that has not happened.
@@ -2019,7 +2516,7 @@ paths:
                 zeroLimit:
                   value:
                     code: INVALID_REQUEST
-                    message: 'That request could not be read. Check that the body is valid JSON and that every required value is supplied. (entriesLimit 0)'
+                    message: 'That request could not be read. Check that the body is valid JSON and that every required value is supplied. (limit 0)'
         '403': { $ref: '#/components/responses/Forbidden' }
         '404':
           description: |
@@ -2038,6 +2535,7 @@ paths:
                     code: NOT_FOUND
                     message: 'That record does not exist, or you do not have access to it. (a1Cg8000000AbCeEAK is not a Branch__c)'
         '409': { $ref: '#/components/responses/ComparisonConflict' }
+        '413': { $ref: '#/components/responses/StructureTooLarge' }
         '422': { $ref: '#/components/responses/ComparisonUnprocessable' }
         '500': { $ref: '#/components/responses/InternalError' }
 
@@ -2048,8 +2546,8 @@ paths:
       summary: Compare a baseline against another configuration
       description: |
         The same comparison as [`compareBranch`](#operation/compareBranch) — same right-hand types,
-        same kinds, same summary, same truncation — with a **baseline** on the left instead of a
-        branch.
+        same kinds, same summary, same paging — with a **baseline** on the left instead of a
+        branch. `target.rowKey` names the row of the baseline's own tree read.
 
         It exists because a baseline has to be able to sit on the left as well as the right: "what
         has this branch done since we froze it?" and "what changed between these two builds?" are
@@ -2080,10 +2578,11 @@ paths:
         - $ref: '#/components/parameters/RightId'
         - $ref: '#/components/parameters/RightAsOf'
         - $ref: '#/components/parameters/IncludeUnchanged'
-        - $ref: '#/components/parameters/EntriesLimit'
+        - $ref: '#/components/parameters/ListLimit'
+        - $ref: '#/components/parameters/Cursor'
       responses:
         '200':
-          description: The comparison, in the shape `compareBranch` returns — `left.kind` is `baseline`.
+          description: One page of the comparison, in the shape `compareBranch` returns — `left.kind` is `baseline`.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Comparison' }
@@ -2106,6 +2605,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/RestError' }
         '409': { $ref: '#/components/responses/ComparisonConflict' }
+        '413': { $ref: '#/components/responses/StructureTooLarge' }
         '422': { $ref: '#/components/responses/ComparisonUnprocessable' }
         '500': { $ref: '#/components/responses/InternalError' }
 
@@ -2178,38 +2678,122 @@ components:
       examples:
         iso: { value: '2026-02-01T00:00:00Z' }
 
-    Flat:
-      name: flat
+    ParentRowKey:
+      name: parentRowKey
       in: query
       required: false
       description: |
-        Response shape. **Flat is the default, and only an explicit `flat=false` nests.**
+        Read beneath this row instead of beneath the root: its children (`depth=1`) or its whole
+        subtree. The row itself is not returned. Use a `rowKey` exactly as a tree read issued it;
+        never compose or parse one.
 
-        Anything unrecognised (`flat=0`, `flat=no`) falls back to flat rather than raising — partly
-        because `Boolean.valueOf('0')` is `false` and the obvious implementation would *nest* for
-        `flat=0`, the opposite of what that caller asked for, and partly because a flat response
-        carries `parentItemId` on every row and is therefore losslessly re-nestable by the client.
-
-        Not accepted by `GET /mbom/sources/{sourceId}/tree` — silently ignored there, so one
-        parameter set can be sent to both tree reads.
+        A key that names no row in the state being read is `404 NOT_FOUND`. A key stays valid
+        across snapshots while its occurrence exists. Ignored beside `cursor`.
       schema:
-        type: boolean
-        default: true
+        type: string
+        maxLength: 1024
+      examples:
+        level2: { value: 'a0Bg8000000Ab10.a0Bg8000000Ab31' }
 
-    EntriesLimit:
-      name: entriesLimit
+    Depth:
+      name: depth
       in: query
       required: false
       description: |
-        Caps how many **`informational`** entries the preview returns. `required` entries are always
-        returned in full regardless of this cap.
+        How many levels below the root (or below `parentRowKey`) to return: a positive integer, or
+        `all`. **Defaults to `all`**, so a request with no new parameter returns the whole tree,
+        paged. A grid expanding one level at a time sends `depth=1`.
 
-        Must be a positive integer; anything else is `400 INVALID_REQUEST` rather than a silent
-        fallback to the default.
+        Anything else is `400 INVALID_REQUEST`. Ignored beside `cursor`.
+      schema:
+        oneOf:
+          - type: integer
+            minimum: 1
+          - type: string
+            const: all
+        default: all
+
+    TreeLimit:
+      name: limit
+      in: query
+      required: false
+      description: |
+        The most rows (or lines) one page returns: 1 to 2000, **default 500**. Anything else is
+        `400 INVALID_REQUEST`, never a silent fallback. A page may hold fewer rows than `limit` and
+        still have `hasMore: true`; rely on `hasMore`, never on a short page.
       schema:
         type: integer
         minimum: 1
+        maximum: 2000
+        default: 500
+
+    ListLimit:
+      name: limit
+      in: query
+      required: false
+      description: |
+        The most entries one page returns: 1 to 2000, **default 200**. Anything else is
+        `400 INVALID_REQUEST`, never a silent fallback. Rely on `page.hasMore`, never on a short
+        page.
+
+        *Replaces `entriesLimit` (MVP-30540), which is ignored if sent.*
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 2000
         default: 200
+
+    Cursor:
+      name: cursor
+      in: query
+      required: false
+      description: |
+        `page.nextCursor` from the previous page. The cursor carries the request it continues, so
+        every other parameter except `limit` is ignored beside it, and the page resolves the same
+        state as the first one. Opaque; never expires; never parse it. A cursor this endpoint did
+        not issue for this record is `400 INVALID_REQUEST`.
+      schema:
+        type: string
+
+    Snapshot:
+      name: snapshot
+      in: query
+      required: false
+      description: |
+        The `snapshot` a previous tree read of this record returned. The read then resolves exactly
+        the rows that read did, even if the branch has been edited since, so children fetched
+        later fit the rows already on screen. `asOf` is ignored beside it, because the snapshot
+        carries its own.
+
+        Without it, the read resolves the current state at `asOf`. A snapshot pins which rows exist
+        and where they hang. A Draft row's quantity or find number edited in place since shows its
+        newer value; the row's `version` detects that. A snapshot never expires. One this endpoint
+        did not issue for this record is `400 INVALID_REQUEST`.
+      schema:
+        type: string
+
+    Compare:
+      name: compare
+      in: query
+      required: false
+      description: |
+        Adds a `redline` to every row, comparing this tree against a target:
+
+        - `source` — what this branch's own source supplies (branch tree read only).
+        - `baseline:{baselineId}` — a baseline, at its own recorded timepoint.
+        - `branch:{branchId}` — another branch, now.
+        - `ebom:{itemRevisionId}` — a released eBOM revision, at its release date.
+
+        The target resolves exactly as the comparison's right side does with no `rightAsOf`. See
+        the [branch tree read](#operation/getBranchTree) for what each redline status means. Any
+        other form is `400 INVALID_REQUEST`; an id that names nothing, or the wrong object, is
+        `404 NOT_FOUND`. Omitted, every row's `redline` is null.
+      schema:
+        type: string
+        pattern: '^(source|baseline:[a-zA-Z0-9]{15,18}|branch:[a-zA-Z0-9]{15,18}|ebom:[a-zA-Z0-9]{15,18})$'
+      examples:
+        source: { value: source }
+        baseline: { value: 'baseline:a1Fg8000000AbE1EAK' }
 
     RightKind:
       name: rightKind
@@ -2281,8 +2865,9 @@ components:
         fallback is the smaller response and loses no information: `summary.unchanged` carries the
         count either way.
 
-        It costs no extra query. It does **not** raise `entriesLimit`, and it moves `summary.total`
-        and `summary.byKind`, which count entries emitted — see the endpoint description.
+        It costs no extra query. It does **not** raise the default `limit`, and it moves
+        `summary.total` and `summary.byKind`, which count entries emitted — see the endpoint
+        description.
       schema:
         type: boolean
         default: false
@@ -2404,13 +2989,13 @@ components:
 
     StructureTree:
       type: object
-      description: The response body of **both** tree reads — a branch's effective structure, and a source's structure on its own.
-      required: [rootRevisionId, rows, warnings]
+      description: The response body of the branch and source tree reads — one page of a branch's effective structure, or of a source's structure on its own.
+      required: [rootRevisionId, snapshot, parentRowKey, rows, warnings, page]
       properties:
         asOf:
           type: string
           format: date-time
-          description: The timepoint this tree was resolved at, echoed so the response is self-describing. Present even when the caller sent none.
+          description: The timepoint this tree was resolved at, echoed so the response is self-describing. Present even when the caller sent none, and taken from the `snapshot` when one was sent.
         rootRevisionId:
           allOf: [{ $ref: '#/components/schemas/SalesforceId' }]
           description: The root `Item_Revision__c` the structure hangs from.
@@ -2418,26 +3003,133 @@ components:
           type: string
           format: date-time
           description: '**T_R** — the source timepoint `base` rows resolve at.'
+        snapshot:
+          type: string
+          description: |
+            Opaque name of the state this page resolved. Send it with child and page requests that
+            belong to the same view; see the `snapshot` parameter. Never parse it.
+          examples: ['s1.MjAyNi0wNC0wNVQxNzoyMjowM1p8NDI']
+        parentRowKey:
+          oneOf: [{ type: string }, { type: 'null' }]
+          description: The `parentRowKey` this page was read beneath; null for a read from the root.
+        compareTarget:
+          oneOf: [{ $ref: '#/components/schemas/ComparisonSide' }, { type: 'null' }]
+          description: What `compare` compared against, described as a comparison describes its right side. Null without `compare`, and always null on a source tree read.
         rows:
           type: array
-          description: Always present; empty rather than absent.
+          description: One page of rows in depth-first pre-order. Always present; empty rather than absent.
           items: { $ref: '#/components/schemas/TreeRow' }
         warnings:
           type: array
-          description: Always present; empty rather than absent.
+          description: |
+            Warnings about **rows in this page** only, each naming its row by `rowKey`. Always
+            present; empty rather than absent. Whole-configuration warnings are on the findings.
           items: { $ref: '#/components/schemas/TreeWarning' }
+        page: { $ref: '#/components/schemas/PageInfo' }
+
+    PageInfo:
+      type: object
+      description: Where this page sits in the whole answer. There is deliberately no total count.
+      required: [limit, hasMore, nextCursor]
+      properties:
+        limit:
+          type: integer
+          description: The effective page size — the `limit` sent, or the default.
+          examples: [500]
+        hasMore:
+          type: boolean
+          description: True when another page follows. The only end-of-data signal; a short page is not one.
+        nextCursor:
+          oneOf: [{ type: string }, { type: 'null' }]
+          description: Send as `cursor` for the next page. Null exactly when `hasMore` is false. Opaque.
+          examples: ['c1.YTBCZzgwMDAwMDBBYjEyfDUwMA']
+
+    RowRedline:
+      type: object
+      description: |
+        How a row differs from the `compare` target — read as **this tree against the target**.
+        See the branch tree read for the full rules.
+      required: [status, changedFields, oldValues, entryId]
+      properties:
+        status:
+          type: string
+          enum: [added, removed, modified, unchanged]
+          description: |
+            - `added` — this tree has the row; the target does not.
+            - `removed` — the target has the row; this tree does not (rendered from the target), or
+              this tree excluded it.
+            - `modified` — both have it, and `changedFields` differ.
+            - `unchanged` — both have it, identical.
+        changedFields:
+          type: array
+          description: On `modified`, which of the three assertable values differ, in this fixed order; empty otherwise.
+          items:
+            type: string
+            enum: [quantity, findNumber, childRevision]
+        oldValues:
+          type: object
+          description: On `modified`, the **target's** value of each changed field, keyed `quantity`, `findNumber` and `childItemRevisionId`; empty otherwise.
+          additionalProperties: true
+          examples:
+            - { quantity: 2 }
+        entryId:
+          oneOf: [{ type: string }, { type: 'null' }]
+          description: The `entryId` the comparison of the same pair gives this position, so the redline and the change list can be linked. Null on `unchanged` rows and on `REDLINE_AMBIGUOUS` rows.
 
     TreeRow:
       type: object
       description: |
-        One row of a resolved tree. The same shape serves both response shapes: in the **nested**
-        shape `childRows` holds the subtree and `parentItemId` is still populated; in the **flat**
-        shape every row is a sibling and `childRows` is empty — so a client can rebuild the tree from
-        a flat response without a second request. The one exception is an item rendered at two
-        revisions, whose occurrences' children all name the same `parentItemId`; see the branch
-        tree read's "Flat vs. nested".
-      required: [provenance, childRows]
+        One row of a resolved tree: one occurrence of one BOM line. Rows carry their own place in
+        the tree (`rowKey`, `parentRowKey`, `level`), so a client rebuilds the tree from any set of
+        pages by `parentRowKey`, and never by item id — one item can appear at several places.
+      required: [rowKey, parentRowKey, level, hasChildren, provenance, warningCodes]
       properties:
+        rowKey:
+          type: string
+          maxLength: 1024
+          description: |
+            Opaque, server-issued identity of this occurrence (MVP-30540). It encodes the path from
+            the root, so two occurrences of one item have two keys. URL-safe, at most 16
+            characters per level, and **stable** across edits and snapshots while the occurrence
+            exists. Send it as `parentRowKey` to read beneath this row. Never compose or parse it.
+          examples: ['a0Bg8000000Ab10']
+        parentRowKey:
+          oneOf: [{ type: string }, { type: 'null' }]
+          description: The `rowKey` of the row this one hangs beneath; **null for the root's children** (level 1).
+        level:
+          type: integer
+          minimum: 1
+          description: Depth below the root — 1 for the root's children.
+        hasChildren:
+          type: boolean
+          description: True when reading beneath this row would return at least one row. Under `compare`, true when either side has children.
+        ciId:
+          oneOf: [{ $ref: '#/components/schemas/SalesforceId' }, { type: 'null' }]
+          description: |
+            The `CI__c` the branch holds for this row — the id `exclude`, `restore`, `revert` and
+            `convert-to-native` take (MVP-30540). **Null for a `base` row**, which has no branch
+            record, for a `nested` row, and on source and baseline rows.
+        version:
+          oneOf: [{ type: string }, { type: 'null' }]
+          description: |
+            Opaque token for the row's current state (MVP-30540). Send it back as
+            `DeltaOperation.version` to have an edit refused with `409 STALE_REVISION` if anyone
+            changed the row since you read it. It changes on every change to the row, including an
+            in-place quantity edit. Populated on every editable row of a branch tree read; null
+            on `nested` rows, on `compare`'s removed rows, and on source and baseline rows. Never
+            parse it.
+          examples: ['v1.Ab31kQ9x']
+        warningCodes:
+          type: array
+          description: |
+            The codes of the row-level warnings about this row (MVP-30540): `STORED_REVISION_RETIRED`,
+            `MEMBER_ADD_COLLISION`, `PINNED_SUBTREE_HIDES_EDITS`, `NESTED_CYCLE_PRUNED`,
+            `REDLINE_AMBIGUOUS`. The full warning is in the response's `warnings`. Always present;
+            empty rather than absent.
+          items: { type: string }
+        redline:
+          oneOf: [{ $ref: '#/components/schemas/RowRedline' }, { type: 'null' }]
+          description: How this row differs from the `compare` target. Null without `compare`.
         edgeId:
           oneOf: [{ $ref: '#/components/schemas/SalesforceId' }, { type: 'null' }]
           description: The `Assembly_CI__c` edge. **Null for a `base` row** that no branch has claimed. Suppressed on baseline rows.
@@ -2553,16 +3245,15 @@ components:
           description: |
             When that branch revision was created, to the whole second (MVP-30375). Null exactly
             where `revisionChosenById` is.
-        childRows:
-          type: array
-          description: Populated in the nested shape only; **empty, never null**, in the flat shape.
-          items: { $ref: '#/components/schemas/TreeRow' }
 
     TreeWarning:
       type: object
       description: |
         A condition worth telling the user about that does **not** block the read. Shared by the tree
-        reads, the baseline read and the pull preview.
+        reads, the findings, the pull preview and the comparisons.
+
+        A tree read carries only the warnings about the rows it returns; the
+        [findings](#operation/getBranchFindings) carry every warning about the whole configuration.
 
         The key is **`warningCode`**, matching the existing mBOM convention — never `code`, which
         this API reserves for the error body.
@@ -2570,13 +3261,15 @@ components:
       properties:
         warningCode:
           type: string
-          enum: [MIXED_REVISION, BASELINE_COUNT_DRIFT, BASELINE_PROVENANCE_DRIFT, NESTED_CYCLE_PRUNED, PINNED_SUBTREE_HIDES_EDITS, MEMBER_ADD_COLLISION, COMPARE_ROOTS_DIFFER, BASELINE_PIN_DRIFT, STORED_REVISION_RETIRED]
+          enum: [MIXED_REVISION, BASELINE_COUNT_DRIFT, BASELINE_PROVENANCE_DRIFT, NESTED_CYCLE_PRUNED, PINNED_SUBTREE_HIDES_EDITS, MEMBER_ADD_COLLISION, COMPARE_ROOTS_DIFFER, BASELINE_PIN_DRIFT, STORED_REVISION_RETIRED, REDLINE_AMBIGUOUS]
           description: |
             The complete vocabulary.
 
             - `MIXED_REVISION` — one item rendered at more than one revision in the same tree,
               because two clocks are in play. Legal and expected; warned, never blocked. Each
-              occurrence renders its own revision's structure.
+              occurrence renders its own revision's structure. A whole-configuration finding: on
+              the branch findings, the pull preview and a comparison's sides, never on a tree
+              read, whose page may hold only one of the revisions.
             - `BASELINE_COUNT_DRIFT` — a baseline re-derived a different **row count** than its cut
               recorded.
             - `BASELINE_PROVENANCE_DRIFT` — a baseline re-derived a different number of **`claiming`**
@@ -2594,8 +3287,9 @@ components:
               rendered elsewhere), or an `add` under an item only the suppressed structure
               supplied. Not raised for an exclusion of a line upstream has already removed (what
               `remove` leaves on a `claim-orphaned` line): it removes nothing that exists.
-              Rendered, never refused. Raised on the tree reads and on the pull preview,
-              where it describes the tree **after** the commit (with no optional decision taken).
+              Rendered, never refused. Raised on the branch tree read (on the pinned row, whose
+              `rowKey` it carries), on the findings, and on the pull preview, where it describes
+              the tree **after** the commit (with no optional decision taken).
               The remedy is an `update` on the pinned row (MVP-30378): clear it with
               `trackChildRevision: true`, or pin it to the source line's own revision. Either keeps
               the row's quantity and find number, and the hidden edits render again.
@@ -2615,7 +3309,7 @@ components:
               **holding a chosen revision** (`hasChosenRevision`) than its cut recorded. The count
               covers contained members, excluding tombstones, `nested` rows and edits hidden behind
               a pin. It catches a revision decision moving where no row count or claim count moved.
-              Raised only where a baseline is re-resolved: the baseline tree read, and a
+              Raised only where a baseline is re-resolved: the baseline findings, and a
               comparison's baseline side. It carries no `itemId` and empty arrays, like the other
               drift codes. A baseline cut before MVP-30375 has no stored count and never raises it.
             - `STORED_REVISION_RETIRED` (MVP-30376) — a row's explicitly stored child revision (a
@@ -2630,11 +3324,25 @@ components:
               `new` row), by a tombstone, or by an edit hidden behind a pin. On a dead pin with
               nested structure, it names the pinned row, not the rows beneath it. A user who cannot
               see the stored revision under sharing gets no warning. Raised on the branch tree read
-              and on both sides of a comparison (branch and baseline sides); **not** on the
-              baseline tree read (drift only) or the pull preview.
+              (on the row), on the branch findings, and on both sides of a comparison (branch and
+              baseline sides); **not** on the baseline tree read or the pull preview.
+            - `REDLINE_AMBIGUOUS` (MVP-30540) — under `compare`, the correlation join could not tell
+              which row of this tree pairs with which row of the target at one position, so the
+              rows are shown unpaired (`added` and `removed`) instead of refusing the read. One
+              warning per such row, carrying its `rowKey`. The
+              [comparison](#operation/compareBranch) of the same pair answers
+              `422 AMBIGUOUS_CORRELATION` and its remedies apply. Tree reads with `compare` only.
         message:
           type: string
           description: Human-readable, from a Custom Label. Translated; never parse it.
+        rowKey:
+          oneOf: [{ type: string }, { type: 'null' }]
+          description: |
+            The row the warning is about (MVP-30540), on a tree read and on the findings:
+            `STORED_REVISION_RETIRED`, `MEMBER_ADD_COLLISION`, `PINNED_SUBTREE_HIDES_EDITS` (the
+            pinned row), `NESTED_CYCLE_PRUNED` and `REDLINE_AMBIGUOUS`. Null on `MIXED_REVISION`,
+            the drift codes and `COMPARE_ROOTS_DIFFER`, and on every pull-preview and comparison
+            warning.
         itemId:
           oneOf: [{ $ref: '#/components/schemas/SalesforceId' }, { type: 'null' }]
           description: |
@@ -2717,6 +3425,15 @@ components:
             the moment anything is reordered, and on `clientRef` alone breaks when you do not set it
             — so `index` is stated too.
           examples: ['row-motor']
+        version:
+          oneOf: [{ type: string }, { type: 'null' }]
+          description: |
+            The target row's `version` from a branch tree read (MVP-30540). When sent, the
+            operation applies only if the row is unchanged since that read; otherwise it fails
+            with `409 STALE_REVISION`. Omitted or null: no check — the last writer wins. Taken by
+            every operation that targets an existing row; ignored on `add`. See the endpoint's
+            `version` section.
+          examples: ['v1.Ab31kQ9x']
         ebomAssemblyId:
           allOf: [{ $ref: '#/components/schemas/SalesforceId' }]
           description: |
@@ -2860,7 +3577,7 @@ components:
 
     DeltaBatchResponse:
       type: object
-      required: [branchId, atomic, asOf, applied, failed, results]
+      required: [branchId, atomic, asOf, applied, failed, results, snapshot, invalidatedParentRowKeys]
       properties:
         branchId: { $ref: '#/components/schemas/SalesforceId' }
         atomic:
@@ -2882,6 +3599,22 @@ components:
           type: array
           description: One entry per requested operation, **in request order**, success or failure.
           items: { $ref: '#/components/schemas/DeltaResult' }
+        snapshot:
+          type: string
+          description: |
+            The branch's state **after** this batch (MVP-30540), as a tree read would name it.
+            Read with it to see your own writes and nothing later. Present even when nothing was
+            applied, naming the unchanged state.
+          examples: ['s1.MjAyNi0wNC0wNVQxNzoyMjowNVp8NDM']
+        invalidatedParentRowKeys:
+          type: array
+          description: |
+            The `rowKey`s of rows whose children a client should read again, because a row beneath
+            them was added, removed or changed by this batch (MVP-30540). An empty string stands
+            for the root. Empty when nothing was applied. Always present.
+          items: { type: string }
+          examples:
+            - ['', 'a0Bg8000000Ab10']
 
     DeltaResult:
       type: object
@@ -2994,7 +3727,7 @@ components:
 
     BaselineTree:
       type: object
-      required: [baselineId, resolutionTimePoint, rows, warnings]
+      required: [baselineId, resolutionTimePoint, snapshot, parentRowKey, rows, warnings, page]
       properties:
         baselineId: { $ref: '#/components/schemas/SalesforceId' }
         label: { type: string }
@@ -3002,22 +3735,124 @@ components:
           type: string
           format: date-time
           description: What the baseline resolved against when it was cut.
+        snapshot:
+          type: string
+          description: As on `StructureTree`. A baseline never changes, so it matters only with `compare`, where it pins the target.
+        parentRowKey:
+          oneOf: [{ type: string }, { type: 'null' }]
+          description: The `parentRowKey` this page was read beneath; null for a read from the root.
+        compareTarget:
+          oneOf: [{ $ref: '#/components/schemas/ComparisonSide' }, { type: 'null' }]
+          description: What `compare` compared against. Null without `compare`.
         rows:
           type: array
           description: |
-            The re-resolved rows, reusing the tree shape so clients render both the same way — with
-            `edgeId` and `edgeKey` nulled, `governingTimestamp` collapsed onto this baseline's own
-            `resolutionTimePoint`, and excluded rows filtered out.
+            One page of the re-resolved rows, reusing the tree shape so clients render both the
+            same way — with `edgeId`, `edgeKey`, `ciId` and `version` nulled, `governingTimestamp`
+            collapsed onto this baseline's own `resolutionTimePoint`, and excluded rows filtered
+            out.
           items: { $ref: '#/components/schemas/TreeRow' }
         warnings:
           type: array
           description: |
-            **Drift only** — `BASELINE_COUNT_DRIFT`, `BASELINE_PROVENANCE_DRIFT` and
-            `BASELINE_PIN_DRIFT`. Mixed-revision, collision, hidden-edit and
-            `STORED_REVISION_RETIRED` warnings from the underlying resolution are not forwarded:
-            they are advice about a branch, not drift. (A comparison's baseline side does carry
-            `STORED_REVISION_RETIRED`.)
+            Empty, except for `REDLINE_AMBIGUOUS` under `compare`. Always present. The drift
+            canaries are on the [baseline findings](#operation/getBaselineFindings) (MVP-30540).
+            Mixed-revision, collision, hidden-edit and `STORED_REVISION_RETIRED` warnings are
+            advice about a branch, not a baseline, and are not raised. (A comparison's baseline
+            side does carry `STORED_REVISION_RETIRED`.)
           items: { $ref: '#/components/schemas/TreeWarning' }
+        page: { $ref: '#/components/schemas/PageInfo' }
+
+    # -------------------------------------------------- whole-configuration outputs
+
+    FlattenedStructure:
+      type: object
+      description: One page of a flattened view — one line per part, quantities multiplied down the tree and summed.
+      required: [rootRevisionId, status, jobId, lines, page]
+      properties:
+        asOf:
+          type: string
+          format: date-time
+          description: The timepoint resolved — the caller's `asOf`, the server clock, or a baseline's own timepoint.
+        rootRevisionId:
+          allOf: [{ $ref: '#/components/schemas/SalesforceId' }]
+          description: The root `Item_Revision__c` being built.
+        sourceTimePoint:
+          oneOf: [{ type: string, format: date-time }, { type: 'null' }]
+          description: '**T_R** — the source timepoint `base` content resolved at.'
+        status: { $ref: '#/components/schemas/OutputStatus' }
+        jobId:
+          oneOf: [{ type: string }, { type: 'null' }]
+          description: Reserved; always null in this version. Names the background job when `status` is `accepted`.
+        lines:
+          type: array
+          description: Always present; empty rather than absent.
+          items: { $ref: '#/components/schemas/FlattenedLine' }
+        page: { $ref: '#/components/schemas/PageInfo' }
+
+    FlattenedLine:
+      type: object
+      description: One part at one revision and secondary unique key, with its total quantity per build of the root.
+      required: [childItemId, totalQuantity, occurrences, warningCodes]
+      properties:
+        childItemId: { $ref: '#/components/schemas/SalesforceId' }
+        childItemNumber:
+          oneOf: [{ type: string }, { type: 'null' }]
+          examples: ['Motor-002']
+        childItemName:
+          oneOf: [{ type: string }, { type: 'null' }]
+          examples: ['Brushless motor, 24 V']
+        childItemRevisionId:
+          oneOf: [{ $ref: '#/components/schemas/SalesforceId' }, { type: 'null' }]
+          description: The revision every occurrence on this line renders. Null for a floating row whose item has nothing released at the read clock.
+        childRevisionLabel:
+          oneOf: [{ type: string }, { type: 'null' }]
+          examples: ['rev-1']
+        secondaryUniqueKey:
+          oneOf: [{ type: string }, { type: 'null' }]
+          description: The BOM lines' secondary unique key; null where the lines carry none. Lines of one part at one revision with different keys stay separate, as in the eBOM flattened view.
+        totalQuantity:
+          type: number
+          description: The part's quantity multiplied down each occurrence path from the root, summed over every occurrence on this line.
+          examples: [12]
+        occurrences:
+          type: integer
+          minimum: 1
+          description: How many places in the tree contribute to this line.
+        warningCodes:
+          type: array
+          description: '`MIXED_REVISION` when the same part also appears at another revision, on another line. Always present.'
+          items: { type: string }
+
+    Findings:
+      type: object
+      description: One page of the warnings about a whole configuration — a branch's, or a baseline's drift.
+      required: [status, jobId, findings, page]
+      properties:
+        asOf:
+          type: string
+          format: date-time
+          description: The timepoint resolved — the caller's `asOf`, the server clock, or a baseline's own timepoint.
+        rootRevisionId:
+          oneOf: [{ $ref: '#/components/schemas/SalesforceId' }, { type: 'null' }]
+        status: { $ref: '#/components/schemas/OutputStatus' }
+        jobId:
+          oneOf: [{ type: string }, { type: 'null' }]
+          description: Reserved; always null in this version.
+        findings:
+          type: array
+          description: Always present; empty is the healthy answer.
+          items: { $ref: '#/components/schemas/TreeWarning' }
+        page: { $ref: '#/components/schemas/PageInfo' }
+
+    OutputStatus:
+      type: string
+      enum: [completed, accepted]
+      description: |
+        Whether the output in this response is complete (`completed`, with HTTP 200 or 201), or was
+        accepted as a background job (`accepted`, with HTTP 202 and a `jobId`). **This version
+        always answers `completed`.** `accepted` is reserved so a later version can process very
+        large configurations in the background without breaking a client that already checks it.
 
     # -------------------------------------------------- pull
 
@@ -3078,7 +3913,7 @@ components:
 
     PullPreview:
       type: object
-      required: [sourceId, branchId, sourceType, currentSourceVersion, hasChanges, summary, entries, warnings, truncated, entriesLimit, diffFingerprint, generatedAt]
+      required: [sourceId, branchId, sourceType, currentSourceVersion, hasChanges, summary, entries, warnings, page, previewId, diffFingerprint, generatedAt]
       properties:
         sourceId: { $ref: '#/components/schemas/SalesforceId' }
         branchId:
@@ -3104,8 +3939,9 @@ components:
         entries:
           type: array
           description: |
-            Every difference found, in a stable, deterministic order. Always present; empty rather
-            than absent.
+            One page of the differences found: every `required` entry before any informational
+            one, each tier in a stable, deterministic order. Always present; empty rather than
+            absent.
           items: { $ref: '#/components/schemas/DiffEntry' }
         warnings:
           type: array
@@ -3115,21 +3951,18 @@ components:
             `STORED_REVISION_RETIRED` is not raised here; the branch tree read and the comparison
             raise it.
           items: { $ref: '#/components/schemas/TreeWarning' }
-        truncated:
-          type: boolean
+        page: { $ref: '#/components/schemas/PageInfo' }
+        previewId:
+          type: string
           description: |
-            True when the **informational** entry set exceeded `entriesLimit` and was trimmed.
-            Entries with `decision: required` are never truncated. `summary` still reflects the
-            untrimmed totals.
-        entriesLimit:
-          type: integer
-          description: The effective cap applied this call — the query param, or the server default of 200.
-          examples: [200]
+            Opaque name of this preview — the candidate, the branch state it was taken against, and
+            the diff (MVP-30540). The same on every page. Send it on the commit. Never parse it.
+          examples: ['pv1.Xk3q9fA2c41ab7e0']
         diffFingerprint:
           type: string
           description: |
             Opaque `sha256:`-prefixed digest of the inputs and the **complete** resolved entry set
-            (not the truncated page). Echo it back on commit; a mismatch means the world moved in
+            (not one page). Echo it back on commit; a mismatch means the world moved in
             between and fails fast with `STALE_REVISION`.
 
             It covers a **clock-free** projection of the entries, because a claiming row's
@@ -3176,7 +4009,7 @@ components:
 
     DiffSummary:
       type: object
-      description: Counts over the **untruncated** entry set, so a caller can render "N informational, M requiring a decision" without walking `entries`.
+      description: Counts over the **whole** diff, on every page, so a caller can render "N informational, M requiring a decision" without paging through `entries`.
       required: [total, informational, required, byKind]
       properties:
         total: { type: integer, minimum: 0 }
@@ -3299,6 +4132,15 @@ components:
             (`Item__c.Name`). On a `source` target it is the root item's number instead, because
             that entry is about the root item and has no child.
           examples: ['Motor-002']
+        rowKey:
+          oneOf: [{ type: string }, { type: 'null' }]
+          description: |
+            The `rowKey` of the row this entry is about (MVP-30540): in the branch's **current**
+            tree on a pull preview, in the **left** side's tree on a comparison. A client uses it
+            to show the entry in the tree. Null when that tree has no such row (`member-added`) and
+            on a root entry. When the member renders at more than one occurrence, the first in tree
+            order.
+          examples: ['a0Bg8000000Ab10']
         path:
           type: array
           description: Breadcrumb from the root to this member's parent, for UI context.
@@ -3342,13 +4184,12 @@ components:
         configuration-item type becomes a sibling schema in `MemberState.detail`'s `oneOf` and
         changes nothing else.
 
-        ## The three name fields are null on a tree read
+        ## Display fields
 
-        `parentItemNumber`, `childItemNumber` and `childRevisionLabel` are populated **only on the
-        diff paths** — the pull preview and the comparisons. Those build a name cache with a
-        repository read of their own; the tree reads deliberately do not pay for one, so they return
-        all three as `null`. Treat them as optional display sugar, never as evidence that an item has
-        no number. The identity and content fields beside them are populated everywhere.
+        `parentItemNumber`, `childItemNumber`, `childItemName` and `childRevisionLabel` are
+        populated on every read (MVP-30540; tree reads used to return them null). They are looked
+        up once per page, never once per row. They are display values: null where the record is
+        not visible to the caller, so never treat a null as evidence that an item has no number.
       required: [ciKind]
       properties:
         ciKind: { type: string, const: assembly-edge }
@@ -3363,13 +4204,17 @@ components:
             **Null on a root entry** — see `quantity` for why.
         parentItemNumber:
           oneOf: [{ type: string }, { type: 'null' }]
-          description: 'Null on tree reads — see the schema description.'
+          description: 'The parent item''s number (`Item__c.Name`). See the schema description.'
           examples: ['Assy-100']
         childItemId: { $ref: '#/components/schemas/SalesforceId' }
         childItemNumber:
           oneOf: [{ type: string }, { type: 'null' }]
-          description: 'Null on tree reads — see the schema description.'
+          description: 'The child item''s number (`Item__c.Name`). See the schema description.'
           examples: ['Motor-002']
+        childItemName:
+          oneOf: [{ type: string }, { type: 'null' }]
+          description: 'The child item''s description, for display (MVP-30540). See the schema description.'
+          examples: ['Brushless motor, 24 V']
         childItemRevisionId:
           oneOf: [{ $ref: '#/components/schemas/SalesforceId' }, { type: 'null' }]
           description: |
@@ -3392,7 +4237,7 @@ components:
             shows.
         childRevisionLabel:
           oneOf: [{ type: string }, { type: 'null' }]
-          description: 'Null on tree reads — see the schema description.'
+          description: 'The label of `childItemRevisionId`. See the schema description.'
           examples: ['rev-1']
         quantity:
           oneOf: [{ type: number }, { type: 'null' }]
@@ -3418,6 +4263,14 @@ components:
           type: string
           description: Echoed back from the preview this commit is acting on. A mismatch against the freshly re-resolved diff fails the whole commit with `STALE_REVISION`.
           examples: ['sha256:9f2c41ab7e08d3b6']
+        previewId:
+          oneOf: [{ type: string }, { type: 'null' }]
+          description: |
+            The `previewId` of the preview this commit is acting on (MVP-30540). Optional in this
+            version, and checked like `diffFingerprint` when sent: a preview that no longer
+            describes the diff fails the commit with `STALE_REVISION`. Send it now; a later version
+            that keeps large diffs server-side will look them up by it.
+          examples: ['pv1.Xk3q9fA2c41ab7e0']
         decisions:
           type: array
           description: |
@@ -3431,8 +4284,8 @@ components:
             `DISPOSITION_REQUIRED` keys on `claim-orphaned` alone. A decision whose `action` its
             entry does not offer in `availableActions` is `400 INVALID_REQUEST`.
 
-            At most **200** decisions: each compiles to one delta operation in one batch, and more
-            is `413 BATCH_TOO_LARGE`, refused whole.
+            There is **no fixed limit** (MVP-30540): send every decision in one commit. A commit too
+            large for one transaction is refused whole with `413 STRUCTURE_TOO_LARGE`.
           items:
             type: object
             required: [entryId, action]
@@ -3506,8 +4359,17 @@ components:
 
     PullCommitResult:
       type: object
-      required: [sourceId, newSourceRevisionId, acceptedRootRevisionId, acceptedAt, applied]
+      required: [status, jobId, sourceId, newSourceRevisionId, acceptedRootRevisionId, acceptedAt, applied]
       properties:
+        status:
+          allOf: [{ $ref: '#/components/schemas/OutputStatus' }]
+          description: |
+            `completed` — the pull is committed and every field below is filled in. Always
+            `completed` in this version. `accepted` (with HTTP 202 and a `jobId`) is reserved for a
+            background commit.
+        jobId:
+          oneOf: [{ type: string }, { type: 'null' }]
+          description: Reserved; always null in this version.
         sourceId: { $ref: '#/components/schemas/SalesforceId' }
         newSourceRevisionId:
           allOf: [{ $ref: '#/components/schemas/SalesforceId' }]
@@ -3615,7 +4477,7 @@ components:
 
         No envelope, nulls not suppressed, and every collection always `[]` rather than absent —
         the same conventions as the rest of this API.
-      required: [left, right, identical, summary, entries, leftWarnings, rightWarnings, truncated, entriesLimit, generatedAt]
+      required: [left, right, identical, summary, entries, leftWarnings, rightWarnings, page, generatedAt]
       properties:
         left:
           allOf: [{ $ref: '#/components/schemas/ComparisonSide' }]
@@ -3628,15 +4490,15 @@ components:
           description: |
             True when the two configurations contain the same members with the same content.
 
-            Derived from the entry list rather than from the summary: true exactly when no entry of
-            any kind other than `member-unchanged` is present. So it reads the same whether or not
-            the unchanged rows were asked for, and a `root-version-differs` entry is enough on its
-            own to make it false.
+            Computed over the **whole** comparison, and the same on every page: true exactly when
+            the comparison has no entry of any kind other than `member-unchanged`. So it reads the
+            same whether or not the unchanged rows were asked for, and a `root-version-differs`
+            entry is enough on its own to make it false.
         summary: { $ref: '#/components/schemas/CompareSummary' }
         entries:
           type: array
           description: |
-            One entry per differing correlation key — plus every matching one when
+            One page of entries: one per differing correlation key — plus every matching one when
             `includeUnchanged=true` — ordered by breadcrumb path, then find number, then child item
             id, then kind. Always present; empty rather than absent, and empty is the ordinary
             shape of an identical comparison.
@@ -3660,15 +4522,7 @@ components:
           type: array
           description: Warnings about the **right** side's own resolution, populated as `leftWarnings` is (without `COMPARE_ROOTS_DIFFER`). Always present; empty rather than absent.
           items: { $ref: '#/components/schemas/TreeWarning' }
-        truncated:
-          type: boolean
-          description: |
-            True when `entries` was capped at `entriesLimit`. The cap is a plain prefix and
-            `summary` still reports untruncated totals, which is what makes this actionable.
-        entriesLimit:
-          type: integer
-          description: The effective cap applied this call — the query parameter, or the server default of 200.
-          examples: [200]
+        page: { $ref: '#/components/schemas/PageInfo' }
         generatedAt:
           type: string
           format: date-time
@@ -3783,7 +4637,7 @@ components:
     CompareSummary:
       type: object
       description: |
-        Counts over the **whole** comparison, never over a truncated entry list.
+        Counts over the **whole** comparison, on every page — never over one page of entries.
 
         Read the two groups differently. `total` and `byKind` count entries **emitted**, so both
         move with `includeUnchanged`. `added`, `removed`, `differing` and `unchanged` count
@@ -3853,7 +4707,7 @@ components:
              PARENT_NOT_IN_BRANCH, UNSUPPORTED_CI_TYPE, CI_IDENTITY_UNRESOLVED,
              CI_IDENTITY_COLLISION, PROVENANCE_INVALID, CANDIDATE_ROOT_MISMATCH,
              AMBIGUOUS_CORRELATION, REVISION_ITEM_MISMATCH, REVISION_CHOICE_REQUIRED,
-             BATCH_TOO_LARGE, ASOF_IN_FUTURE, ASOF_INVALID, NOT_EDITABLE,
+             BATCH_TOO_LARGE, STRUCTURE_TOO_LARGE, ASOF_IN_FUTURE, ASOF_INVALID, NOT_EDITABLE,
              INVALID_REQUEST, NOT_FOUND, FORBIDDEN, INTERNAL_ERROR]
           examples: ['NOT_RELEASED']
         message:
@@ -3881,7 +4735,9 @@ components:
 
         A field-level denial deeper in the stack is also answered 403: under `USER_MODE` that
         surfaces as a `QueryException`, and every query on this path is built from a fixed field
-        list, so an access failure is far and away the likeliest cause.
+        list, so an access failure is far and away the likeliest cause. The one exception is a
+        query too long for the platform to accept, which only a very large structure produces:
+        that is `413 STRUCTURE_TOO_LARGE`, not 403 (MVP-30540).
       content:
         application/json:
           schema: { $ref: '#/components/schemas/RestError' }
@@ -3908,6 +4764,27 @@ components:
                 code: NOT_FOUND
                 message: 'That record does not exist, or you do not have access to it. (a1Cg8000000AbCeEAK is not a Branch__c)'
 
+    StructureTooLarge:
+      description: |
+        `STRUCTURE_TOO_LARGE` (413, MVP-30540). The structure this request has to resolve is too
+        large to process in one transaction. **Nothing is written.** Sending the same request again
+        will fail the same way, so do not retry it.
+
+        The server checks the platform limits it has actually consumed (CPU time, memory, rows read,
+        queries, rows written) as it resolves, and stops with this answer before it would run out,
+        rather than failing with an unhandled error or returning a partial structure. It never
+        returns part of a structure as if it were the whole.
+
+        A smaller page does not help: the limit is about the configuration, not the response.
+        Contact your administrator. A configuration this large is a candidate for splitting into
+        smaller MBOMs.
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/RestError' }
+          examples:
+            tooLarge:
+              $ref: '#/components/examples/StructureTooLarge'
+
     PullConflictPreview:
       description: |
         409 — well formed, retryable after state changes.
@@ -3931,7 +4808,7 @@ components:
 
         | code | Cause | Remedy |
         |---|---|---|
-        | `STALE_REVISION` | `diffFingerprint` mismatch, or an `entryId` that no longer names an entry in the freshly re-resolved diff | re-run `pull-preview` and resubmit |
+        | `STALE_REVISION` | `diffFingerprint` or `previewId` mismatch, or an `entryId` that no longer names an entry in the freshly re-resolved diff | re-run `pull-preview` and resubmit |
         | `DISPOSITION_REQUIRED` | a `claim-orphaned` entry has no decision — the only kind that can raise it. (A live `replace` substitute whose superseded line upstream keeps is `claim-retained` and never raises it, MVP-30378.) | supply one for every required entry |
         | `NOT_RELEASED` / `CANDIDATE_NOT_NEWER` | revalidated at commit time and no longer qualifies | pick another candidate |
         | `CONCURRENT_WRITE` | another transaction holds the branch's write lock — a delta batch, a baseline cut or another commit | send the same request again |
@@ -4073,19 +4950,38 @@ components:
 
   examples:
 
-    BranchTreeFlat:
+    # Tree examples share one id → display-value map, used everywhere in this file:
+    #   Assy-100 (root, rev-1 / rev-2), Motor-002, Bracket-005, Harness-011, Panel-300, Label-400,
+    #   Pack-900 (the branch's own `add`), Sub-200 with Gear-210 and Bearing-230 beneath it.
+    # A source-supplied row's `rowKey` segment is the first 15 characters of its `edgeKey`; a
+    # branch `new` row's is the first 15 of its `edgeId`. Both are opaque on the wire.
+
+    BranchTreeWhole:
       value:
         asOf: '2026-04-05T17:22:03.518Z'
         rootRevisionId: a0Ag8000000Ab01EAC
         sourceTimePoint: '2026-01-15T00:00:00.000Z'
+        snapshot: 's1.MjAyNi0wNC0wNVQxNzoyMjowM1p8NDI'
+        parentRowKey: null
+        compareTarget: null
         rows:
-          - edgeId: a1Eg8000000AbD1EAK
+          - rowKey: a0Bg8000000Ab10
+            parentRowKey: null
+            level: 1
+            hasChildren: false
+            edgeId: a1Eg8000000AbD1EAK
             edgeKey: a0Bg8000000Ab10EAC
+            ciId: a1Gg8000000AbF1EAK
+            version: 'v1.Ab31kQ9x'
             detail:
               ciKind: assembly-edge
               parentItemId: a02g8000000Ab01EAC
+              parentItemNumber: Assy-100
               childItemId: a02g8000000Ab20EAC
+              childItemNumber: Motor-002
+              childItemName: 'Brushless motor, 24 V'
               childItemRevisionId: a0Ag8000000Ab41EAC
+              childRevisionLabel: rev-1
               quantity: 4
               findNumber: 10
             provenance: claiming
@@ -4099,14 +4995,25 @@ components:
             wasClaimed: false
             revisionChosenById: null
             revisionChosenAt: null
-            childRows: []
-          - edgeId: null
+            warningCodes: []
+            redline: null
+          - rowKey: a0Bg8000000Ab11
+            parentRowKey: null
+            level: 1
+            hasChildren: false
+            edgeId: null
             edgeKey: a0Bg8000000Ab11EAC
+            ciId: null
+            version: 'v1.Bk72mR4p'
             detail:
               ciKind: assembly-edge
               parentItemId: a02g8000000Ab01EAC
+              parentItemNumber: Assy-100
               childItemId: a02g8000000Ab21EAC
+              childItemNumber: Bracket-005
+              childItemName: Motor mounting bracket
               childItemRevisionId: a0Ag8000000Ab31EAC
+              childRevisionLabel: rev-3
               quantity: 2
               findNumber: 20
             provenance: base
@@ -4120,14 +5027,25 @@ components:
             wasClaimed: false
             revisionChosenById: null
             revisionChosenAt: null
-            childRows: []
-          - edgeId: a1Eg8000000AbD3EAK
+            warningCodes: []
+            redline: null
+          - rowKey: a0Bg8000000Ab12
+            parentRowKey: null
+            level: 1
+            hasChildren: false
+            edgeId: a1Eg8000000AbD3EAK
             edgeKey: a0Bg8000000Ab12EAC
+            ciId: a1Gg8000000AbF3EAK
+            version: 'v1.Hx40nT6w'
             detail:
               ciKind: assembly-edge
               parentItemId: a02g8000000Ab01EAC
+              parentItemNumber: Assy-100
               childItemId: a02g8000000Ab22EAC
+              childItemNumber: Harness-011
+              childItemName: Main wiring harness
               childItemRevisionId: a0Ag8000000Ab61EAC
+              childRevisionLabel: rev-1
               quantity: 3
               findNumber: 30
             provenance: claiming
@@ -4141,14 +5059,25 @@ components:
             wasClaimed: false
             revisionChosenById: null
             revisionChosenAt: null
-            childRows: []
-          - edgeId: a1Eg8000000AbD9EAK
+            warningCodes: []
+            redline: null
+          - rowKey: a1Eg8000000AbD9
+            parentRowKey: null
+            level: 1
+            hasChildren: false
+            edgeId: a1Eg8000000AbD9EAK
             edgeKey: 'new-a1Bg8000000AbCdEAK-a02g8000000Ab01EAC-a02g8000000Ab90EAC'
+            ciId: a1Gg8000000AbF9EAK
+            version: 'v1.Pk19cJ3s'
             detail:
               ciKind: assembly-edge
               parentItemId: a02g8000000Ab01EAC
+              parentItemNumber: Assy-100
               childItemId: a02g8000000Ab90EAC
+              childItemNumber: Pack-900
+              childItemName: Shipping carton
               childItemRevisionId: a0Ag8000000Ab95EAC
+              childRevisionLabel: rev-1
               quantity: 1
               findNumber: 90
             provenance: new
@@ -4162,24 +5091,78 @@ components:
             wasClaimed: false
             revisionChosenById: null
             revisionChosenAt: null
-            childRows: []
+            warningCodes: []
+            redline: null
         warnings: []
+        page:
+          limit: 500
+          hasMore: false
+          nextCursor: null
 
-    BranchTreeNested:
+    BranchTreeFirstLevel:
+      summary: The first two rows of the first level, with more to come
+      description: |
+        The `BranchTreeWhole` branch read with `depth=1&limit=2`. The first two level-1 rows come
+        back; send `page.nextCursor` as `cursor`, with the same `snapshot`, for the rest.
       value:
         asOf: '2026-04-05T17:22:03.518Z'
         rootRevisionId: a0Ag8000000Ab01EAC
         sourceTimePoint: '2026-01-15T00:00:00.000Z'
+        snapshot: 's1.MjAyNi0wNC0wNVQxNzoyMjowM1p8NDI'
+        parentRowKey: null
+        compareTarget: null
         rows:
-          - edgeId: null
-            edgeKey: a0Bg8000000Ab14EAC
+          - rowKey: a0Bg8000000Ab10
+            parentRowKey: null
+            level: 1
+            hasChildren: false
+            edgeId: a1Eg8000000AbD1EAK
+            edgeKey: a0Bg8000000Ab10EAC
+            ciId: a1Gg8000000AbF1EAK
+            version: 'v1.Ab31kQ9x'
             detail:
               ciKind: assembly-edge
-              parentItemId: a02g8000000Ab30EAC
-              childItemId: a02g8000000Ab31EAC
-              childItemRevisionId: a0Ag8000000Ab72EAC
+              parentItemId: a02g8000000Ab01EAC
+              parentItemNumber: Assy-100
+              childItemId: a02g8000000Ab20EAC
+              childItemNumber: Motor-002
+              childItemName: 'Brushless motor, 24 V'
+              childItemRevisionId: a0Ag8000000Ab41EAC
+              childRevisionLabel: rev-1
               quantity: 4
               findNumber: 10
+            provenance: claiming
+            governingTimestamp: '2026-04-05T17:22:03.518Z'
+            sourceId: a1Cg8000000AbCeEAK
+            isClaimed: true
+            isExcluded: false
+            isReplaced: false
+            isEditable: true
+            hasChosenRevision: false
+            wasClaimed: false
+            revisionChosenById: null
+            revisionChosenAt: null
+            warningCodes: []
+            redline: null
+          - rowKey: a0Bg8000000Ab11
+            parentRowKey: null
+            level: 1
+            hasChildren: false
+            edgeId: null
+            edgeKey: a0Bg8000000Ab11EAC
+            ciId: null
+            version: 'v1.Bk72mR4p'
+            detail:
+              ciKind: assembly-edge
+              parentItemId: a02g8000000Ab01EAC
+              parentItemNumber: Assy-100
+              childItemId: a02g8000000Ab21EAC
+              childItemNumber: Bracket-005
+              childItemName: Motor mounting bracket
+              childItemRevisionId: a0Ag8000000Ab31EAC
+              childRevisionLabel: rev-3
+              quantity: 2
+              findNumber: 20
             provenance: base
             governingTimestamp: '2026-01-15T00:00:00.000Z'
             sourceId: a1Cg8000000AbCeEAK
@@ -4191,74 +5174,46 @@ components:
             wasClaimed: false
             revisionChosenById: null
             revisionChosenAt: null
-            childRows:
-              - edgeId: null
-                edgeKey: a0Bg8000000Ab15EAC
-                provenance: base
-                governingTimestamp: '2026-01-15T00:00:00.000Z'
-                sourceId: a1Cg8000000AbCeEAK
-                isClaimed: false
-                isExcluded: false
-                isReplaced: false
-                isEditable: true
-                hasChosenRevision: false
-                wasClaimed: false
-                revisionChosenById: null
-                revisionChosenAt: null
-                childRows: []
+            warningCodes: []
+            redline: null
         warnings: []
+        page:
+          limit: 2
+          hasMore: true
+          nextCursor: 'c1.YTBCZzgwMDAwMDBBYjExfDJ8czE'
 
-    BranchTreeMixedRevision:
+    BranchTreeChildren:
+      summary: Expanding one row
+      description: |
+        `parentRowKey=a0Bg8000000Ab14&depth=1&snapshot=…` on the `BranchTreePinnedClaim` branch:
+        the children of the Sub-200 row. Sub-200 is pinned to rev-2, so they are rev-2's own
+        lines, read-only `nested` rows. The `PINNED_SUBTREE_HIDES_EDITS` warning is about the
+        Sub-200 row itself, which is not in this page, so `warnings` is empty.
       value:
         asOf: '2026-04-05T17:22:03.518Z'
         rootRevisionId: a0Ag8000000Ab01EAC
         sourceTimePoint: '2026-01-15T00:00:00.000Z'
-        rows: []
-        warnings:
-          - warningCode: MIXED_REVISION
-            message: 'This item appears at more than one revision in the same tree, because rows follow different timepoints: rows from the source follow the source timepoint, added and substituted rows follow the as-of date, and a row can hold a chosen revision. This is expected and does not block anything.'
-            itemId: a02g8000000Ab21EAC
-            itemRevisionIds: [a0Ag8000000Ab31EAC, a0Ag8000000Ab32EAC]
-            governingTimestamps: ['2026-01-15T00:00:00.000Z', '2026-04-05T17:22:03.518Z']
-
-    BranchTreePinnedClaim:
-      # Sub-200's line is claimed PINNED to rev-2, while T_R resolves it to rev-1. So rev-2's own
-      # structure renders beneath it as read-only `nested` rows, and rev-1's lines are suppressed.
-      # The branch had claimed one of those rev-1 lines (child Ab32, which rev-2 dropped) -- that
-      # claim is in the log but in no rendered configuration, hence the warning.
-      value:
-        asOf: '2026-04-05T17:22:03.518Z'
-        rootRevisionId: a0Ag8000000Ab01EAC
-        sourceTimePoint: '2026-01-15T00:00:00.000Z'
+        snapshot: 's1.MjAyNi0wNC0wNVQxNzoyMjowM1p8NTc'
+        parentRowKey: a0Bg8000000Ab14
+        compareTarget: null
         rows:
-          - edgeId: a1Eg8000000AbD7EAK
-            edgeKey: a0Bg8000000Ab14EAC
-            detail:
-              ciKind: assembly-edge
-              parentItemId: a02g8000000Ab01EAC
-              childItemId: a02g8000000Ab30EAC
-              childItemRevisionId: a0Ag8000000Ab73EAC
-              quantity: 1
-              findNumber: 50
-            provenance: claiming
-            governingTimestamp: '2026-04-05T17:22:03.518Z'
-            sourceId: a1Cg8000000AbCeEAK
-            isClaimed: true
-            isExcluded: false
-            isReplaced: false
-            isEditable: true
-            hasChosenRevision: true
-            wasClaimed: false
-            revisionChosenById: 005g8000000AbZ1AAK
-            revisionChosenAt: '2026-04-05T17:20:12.000Z'
-            childRows: []
-          - edgeId: null
+          - rowKey: a0Bg8000000Ab14.a0Bg8000000Ab16
+            parentRowKey: a0Bg8000000Ab14
+            level: 2
+            hasChildren: false
+            edgeId: null
             edgeKey: a0Bg8000000Ab16EAC
+            ciId: null
+            version: null
             detail:
               ciKind: assembly-edge
               parentItemId: a02g8000000Ab30EAC
+              parentItemNumber: Sub-200
               childItemId: a02g8000000Ab31EAC
+              childItemNumber: Gear-210
+              childItemName: 'Spur gear, 32T'
               childItemRevisionId: a0Ag8000000Ab72EAC
+              childRevisionLabel: rev-1
               quantity: 4
               findNumber: 10
             provenance: nested
@@ -4272,59 +5227,93 @@ components:
             wasClaimed: false
             revisionChosenById: null
             revisionChosenAt: null
-            childRows: []
-        warnings:
-          - warningCode: PINNED_SUBTREE_HIDES_EDITS
-            message: 'Some edits on this branch will not take effect. A row is pinned to a revision whose own structure replaces the lines those edits were made on, so they are not part of this configuration.'
-            itemId: a02g8000000Ab32EAC
-            itemRevisionIds: [a0Ag8000000Ab73EAC]
-            governingTimestamps: []
+            warningCodes: []
+            redline: null
+          - rowKey: a0Bg8000000Ab14.a0Bg8000000Ab17
+            parentRowKey: a0Bg8000000Ab14
+            level: 2
+            hasChildren: false
+            edgeId: null
+            edgeKey: a0Bg8000000Ab17EAC
+            ciId: null
+            version: null
+            detail:
+              ciKind: assembly-edge
+              parentItemId: a02g8000000Ab30EAC
+              parentItemNumber: Sub-200
+              childItemId: a02g8000000Ab33EAC
+              childItemNumber: Bearing-230
+              childItemName: 'Ball bearing, 608'
+              childItemRevisionId: a0Ag8000000Ab74EAC
+              childRevisionLabel: rev-1
+              quantity: 2
+              findNumber: 20
+            provenance: nested
+            governingTimestamp: '2026-04-05T17:22:03.518Z'
+            sourceId: null
+            isClaimed: false
+            isExcluded: false
+            isReplaced: false
+            isEditable: false
+            hasChosenRevision: false
+            wasClaimed: false
+            revisionChosenById: null
+            revisionChosenAt: null
+            warningCodes: []
+            redline: null
+        warnings: []
+        page:
+          limit: 500
+          hasMore: false
+          nextCursor: null
 
-    BranchTreeOverrideBadges:
-      summary: hasChosenRevision follows the choice, not the rendered revision
+    BranchTreeRedlined:
+      summary: What this MBOM changed, against its own source
       description: |
-        Four rows:
+        The `BranchTreeWhole` branch read with `compare=source`:
 
-        1. A claim pinned to the **same** revision its source line resolves to. It is badged,
-           although it renders no pinned structure, and names who chose the revision and when.
-        2. A tracking claim. It is unbadged, although it renders a released revision.
-        3. A floating `new` row. It is unbadged.
-        4. A converted row that stamped a revision. It is badged, and it carries `wasClaimed`.
+        - **Motor-002** is claimed at quantity 4 where the source supplies 1: `modified`, with the
+          source's value in `oldValues`. `entryId` is the comparison's `member-differs` entry for
+          the same position.
+        - **Bracket-005** is the source's own line: `unchanged`.
+        - **Harness-011** is excluded, and the source still supplies it: `removed`.
+        - **Pack-900** is the branch's own `add`: `added`.
       value:
         asOf: '2026-04-05T17:22:03.518Z'
         rootRevisionId: a0Ag8000000Ab01EAC
         sourceTimePoint: '2026-01-15T00:00:00.000Z'
+        snapshot: 's1.MjAyNi0wNC0wNVQxNzoyMjowM1p8NDJ8c3Jj'
+        parentRowKey: null
+        compareTarget:
+          kind: source
+          id: a1Cg8000000AbCeEAK
+          label: Assy-100
+          rootItemId: a02g8000000Ab01EAC
+          rootItemNumber: Assy-100
+          rootRevisionId: a0Ag8000000Ab01EAC
+          rootRevisionLabel: rev-1
+          asOf: '2026-04-05T17:22:03.518Z'
+          sourceTimePoint: '2026-01-15T00:00:00.000Z'
         rows:
-          - edgeId: a1Eg8000000AbD1EAK
+          - rowKey: a0Bg8000000Ab10
+            parentRowKey: null
+            level: 1
+            hasChildren: false
+            edgeId: a1Eg8000000AbD1EAK
             edgeKey: a0Bg8000000Ab10EAC
+            ciId: a1Gg8000000AbF1EAK
+            version: 'v1.Ab31kQ9x'
             detail:
               ciKind: assembly-edge
               parentItemId: a02g8000000Ab01EAC
+              parentItemNumber: Assy-100
               childItemId: a02g8000000Ab20EAC
+              childItemNumber: Motor-002
+              childItemName: 'Brushless motor, 24 V'
               childItemRevisionId: a0Ag8000000Ab41EAC
+              childRevisionLabel: rev-1
               quantity: 4
               findNumber: 10
-            provenance: claiming
-            governingTimestamp: '2026-04-05T17:22:03.518Z'
-            sourceId: a1Cg8000000AbCeEAK
-            isClaimed: true
-            isExcluded: false
-            isReplaced: false
-            isEditable: true
-            hasChosenRevision: true
-            wasClaimed: false
-            revisionChosenById: 005g8000000AbZ1AAK
-            revisionChosenAt: '2026-04-05T17:22:04.000Z'
-            childRows: []
-          - edgeId: a1Eg8000000AbD2EAK
-            edgeKey: a0Bg8000000Ab11EAC
-            detail:
-              ciKind: assembly-edge
-              parentItemId: a02g8000000Ab01EAC
-              childItemId: a02g8000000Ab21EAC
-              childItemRevisionId: a0Ag8000000Ab31EAC
-              quantity: 3
-              findNumber: 20
             provenance: claiming
             governingTimestamp: '2026-04-05T17:22:03.518Z'
             sourceId: a1Cg8000000AbCeEAK
@@ -4336,14 +5325,101 @@ components:
             wasClaimed: false
             revisionChosenById: null
             revisionChosenAt: null
-            childRows: []
-          - edgeId: a1Eg8000000AbD9EAK
-            edgeKey: 'new-a1Bg8000000AbCdEAK-a02g8000000Ab01EAC-a02g8000000Ab90EAC'
+            warningCodes: []
+            redline:
+              status: modified
+              changedFields: [quantity]
+              oldValues: { quantity: 1 }
+              entryId: '7b31c0d5e9a24f18'
+          - rowKey: a0Bg8000000Ab11
+            parentRowKey: null
+            level: 1
+            hasChildren: false
+            edgeId: null
+            edgeKey: a0Bg8000000Ab11EAC
+            ciId: null
+            version: 'v1.Bk72mR4p'
             detail:
               ciKind: assembly-edge
               parentItemId: a02g8000000Ab01EAC
+              parentItemNumber: Assy-100
+              childItemId: a02g8000000Ab21EAC
+              childItemNumber: Bracket-005
+              childItemName: Motor mounting bracket
+              childItemRevisionId: a0Ag8000000Ab31EAC
+              childRevisionLabel: rev-3
+              quantity: 2
+              findNumber: 20
+            provenance: base
+            governingTimestamp: '2026-01-15T00:00:00.000Z'
+            sourceId: a1Cg8000000AbCeEAK
+            isClaimed: false
+            isExcluded: false
+            isReplaced: false
+            isEditable: true
+            hasChosenRevision: false
+            wasClaimed: false
+            revisionChosenById: null
+            revisionChosenAt: null
+            warningCodes: []
+            redline:
+              status: unchanged
+              changedFields: []
+              oldValues: {}
+              entryId: null
+          - rowKey: a0Bg8000000Ab12
+            parentRowKey: null
+            level: 1
+            hasChildren: false
+            edgeId: a1Eg8000000AbD3EAK
+            edgeKey: a0Bg8000000Ab12EAC
+            ciId: a1Gg8000000AbF3EAK
+            version: 'v1.Hx40nT6w'
+            detail:
+              ciKind: assembly-edge
+              parentItemId: a02g8000000Ab01EAC
+              parentItemNumber: Assy-100
+              childItemId: a02g8000000Ab22EAC
+              childItemNumber: Harness-011
+              childItemName: Main wiring harness
+              childItemRevisionId: a0Ag8000000Ab61EAC
+              childRevisionLabel: rev-1
+              quantity: 3
+              findNumber: 30
+            provenance: claiming
+            governingTimestamp: '2026-04-05T17:22:03.518Z'
+            sourceId: a1Cg8000000AbCeEAK
+            isClaimed: true
+            isExcluded: true
+            isReplaced: false
+            isEditable: true
+            hasChosenRevision: false
+            wasClaimed: false
+            revisionChosenById: null
+            revisionChosenAt: null
+            warningCodes: []
+            redline:
+              status: removed
+              changedFields: []
+              oldValues: {}
+              entryId: '9d24e6b07a1fc583'
+          - rowKey: a1Eg8000000AbD9
+            parentRowKey: null
+            level: 1
+            hasChildren: false
+            edgeId: a1Eg8000000AbD9EAK
+            edgeKey: 'new-a1Bg8000000AbCdEAK-a02g8000000Ab01EAC-a02g8000000Ab90EAC'
+            ciId: a1Gg8000000AbF9EAK
+            version: 'v1.Pk19cJ3s'
+            detail:
+              ciKind: assembly-edge
+              parentItemId: a02g8000000Ab01EAC
+              parentItemNumber: Assy-100
               childItemId: a02g8000000Ab90EAC
+              childItemNumber: Pack-900
+              childItemName: Shipping carton
               childItemRevisionId: a0Ag8000000Ab95EAC
+              childRevisionLabel: rev-1
               quantity: 1
               findNumber: 90
             provenance: new
@@ -4357,14 +5433,272 @@ components:
             wasClaimed: false
             revisionChosenById: null
             revisionChosenAt: null
-            childRows: []
-          - edgeId: a1Eg8000000AbD3EAK
-            edgeKey: a0Bg8000000Ab12EAC
+            warningCodes: []
+            redline:
+              status: added
+              changedFields: []
+              oldValues: {}
+              entryId: '6e0a8c31f5b97d42'
+        warnings: []
+        page:
+          limit: 500
+          hasMore: false
+          nextCursor: null
+
+    BranchTreePinnedClaim:
+      # Sub-200's line is claimed PINNED to rev-2, while T_R resolves it to rev-1. So rev-2's own
+      # structure renders beneath it as read-only `nested` rows, and rev-1's lines are suppressed.
+      # The branch had claimed one of those rev-1 lines (child Ab32, which rev-2 dropped) -- that
+      # claim is in the log but in no rendered configuration, hence the warning on the Sub-200 row.
+      value:
+        asOf: '2026-04-05T17:22:03.518Z'
+        rootRevisionId: a0Ag8000000Ab01EAC
+        sourceTimePoint: '2026-01-15T00:00:00.000Z'
+        snapshot: 's1.MjAyNi0wNC0wNVQxNzoyMjowM1p8NTc'
+        parentRowKey: null
+        compareTarget: null
+        rows:
+          - rowKey: a0Bg8000000Ab14
+            parentRowKey: null
+            level: 1
+            hasChildren: true
+            edgeId: a1Eg8000000AbD7EAK
+            edgeKey: a0Bg8000000Ab14EAC
+            ciId: a1Gg8000000AbF7EAK
+            version: 'v1.Sb20pN7c'
             detail:
               ciKind: assembly-edge
               parentItemId: a02g8000000Ab01EAC
+              parentItemNumber: Assy-100
+              childItemId: a02g8000000Ab30EAC
+              childItemNumber: Sub-200
+              childItemName: Drive subassembly
+              childItemRevisionId: a0Ag8000000Ab73EAC
+              childRevisionLabel: rev-2
+              quantity: 1
+              findNumber: 50
+            provenance: claiming
+            governingTimestamp: '2026-04-05T17:22:03.518Z'
+            sourceId: a1Cg8000000AbCeEAK
+            isClaimed: true
+            isExcluded: false
+            isReplaced: false
+            isEditable: true
+            hasChosenRevision: true
+            wasClaimed: false
+            revisionChosenById: 005g8000000AbZ1AAK
+            revisionChosenAt: '2026-04-05T17:20:12.000Z'
+            warningCodes: [PINNED_SUBTREE_HIDES_EDITS]
+            redline: null
+          - rowKey: a0Bg8000000Ab14.a0Bg8000000Ab16
+            parentRowKey: a0Bg8000000Ab14
+            level: 2
+            hasChildren: false
+            edgeId: null
+            edgeKey: a0Bg8000000Ab16EAC
+            ciId: null
+            version: null
+            detail:
+              ciKind: assembly-edge
+              parentItemId: a02g8000000Ab30EAC
+              parentItemNumber: Sub-200
+              childItemId: a02g8000000Ab31EAC
+              childItemNumber: Gear-210
+              childItemName: 'Spur gear, 32T'
+              childItemRevisionId: a0Ag8000000Ab72EAC
+              childRevisionLabel: rev-1
+              quantity: 4
+              findNumber: 10
+            provenance: nested
+            governingTimestamp: '2026-04-05T17:22:03.518Z'
+            sourceId: null
+            isClaimed: false
+            isExcluded: false
+            isReplaced: false
+            isEditable: false
+            hasChosenRevision: false
+            wasClaimed: false
+            revisionChosenById: null
+            revisionChosenAt: null
+            warningCodes: []
+            redline: null
+          - rowKey: a0Bg8000000Ab14.a0Bg8000000Ab17
+            parentRowKey: a0Bg8000000Ab14
+            level: 2
+            hasChildren: false
+            edgeId: null
+            edgeKey: a0Bg8000000Ab17EAC
+            ciId: null
+            version: null
+            detail:
+              ciKind: assembly-edge
+              parentItemId: a02g8000000Ab30EAC
+              parentItemNumber: Sub-200
+              childItemId: a02g8000000Ab33EAC
+              childItemNumber: Bearing-230
+              childItemName: 'Ball bearing, 608'
+              childItemRevisionId: a0Ag8000000Ab74EAC
+              childRevisionLabel: rev-1
+              quantity: 2
+              findNumber: 20
+            provenance: nested
+            governingTimestamp: '2026-04-05T17:22:03.518Z'
+            sourceId: null
+            isClaimed: false
+            isExcluded: false
+            isReplaced: false
+            isEditable: false
+            hasChosenRevision: false
+            wasClaimed: false
+            revisionChosenById: null
+            revisionChosenAt: null
+            warningCodes: []
+            redline: null
+        warnings:
+          - warningCode: PINNED_SUBTREE_HIDES_EDITS
+            message: 'Some edits on this branch will not take effect. A row is pinned to a revision whose own structure replaces the lines those edits were made on, so they are not part of this configuration.'
+            rowKey: a0Bg8000000Ab14
+            itemId: a02g8000000Ab32EAC
+            itemRevisionIds: [a0Ag8000000Ab73EAC]
+            governingTimestamps: []
+        page:
+          limit: 500
+          hasMore: false
+          nextCursor: null
+
+    BranchTreeOverrideBadges:
+      summary: hasChosenRevision follows the choice, not the rendered revision
+      description: |
+        Four rows:
+
+        1. A claim pinned to the **same** revision its source line resolves to. It is badged,
+           although it renders no pinned structure, and names who chose the revision and when.
+        2. A tracking claim. It is unbadged, although it renders a released revision.
+        3. A floating `new` row. It is unbadged.
+        4. A converted row that stamped a revision. It is badged, and it carries `wasClaimed`.
+           It keeps the `rowKey` it had as a claim, because converting it did not change the
+           occurrence.
+      value:
+        asOf: '2026-04-05T17:22:03.518Z'
+        rootRevisionId: a0Ag8000000Ab01EAC
+        sourceTimePoint: '2026-01-15T00:00:00.000Z'
+        snapshot: 's1.MjAyNi0wNC0wNVQxNzoyMjowM1p8NjE'
+        parentRowKey: null
+        compareTarget: null
+        rows:
+          - rowKey: a0Bg8000000Ab10
+            parentRowKey: null
+            level: 1
+            hasChildren: false
+            edgeId: a1Eg8000000AbD1EAK
+            edgeKey: a0Bg8000000Ab10EAC
+            ciId: a1Gg8000000AbF1EAK
+            version: 'v1.Ob11aQ5e'
+            detail:
+              ciKind: assembly-edge
+              parentItemId: a02g8000000Ab01EAC
+              parentItemNumber: Assy-100
+              childItemId: a02g8000000Ab20EAC
+              childItemNumber: Motor-002
+              childItemName: 'Brushless motor, 24 V'
+              childItemRevisionId: a0Ag8000000Ab41EAC
+              childRevisionLabel: rev-1
+              quantity: 4
+              findNumber: 10
+            provenance: claiming
+            governingTimestamp: '2026-04-05T17:22:03.518Z'
+            sourceId: a1Cg8000000AbCeEAK
+            isClaimed: true
+            isExcluded: false
+            isReplaced: false
+            isEditable: true
+            hasChosenRevision: true
+            wasClaimed: false
+            revisionChosenById: 005g8000000AbZ1AAK
+            revisionChosenAt: '2026-04-05T17:22:04.000Z'
+            warningCodes: []
+            redline: null
+          - rowKey: a0Bg8000000Ab11
+            parentRowKey: null
+            level: 1
+            hasChildren: false
+            edgeId: a1Eg8000000AbD2EAK
+            edgeKey: a0Bg8000000Ab11EAC
+            ciId: a1Gg8000000AbF2EAK
+            version: 'v1.Ob12bR6f'
+            detail:
+              ciKind: assembly-edge
+              parentItemId: a02g8000000Ab01EAC
+              parentItemNumber: Assy-100
+              childItemId: a02g8000000Ab21EAC
+              childItemNumber: Bracket-005
+              childItemName: Motor mounting bracket
+              childItemRevisionId: a0Ag8000000Ab31EAC
+              childRevisionLabel: rev-3
+              quantity: 3
+              findNumber: 20
+            provenance: claiming
+            governingTimestamp: '2026-04-05T17:22:03.518Z'
+            sourceId: a1Cg8000000AbCeEAK
+            isClaimed: true
+            isExcluded: false
+            isReplaced: false
+            isEditable: true
+            hasChosenRevision: false
+            wasClaimed: false
+            revisionChosenById: null
+            revisionChosenAt: null
+            warningCodes: []
+            redline: null
+          - rowKey: a1Eg8000000AbD9
+            parentRowKey: null
+            level: 1
+            hasChildren: false
+            edgeId: a1Eg8000000AbD9EAK
+            edgeKey: 'new-a1Bg8000000AbCdEAK-a02g8000000Ab01EAC-a02g8000000Ab90EAC'
+            ciId: a1Gg8000000AbF9EAK
+            version: 'v1.Ob19cS7g'
+            detail:
+              ciKind: assembly-edge
+              parentItemId: a02g8000000Ab01EAC
+              parentItemNumber: Assy-100
+              childItemId: a02g8000000Ab90EAC
+              childItemNumber: Pack-900
+              childItemName: Shipping carton
+              childItemRevisionId: a0Ag8000000Ab95EAC
+              childRevisionLabel: rev-1
+              quantity: 1
+              findNumber: 90
+            provenance: new
+            governingTimestamp: '2026-04-05T17:22:03.518Z'
+            sourceId: null
+            isClaimed: false
+            isExcluded: false
+            isReplaced: false
+            isEditable: true
+            hasChosenRevision: false
+            wasClaimed: false
+            revisionChosenById: null
+            revisionChosenAt: null
+            warningCodes: []
+            redline: null
+          - rowKey: a0Bg8000000Ab12
+            parentRowKey: null
+            level: 1
+            hasChildren: false
+            edgeId: a1Eg8000000AbD3EAK
+            edgeKey: a0Bg8000000Ab12EAC
+            ciId: a1Gg8000000AbF3EAK
+            version: 'v1.Ob13dT8h'
+            detail:
+              ciKind: assembly-edge
+              parentItemId: a02g8000000Ab01EAC
+              parentItemNumber: Assy-100
               childItemId: a02g8000000Ab22EAC
+              childItemNumber: Harness-011
+              childItemName: Main wiring harness
               childItemRevisionId: a0Ag8000000Ab61EAC
+              childRevisionLabel: rev-1
               quantity: 3
               findNumber: 30
             provenance: new
@@ -4378,26 +5712,45 @@ components:
             wasClaimed: true
             revisionChosenById: 005g8000000AbZ2AAK
             revisionChosenAt: '2026-04-05T17:20:51.000Z'
-            childRows: []
+            warningCodes: []
+            redline: null
         warnings: []
+        page:
+          limit: 500
+          hasMore: false
+          nextCursor: null
 
     BranchTreeRetiredStoredRevision:
       summary: A pinned claim whose chosen revision was cancelled
       description: |
         The claim was pinned to Motor-002 rev-1, and rev-1 was later cancelled. The row still
-        renders rev-1. The warning names the row's child item and the dead revision.
+        renders rev-1. The row lists the code in `warningCodes`, and the warning names the row by
+        `rowKey`, with its child item and the dead revision.
       value:
         asOf: '2026-04-05T17:22:03.518Z'
         rootRevisionId: a0Ag8000000Ab01EAC
         sourceTimePoint: '2026-01-15T00:00:00.000Z'
+        snapshot: 's1.MjAyNi0wNC0wNVQxNzoyMjowM1p8Mzg'
+        parentRowKey: null
+        compareTarget: null
         rows:
-          - edgeId: a1Eg8000000AbD1EAK
+          - rowKey: a0Bg8000000Ab10
+            parentRowKey: null
+            level: 1
+            hasChildren: false
+            edgeId: a1Eg8000000AbD1EAK
             edgeKey: a0Bg8000000Ab10EAC
+            ciId: a1Gg8000000AbF1EAK
+            version: 'v1.Rt41eU9k'
             detail:
               ciKind: assembly-edge
               parentItemId: a02g8000000Ab01EAC
+              parentItemNumber: Assy-100
               childItemId: a02g8000000Ab20EAC
+              childItemNumber: Motor-002
+              childItemName: 'Brushless motor, 24 V'
               childItemRevisionId: a0Ag8000000Ab41EAC
+              childRevisionLabel: rev-1
               quantity: 4
               findNumber: 10
             provenance: claiming
@@ -4411,27 +5764,46 @@ components:
             wasClaimed: false
             revisionChosenById: 005g8000000AbZ1AAK
             revisionChosenAt: '2026-03-02T10:41:27.000Z'
-            childRows: []
+            warningCodes: [STORED_REVISION_RETIRED]
+            redline: null
         warnings:
           - warningCode: STORED_REVISION_RETIRED
             message: 'This line is set to a specific revision that has since been cancelled or expired. It is still shown, because nobody chose to replace it — review whether it should now point at a different revision.'
+            rowKey: a0Bg8000000Ab10
             itemId: a02g8000000Ab20EAC
             itemRevisionIds: [a0Ag8000000Ab41EAC]
             governingTimestamps: []
+        page:
+          limit: 500
+          hasMore: false
+          nextCursor: null
 
     SourceTree:
       value:
         asOf: '2026-04-05T17:22:03.518Z'
         rootRevisionId: a0Ag8000000Ab01EAC
         sourceTimePoint: '2026-01-15T00:00:00.000Z'
+        snapshot: 's1.MjAyNi0wNC0wNVQxNzoyMjowM1pzcmM'
+        parentRowKey: null
+        compareTarget: null
         rows:
-          - edgeId: null
+          - rowKey: a0Bg8000000Ab10
+            parentRowKey: null
+            level: 1
+            hasChildren: false
+            edgeId: null
             edgeKey: a0Bg8000000Ab10EAC
+            ciId: null
+            version: null
             detail:
               ciKind: assembly-edge
               parentItemId: a02g8000000Ab01EAC
+              parentItemNumber: Assy-100
               childItemId: a02g8000000Ab20EAC
+              childItemNumber: Motor-002
+              childItemName: 'Brushless motor, 24 V'
               childItemRevisionId: a0Ag8000000Ab41EAC
+              childRevisionLabel: rev-1
               quantity: 1
               findNumber: 10
             provenance: base
@@ -4445,8 +5817,150 @@ components:
             wasClaimed: false
             revisionChosenById: null
             revisionChosenAt: null
-            childRows: []
+            warningCodes: []
+            redline: null
+          - rowKey: a0Bg8000000Ab11
+            parentRowKey: null
+            level: 1
+            hasChildren: false
+            edgeId: null
+            edgeKey: a0Bg8000000Ab11EAC
+            ciId: null
+            version: null
+            detail:
+              ciKind: assembly-edge
+              parentItemId: a02g8000000Ab01EAC
+              parentItemNumber: Assy-100
+              childItemId: a02g8000000Ab21EAC
+              childItemNumber: Bracket-005
+              childItemName: Motor mounting bracket
+              childItemRevisionId: a0Ag8000000Ab31EAC
+              childRevisionLabel: rev-3
+              quantity: 2
+              findNumber: 20
+            provenance: base
+            governingTimestamp: '2026-01-15T00:00:00.000Z'
+            sourceId: a1Cg8000000AbCeEAK
+            isClaimed: false
+            isExcluded: false
+            isReplaced: false
+            isEditable: true
+            hasChosenRevision: false
+            wasClaimed: false
+            revisionChosenById: null
+            revisionChosenAt: null
+            warningCodes: []
+            redline: null
+          - rowKey: a0Bg8000000Ab12
+            parentRowKey: null
+            level: 1
+            hasChildren: false
+            edgeId: null
+            edgeKey: a0Bg8000000Ab12EAC
+            ciId: null
+            version: null
+            detail:
+              ciKind: assembly-edge
+              parentItemId: a02g8000000Ab01EAC
+              parentItemNumber: Assy-100
+              childItemId: a02g8000000Ab22EAC
+              childItemNumber: Harness-011
+              childItemName: Main wiring harness
+              childItemRevisionId: a0Ag8000000Ab61EAC
+              childRevisionLabel: rev-1
+              quantity: 3
+              findNumber: 30
+            provenance: base
+            governingTimestamp: '2026-01-15T00:00:00.000Z'
+            sourceId: a1Cg8000000AbCeEAK
+            isClaimed: false
+            isExcluded: false
+            isReplaced: false
+            isEditable: true
+            hasChosenRevision: false
+            wasClaimed: false
+            revisionChosenById: null
+            revisionChosenAt: null
+            warningCodes: []
+            redline: null
         warnings: []
+        page:
+          limit: 500
+          hasMore: false
+          nextCursor: null
+
+    BranchFlattened:
+      summary: The BranchTreeWhole branch, one line per part
+      description: |
+        The excluded Harness-011 line adds nothing. Every other part occurs once here, so each
+        `totalQuantity` is its row's quantity; a part used in several places would sum into one
+        line, with `occurrences` counting the places.
+      value:
+        asOf: '2026-04-05T17:22:03.518Z'
+        rootRevisionId: a0Ag8000000Ab01EAC
+        sourceTimePoint: '2026-01-15T00:00:00.000Z'
+        status: completed
+        jobId: null
+        lines:
+          - childItemId: a02g8000000Ab21EAC
+            childItemNumber: Bracket-005
+            childItemName: Motor mounting bracket
+            childItemRevisionId: a0Ag8000000Ab31EAC
+            childRevisionLabel: rev-3
+            secondaryUniqueKey: null
+            totalQuantity: 2
+            occurrences: 1
+            warningCodes: []
+          - childItemId: a02g8000000Ab20EAC
+            childItemNumber: Motor-002
+            childItemName: 'Brushless motor, 24 V'
+            childItemRevisionId: a0Ag8000000Ab41EAC
+            childRevisionLabel: rev-1
+            secondaryUniqueKey: null
+            totalQuantity: 4
+            occurrences: 1
+            warningCodes: []
+          - childItemId: a02g8000000Ab90EAC
+            childItemNumber: Pack-900
+            childItemName: Shipping carton
+            childItemRevisionId: a0Ag8000000Ab95EAC
+            childRevisionLabel: rev-1
+            secondaryUniqueKey: null
+            totalQuantity: 1
+            occurrences: 1
+            warningCodes: []
+        page:
+          limit: 500
+          hasMore: false
+          nextCursor: null
+
+    BranchFindings:
+      summary: An item at two revisions, and a dead stored revision
+      description: |
+        `MIXED_REVISION` comes first and names no row: it is about the configuration as a whole.
+        The row warnings follow in tree order, each naming its row by `rowKey`.
+      value:
+        asOf: '2026-04-05T17:22:03.518Z'
+        rootRevisionId: a0Ag8000000Ab01EAC
+        status: completed
+        jobId: null
+        findings:
+          - warningCode: MIXED_REVISION
+            message: 'This item appears at more than one revision in the same tree, because rows follow different timepoints: rows from the source follow the source timepoint, added and substituted rows follow the as-of date, and a row can hold a chosen revision. This is expected and does not block anything.'
+            rowKey: null
+            itemId: a02g8000000Ab21EAC
+            itemRevisionIds: [a0Ag8000000Ab31EAC, a0Ag8000000Ab32EAC]
+            governingTimestamps: ['2026-01-15T00:00:00.000Z', '2026-04-05T17:22:03.518Z']
+          - warningCode: STORED_REVISION_RETIRED
+            message: 'This line is set to a specific revision that has since been cancelled or expired. It is still shown, because nobody chose to replace it — review whether it should now point at a different revision.'
+            rowKey: a0Bg8000000Ab10
+            itemId: a02g8000000Ab20EAC
+            itemRevisionIds: [a0Ag8000000Ab41EAC]
+            governingTimestamps: []
+        page:
+          limit: 200
+          hasMore: false
+          nextCursor: null
 
     DeltaBatchApplied:
       value:
@@ -4476,6 +5990,8 @@ components:
             edgeId: a1Eg8000000AbD2EAK
             forked: null
             claimed: null
+        snapshot: 's1.MjAyNi0wNC0wNVQxNzoyMjowNVp8NDM'
+        invalidatedParentRowKeys: ['']
 
     DeltaBatchPartial:
       value:
@@ -4505,6 +6021,8 @@ components:
             edgeId: null
             forked: null
             claimed: null
+        snapshot: 's1.MjAyNi0wNC0wNVQxNzoyNToxMVp8NDQ'
+        invalidatedParentRowKeys: ['']
 
     DeltaBatchForked:
       value:
@@ -4524,6 +6042,8 @@ components:
             edgeId: a1Eg8000000AbD1EAK
             forked: true
             claimed: null
+        snapshot: 's1.MjAyNi0wNC0wNlQxNTowMjowMFp8NDU'
+        invalidatedParentRowKeys: ['']
 
     DeltaBatchAutoClaimed:
       summary: update with autoClaim on a base line
@@ -4548,6 +6068,8 @@ components:
             edgeId: a1Eg8000000AbD2EAK
             forked: null
             claimed: true
+        snapshot: 's1.MjAyNi0wNC0wNVQxNzoyNDo0MFp8NDY'
+        invalidatedParentRowKeys: ['']
 
     DeltaBatchRevisionSet:
       summary: An update that changed a claim's stored revision
@@ -4571,6 +6093,8 @@ components:
             edgeId: a1Eg8000000AbD1EAK
             forked: true
             claimed: null
+        snapshot: 's1.MjAyNi0wNC0wNlQxNToxMDowMFp8NDc'
+        invalidatedParentRowKeys: ['']
 
     DeltaBatchAtomicFailure:
       value:
@@ -4593,6 +6117,26 @@ components:
             success: false
             errorCode: ALREADY_EXCLUDED
             message: 'This row is already excluded from this configuration. Restore it first if you want to change it. (edge a0Bg8000000Ab13EAC is already excluded)'
+            ciId: null
+            edgeId: null
+            forked: null
+            claimed: null
+
+    DeltaBatchStaleVersion:
+      summary: An update whose `version` no longer matches the row
+      description: |
+        The `updateWithVersion` request, sent after someone else changed the row. Nothing was
+        written. Reload the row, and send the edit again with its new `version` if it still applies.
+      value:
+        code: STALE_REVISION
+        message: 'This row has been revised since the view you are working from. Reload it and try again. (1 of 1 operations failed validation)'
+        failures:
+          - index: 0
+            clientRef: grid-row-7
+            op: update
+            success: false
+            errorCode: STALE_REVISION
+            message: 'This row has been revised since the view you are working from. Reload it and try again. (Assembly_CI__c a1Eg8000000AbD1EAK changed since version v1.Ab31kQ9x was read)'
             ciId: null
             edgeId: null
             forked: null
@@ -4637,19 +6181,38 @@ components:
             forked: null
             claimed: null
 
-    BaselineTreeClean:
+    StructureTooLarge:
+      summary: A structure too large to resolve in one transaction
+      value:
+        code: STRUCTURE_TOO_LARGE
+        message: 'This configuration is too large to process in one request. Contact your administrator. (query rows 49,812 of 50,000 used while resolving level 7)'
+
+    BaselineTreeRows:
       value:
         baselineId: a1Fg8000000AbE1EAK
         label: Pilot build 1
         resolutionTimePoint: '2026-04-06T14:31:02.000Z'
+        snapshot: 's1.YmFzZWxpbmV8YTFGZzgwMDAwMDBBYkUx'
+        parentRowKey: null
+        compareTarget: null
         rows:
-          - edgeId: null
+          - rowKey: a0Bg8000000Ab10
+            parentRowKey: null
+            level: 1
+            hasChildren: false
+            edgeId: null
             edgeKey: null
+            ciId: null
+            version: null
             detail:
               ciKind: assembly-edge
               parentItemId: a02g8000000Ab01EAC
+              parentItemNumber: Assy-100
               childItemId: a02g8000000Ab20EAC
+              childItemNumber: Motor-002
+              childItemName: 'Brushless motor, 24 V'
               childItemRevisionId: a0Ag8000000Ab41EAC
+              childRevisionLabel: rev-1
               quantity: 4
               findNumber: 10
             provenance: claiming
@@ -4663,21 +6226,13 @@ components:
             wasClaimed: false
             revisionChosenById: null
             revisionChosenAt: null
-            childRows: []
+            warningCodes: []
+            redline: null
         warnings: []
-
-    BaselineTreeDrift:
-      value:
-        baselineId: a1Fg8000000AbE1EAK
-        label: Pilot build 1
-        resolutionTimePoint: '2026-04-06T14:31:02.000Z'
-        rows: []
-        warnings:
-          - warningCode: BASELINE_COUNT_DRIFT
-            message: 'This baseline now resolves to a different number of rows than when it was cut. Something it depends on has changed. Cut recorded 4; this read resolved 5.'
-            itemId: null
-            itemRevisionIds: []
-            governingTimestamps: []
+        page:
+          limit: 500
+          hasMore: false
+          nextCursor: null
 
     BaselineTreePinnedAuthor:
       summary: A pinned baseline row names who chose its revision, and when
@@ -4689,14 +6244,27 @@ components:
         baselineId: a1Fg8000000AbE1EAK
         label: Pilot build 1
         resolutionTimePoint: '2026-04-06T14:31:02.000Z'
+        snapshot: 's1.YmFzZWxpbmV8YTFGZzgwMDAwMDBBYkUx'
+        parentRowKey: null
+        compareTarget: null
         rows:
-          - edgeId: null
+          - rowKey: a0Bg8000000Ab10
+            parentRowKey: null
+            level: 1
+            hasChildren: false
+            edgeId: null
             edgeKey: null
+            ciId: null
+            version: null
             detail:
               ciKind: assembly-edge
               parentItemId: a02g8000000Ab01EAC
+              parentItemNumber: Assy-100
               childItemId: a02g8000000Ab20EAC
+              childItemNumber: Motor-002
+              childItemName: 'Brushless motor, 24 V'
               childItemRevisionId: a0Ag8000000Ab41EAC
+              childRevisionLabel: rev-1
               quantity: 4
               findNumber: 10
             provenance: claiming
@@ -4710,25 +6278,65 @@ components:
             wasClaimed: false
             revisionChosenById: 005g8000000AbZ1AAK
             revisionChosenAt: '2026-04-05T17:22:04.000Z'
-            childRows: []
+            warningCodes: []
+            redline: null
         warnings: []
+        page:
+          limit: 500
+          hasMore: false
+          nextCursor: null
 
-    BaselineTreePinDrift:
-      summary: BASELINE_PIN_DRIFT
-      description: |
-        The cut recorded one row with a chosen revision. The re-derived read finds none, while the
-        row and claim counts still match. `rows` is omitted here.
+    BaselineFindingsClean:
       value:
-        baselineId: a1Fg8000000AbE1EAK
-        label: Pilot build 1
-        resolutionTimePoint: '2026-04-06T14:31:02.000Z'
-        rows: []
-        warnings:
-          - warningCode: BASELINE_PIN_DRIFT
-            message: 'This baseline recorded a different number of rows with a chosen revision than it now re-derives. The rows shown are still the honest answer for the stored timepoint, but something the resolution depends on has changed since the baseline was taken.'
+        asOf: '2026-04-06T14:31:02.000Z'
+        rootRevisionId: a0Ag8000000Ab01EAC
+        status: completed
+        jobId: null
+        findings: []
+        page:
+          limit: 200
+          hasMore: false
+          nextCursor: null
+
+    BaselineFindingsDrift:
+      value:
+        asOf: '2026-04-06T14:31:02.000Z'
+        rootRevisionId: a0Ag8000000Ab01EAC
+        status: completed
+        jobId: null
+        findings:
+          - warningCode: BASELINE_COUNT_DRIFT
+            message: 'This baseline now resolves to a different number of rows than when it was cut. Something it depends on has changed. Cut recorded 4; this read resolved 5.'
+            rowKey: null
             itemId: null
             itemRevisionIds: []
             governingTimestamps: []
+        page:
+          limit: 200
+          hasMore: false
+          nextCursor: null
+
+    BaselineFindingsPinDrift:
+      summary: BASELINE_PIN_DRIFT
+      description: |
+        The cut recorded one row with a chosen revision. The re-derived baseline finds none, while
+        the row and claim counts still match.
+      value:
+        asOf: '2026-04-06T14:31:02.000Z'
+        rootRevisionId: a0Ag8000000Ab01EAC
+        status: completed
+        jobId: null
+        findings:
+          - warningCode: BASELINE_PIN_DRIFT
+            message: 'This baseline recorded a different number of rows with a chosen revision than it now re-derives. The rows shown are still the honest answer for the stored timepoint, but something the resolution depends on has changed since the baseline was taken.'
+            rowKey: null
+            itemId: null
+            itemRevisionIds: []
+            governingTimestamps: []
+        page:
+          limit: 200
+          hasMore: false
+          nextCursor: null
 
     PullPreviewWithChanges:
       value:
@@ -4763,6 +6371,39 @@ components:
             claim-orphaned: 1
             member-add-converged: 1
         entries:
+          - entryId: 'f4880c6b3e1a9d75'
+            kind: claim-orphaned
+            decision: required
+            availableActions: [convert-to-native, remove]
+            retargeted: null
+            revisionAdvances: null
+            claimKind: claim
+            message: 'The newer revision removes a member you changed. Choose whether to keep it as your own content or remove it.'
+            target:
+              ciKind: assembly-edge
+              edgeId: a1Eg8000000AbD3EAK
+              edgeKey: a0Bg8000000Ab12EAC
+              label: Harness-011
+              rowKey: a0Bg8000000Ab12
+              path:
+                - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
+            current:
+              provenance: claiming
+              governingClock: branch
+              governingTimestamp: '2026-04-05T17:22:03.518Z'
+              detail:
+                ciKind: assembly-edge
+                parentItemId: a02g8000000Ab01EAC
+                parentItemNumber: Assy-100
+                childItemId: a02g8000000Ab22EAC
+                childItemNumber: Harness-011
+                childItemName: Main wiring harness
+                childItemRevisionId: a0Ag8000000Ab61EAC
+                childRevisionLabel: rev-1
+                quantity: 3
+                findNumber: 30
+            candidate: null
+
           - entryId: '5c1e0a77f9b34d20'
             kind: source-version-advance
             decision: informational
@@ -4776,6 +6417,7 @@ components:
               edgeId: null
               edgeKey: null
               label: Assy-100
+              rowKey: null
               path:
                 - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
             current: null
@@ -4794,6 +6436,7 @@ components:
               edgeId: null
               edgeKey: a0Bg8000000Ab11EAC
               label: Bracket-005
+              rowKey: a0Bg8000000Ab11
               path:
                 - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
             current:
@@ -4806,6 +6449,7 @@ components:
                 parentItemNumber: Assy-100
                 childItemId: a02g8000000Ab21EAC
                 childItemNumber: Bracket-005
+                childItemName: Motor mounting bracket
                 childItemRevisionId: a0Ag8000000Ab31EAC
                 childRevisionLabel: rev-3
                 quantity: 2
@@ -4820,6 +6464,7 @@ components:
                 parentItemNumber: Assy-100
                 childItemId: a02g8000000Ab21EAC
                 childItemNumber: Bracket-005
+                childItemName: Motor mounting bracket
                 childItemRevisionId: a0Ag8000000Ab32EAC
                 childRevisionLabel: rev-4
                 quantity: 2
@@ -4838,6 +6483,7 @@ components:
               edgeId: a1Eg8000000AbD1EAK
               edgeKey: a0Bg8000000Ab10EAC
               label: Motor-002
+              rowKey: a0Bg8000000Ab10
               path:
                 - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
             current:
@@ -4850,6 +6496,7 @@ components:
                 parentItemNumber: Assy-100
                 childItemId: a02g8000000Ab20EAC
                 childItemNumber: Motor-002
+                childItemName: 'Brushless motor, 24 V'
                 childItemRevisionId: a0Ag8000000Ab41EAC
                 childRevisionLabel: rev-1
                 quantity: 4
@@ -4864,6 +6511,7 @@ components:
                 parentItemNumber: Assy-100
                 childItemId: a02g8000000Ab20EAC
                 childItemNumber: Motor-002
+                childItemName: 'Brushless motor, 24 V'
                 childItemRevisionId: a0Ag8000000Ab41EAC
                 childRevisionLabel: rev-1
                 quantity: 4
@@ -4882,6 +6530,7 @@ components:
               edgeId: null
               edgeKey: a0Bg8000000Ab13EAC
               label: Panel-300
+              rowKey: null
               path:
                 - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
             current: null
@@ -4895,41 +6544,11 @@ components:
                 parentItemNumber: Assy-100
                 childItemId: a02g8000000Ab23EAC
                 childItemNumber: Panel-300
+                childItemName: Front access panel
                 childItemRevisionId: a0Ag8000000Ab52EAC
                 childRevisionLabel: rev-2
                 quantity: 1
                 findNumber: 40
-
-          - entryId: 'f4880c6b3e1a9d75'
-            kind: claim-orphaned
-            decision: required
-            availableActions: [convert-to-native, remove]
-            retargeted: null
-            revisionAdvances: null
-            claimKind: claim
-            message: 'The newer revision removes a member you changed. Choose whether to keep it as your own content or remove it.'
-            target:
-              ciKind: assembly-edge
-              edgeId: a1Eg8000000AbD3EAK
-              edgeKey: a0Bg8000000Ab12EAC
-              label: Harness-011
-              path:
-                - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
-            current:
-              provenance: claiming
-              governingClock: branch
-              governingTimestamp: '2026-04-05T17:22:03.518Z'
-              detail:
-                ciKind: assembly-edge
-                parentItemId: a02g8000000Ab01EAC
-                parentItemNumber: Assy-100
-                childItemId: a02g8000000Ab22EAC
-                childItemNumber: Harness-011
-                childItemRevisionId: a0Ag8000000Ab61EAC
-                childRevisionLabel: rev-1
-                quantity: 3
-                findNumber: 30
-            candidate: null
 
           - entryId: '2d6be1470f83a9c5'
             kind: member-add-converged
@@ -4944,6 +6563,7 @@ components:
               edgeId: a1Eg8000000AbD5EAK
               edgeKey: 'new-a1Bg8000000AbCdEAK-a02g8000000Ab01EAC-a02g8000000Ab24EAC'
               label: Label-400
+              rowKey: a1Eg8000000AbD5
               path:
                 - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
             current:
@@ -4956,6 +6576,7 @@ components:
                 parentItemNumber: Assy-100
                 childItemId: a02g8000000Ab24EAC
                 childItemNumber: Label-400
+                childItemName: Serial number label
                 childItemRevisionId: a0Ag8000000Ab71EAC
                 childRevisionLabel: rev-1
                 quantity: 1
@@ -4970,13 +6591,17 @@ components:
                 parentItemNumber: Assy-100
                 childItemId: a02g8000000Ab24EAC
                 childItemNumber: Label-400
+                childItemName: Serial number label
                 childItemRevisionId: a0Ag8000000Ab71EAC
                 childRevisionLabel: rev-1
                 quantity: 1
                 findNumber: 60
         warnings: []
-        truncated: false
-        entriesLimit: 200
+        page:
+          limit: 200
+          hasMore: false
+          nextCursor: null
+        previewId: 'pv1.Xk3q9fA2c41ab7e0'
         diffFingerprint: 'sha256:9f2c41ab7e08d3b6'
         generatedAt: '2026-04-05T17:22:03.518Z'
 
@@ -5036,6 +6661,7 @@ components:
               edgeId: null
               edgeKey: null
               label: Assy-100
+              rowKey: null
               path:
                 - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
             current: null
@@ -5053,6 +6679,7 @@ components:
               edgeId: a1Eg8000000AbD1EAK
               edgeKey: a0Bg8000000Ab10EAC
               label: Motor-002
+              rowKey: a0Bg8000000Ab10
               path:
                 - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
             current:
@@ -5065,6 +6692,7 @@ components:
                 parentItemNumber: Assy-100
                 childItemId: a02g8000000Ab20EAC
                 childItemNumber: Motor-002
+                childItemName: 'Brushless motor, 24 V'
                 childItemRevisionId: a0Ag8000000Ab41EAC
                 childRevisionLabel: rev-1
                 quantity: 4
@@ -5079,6 +6707,7 @@ components:
                 parentItemNumber: Assy-100
                 childItemId: a02g8000000Ab20EAC
                 childItemNumber: Motor-002
+                childItemName: 'Brushless motor, 24 V'
                 childItemRevisionId: a0Ag8000000Ab42EAC
                 childRevisionLabel: rev-2
                 quantity: 4
@@ -5096,6 +6725,7 @@ components:
               edgeId: a1Eg8000000AbD2EAK
               edgeKey: a0Bg8000000Ab11EAC
               label: Bracket-005
+              rowKey: a0Bg8000000Ab11
               path:
                 - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
             current:
@@ -5108,6 +6738,7 @@ components:
                 parentItemNumber: Assy-100
                 childItemId: a02g8000000Ab21EAC
                 childItemNumber: Bracket-005
+                childItemName: Motor mounting bracket
                 childItemRevisionId: a0Ag8000000Ab31EAC
                 childRevisionLabel: rev-3
                 quantity: 2
@@ -5122,13 +6753,17 @@ components:
                 parentItemNumber: Assy-100
                 childItemId: a02g8000000Ab21EAC
                 childItemNumber: Bracket-005
+                childItemName: Motor mounting bracket
                 childItemRevisionId: a0Ag8000000Ab32EAC
                 childRevisionLabel: rev-4
                 quantity: 2
                 findNumber: 20
         warnings: []
-        truncated: false
-        entriesLimit: 200
+        page:
+          limit: 200
+          hasMore: false
+          nextCursor: null
+        previewId: 'pv1.Rm7t2Lq8b1a83f56'
         diffFingerprint: 'sha256:4c0d9e72b1a83f56'
         generatedAt: '2026-04-05T17:22:03.518Z'
 
@@ -5186,6 +6821,7 @@ components:
               edgeId: a1Eg8000000AbD1EAK
               edgeKey: a0Bg8000000Ab10EAC
               label: Motor-002
+              rowKey: a0Bg8000000Ab10
               path:
                 - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
             current:
@@ -5198,6 +6834,7 @@ components:
                 parentItemNumber: Assy-100
                 childItemId: a02g8000000Ab20EAC
                 childItemNumber: Motor-002
+                childItemName: 'Brushless motor, 24 V'
                 childItemRevisionId: a0Ag8000000Ab41EAC
                 childRevisionLabel: rev-1
                 quantity: 4
@@ -5212,6 +6849,7 @@ components:
                 parentItemNumber: Assy-100
                 childItemId: a02g8000000Ab20EAC
                 childItemNumber: Motor-002
+                childItemName: 'Brushless motor, 24 V'
                 childItemRevisionId: a0Ag8000000Ab42EAC
                 childRevisionLabel: rev-2
                 quantity: 6
@@ -5229,6 +6867,7 @@ components:
               edgeId: a1Eg8000000AbD5EAK
               edgeKey: 'new-a1Bg8000000AbCdEAK-a02g8000000Ab01EAC-a02g8000000Ab24EAC'
               label: Label-400
+              rowKey: a1Eg8000000AbD5
               path:
                 - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
             current:
@@ -5241,6 +6880,7 @@ components:
                 parentItemNumber: Assy-100
                 childItemId: a02g8000000Ab24EAC
                 childItemNumber: Label-400
+                childItemName: Serial number label
                 childItemRevisionId: a0Ag8000000Ab71EAC
                 childRevisionLabel: rev-1
                 quantity: 1
@@ -5255,6 +6895,7 @@ components:
                 parentItemNumber: Assy-100
                 childItemId: a02g8000000Ab24EAC
                 childItemNumber: Label-400
+                childItemName: Serial number label
                 childItemRevisionId: a0Ag8000000Ab71EAC
                 childRevisionLabel: rev-1
                 quantity: 2
@@ -5272,6 +6913,7 @@ components:
               edgeId: a1Eg8000000AbD2EAK
               edgeKey: a0Bg8000000Ab11EAC
               label: Bracket-005
+              rowKey: a0Bg8000000Ab11
               path:
                 - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
             current:
@@ -5284,6 +6926,7 @@ components:
                 parentItemNumber: Assy-100
                 childItemId: a02g8000000Ab21EAC
                 childItemNumber: Bracket-005
+                childItemName: Motor mounting bracket
                 childItemRevisionId: a0Ag8000000Ab31EAC
                 childRevisionLabel: rev-3
                 quantity: 2
@@ -5298,13 +6941,17 @@ components:
                 parentItemNumber: Assy-100
                 childItemId: a02g8000000Ab21EAC
                 childItemNumber: Bracket-005
+                childItemName: Motor mounting bracket
                 childItemRevisionId: a0Ag8000000Ab31EAC
                 childRevisionLabel: rev-3
                 quantity: 2
                 findNumber: 20
         warnings: []
-        truncated: false
-        entriesLimit: 200
+        page:
+          limit: 200
+          hasMore: false
+          nextCursor: null
+        previewId: 'pv1.Pf5d0Kw3e04d267a'
         diffFingerprint: 'sha256:b5e81c3a9f04d267'
         generatedAt: '2026-04-05T17:22:03.518Z'
 
@@ -5330,13 +6977,21 @@ components:
           byKind: {}
         entries: []
         warnings: []
-        truncated: false
-        entriesLimit: 200
+        page:
+          limit: 200
+          hasMore: false
+          nextCursor: null
+        previewId: 'pv1.Nc0v4Hs90000000a'
         diffFingerprint: 'sha256:0000000000000000'
         generatedAt: '2026-04-06T08:00:00.000Z'
 
-    PullPreviewTruncated:
-      summary: '`entriesLimit=1` — one informational entry, and the required one kept regardless'
+    PullPreviewPaged:
+      summary: '`limit=2` — the required entry first, then one informational, with more to come'
+      description: |
+        The `PullPreviewWithChanges` diff read with `limit=2`. The one `required` entry comes
+        first, then the first informational one; `page.nextCursor` fetches the rest. `summary`,
+        `previewId` and `diffFingerprint` describe the **whole** diff and are the same on every
+        page.
       value:
         sourceId: a1Cg8000000AbCeEAK
         branchId: a1Bg8000000AbCdEAK
@@ -5358,8 +7013,8 @@ components:
           acceptedAt: null
         hasChanges: true
         summary:
-          total: 5
-          informational: 4
+          total: 6
+          informational: 5
           required: 1
           byKind:
             source-version-advance: 1
@@ -5367,16 +7022,8 @@ components:
             claim-retained: 1
             member-added: 1
             claim-orphaned: 1
+            member-add-converged: 1
         entries:
-          - entryId: '5c1e0a77f9b34d20'
-            kind: source-version-advance
-            decision: informational
-            availableActions: []
-            message: 'The source assembly moves to a newer released revision.'
-            target:
-              ciKind: source
-              label: Assy-100
-              path: [{ ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }]
           - entryId: 'f4880c6b3e1a9d75'
             kind: claim-orphaned
             decision: required
@@ -5388,15 +7035,31 @@ components:
               edgeId: a1Eg8000000AbD3EAK
               edgeKey: a0Bg8000000Ab12EAC
               label: Harness-011
+              rowKey: a0Bg8000000Ab12
+              path: [{ ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }]
+          - entryId: '5c1e0a77f9b34d20'
+            kind: source-version-advance
+            decision: informational
+            availableActions: []
+            message: 'The source assembly moves to a newer released revision.'
+            target:
+              ciKind: source
+              label: Assy-100
+              rowKey: null
               path: [{ ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }]
         warnings: []
-        truncated: true
-        entriesLimit: 1
+        page:
+          limit: 2
+          hasMore: true
+          nextCursor: 'c1.ZjQ4ODBjNmIzZTFhOWQ3NXwy'
+        previewId: 'pv1.Xk3q9fA2c41ab7e0'
         diffFingerprint: 'sha256:9f2c41ab7e08d3b6'
         generatedAt: '2026-04-05T17:22:03.518Z'
 
     PullCommitCommitted:
       value:
+        status: completed
+        jobId: null
         sourceId: a1Cg8000000AbCeEAK
         newSourceRevisionId: a1Dg8000000AbChEAK
         acceptedRootRevisionId: a0Ag8000000Ab02EAC
@@ -5430,6 +7093,8 @@ components:
 
         `acceptedFields` is echoed in canonical form whatever casing the request used.
       value:
+        status: completed
+        jobId: null
         sourceId: a1Cg8000000AbCeEAK
         newSourceRevisionId: a1Dg8000000AbChEAK
         acceptedRootRevisionId: a0Ag8000000Ab02EAC
@@ -5453,6 +7118,8 @@ components:
 
     PullCommitAlreadyCurrent:
       value:
+        status: completed
+        jobId: null
         sourceId: a1Cg8000000AbCeEAK
         newSourceRevisionId: a1Dg8000000AbCiEAK
         acceptedRootRevisionId: a0Ag8000000Ab02EAC
@@ -5461,10 +7128,10 @@ components:
 
     # The four comparison examples below are ONE fixture read four ways, so they can be read
     # against each other. `ComparisonWithDifferences`, `ComparisonIncludingUnchanged` and
-    # `ComparisonTruncated` are the same branch against the same eBOM revision, differing only in
-    # `includeUnchanged` and `entriesLimit` — which is what makes the summary's behaviour legible:
+    # `ComparisonPaged` are the same branch against the same eBOM revision, differing only in
+    # `includeUnchanged` and `limit` — which is what makes the summary's behaviour legible:
     # `unchanged` is 1 in all three, `total` and `byKind['member-unchanged']` move only with the
-    # flag, and truncation moves neither.
+    # flag, and paging moves neither.
 
     ComparisonIdentical:
       value:
@@ -5506,8 +7173,10 @@ components:
         entries: []
         leftWarnings: []
         rightWarnings: []
-        truncated: false
-        entriesLimit: 200
+        page:
+          limit: 200
+          hasMore: false
+          nextCursor: null
         generatedAt: '2026-04-05T17:22:03.518Z'
 
     ComparisonWithDifferences:
@@ -5559,6 +7228,7 @@ components:
               edgeId: null
               edgeKey: null
               label: Assy-100
+              rowKey: null
               path:
                 - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
             left:
@@ -5571,6 +7241,7 @@ components:
                 parentItemNumber: null
                 childItemId: a02g8000000Ab01EAC
                 childItemNumber: Assy-100
+                childItemName: Gear drive assembly
                 childItemRevisionId: a0Ag8000000Ab01EAC
                 childRevisionLabel: rev-1
                 quantity: null
@@ -5585,6 +7256,7 @@ components:
                 parentItemNumber: null
                 childItemId: a02g8000000Ab01EAC
                 childItemNumber: Assy-100
+                childItemName: Gear drive assembly
                 childItemRevisionId: a0Ag8000000Ab02EAC
                 childRevisionLabel: rev-2
                 quantity: null
@@ -5599,6 +7271,7 @@ components:
               edgeId: a1Eg8000000AbD1EAK
               edgeKey: a0Bg8000000Ab10EAC
               label: Motor-002
+              rowKey: a0Bg8000000Ab10
               path:
                 - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
             left:
@@ -5613,6 +7286,7 @@ components:
                 parentItemNumber: Assy-100
                 childItemId: a02g8000000Ab20EAC
                 childItemNumber: Motor-002
+                childItemName: 'Brushless motor, 24 V'
                 childItemRevisionId: a0Ag8000000Ab41EAC
                 childRevisionLabel: rev-1
                 quantity: 4
@@ -5627,6 +7301,7 @@ components:
                 parentItemNumber: Assy-100
                 childItemId: a02g8000000Ab20EAC
                 childItemNumber: Motor-002
+                childItemName: 'Brushless motor, 24 V'
                 childItemRevisionId: a0Ag8000000Ab42EAC
                 childRevisionLabel: rev-2
                 quantity: 1
@@ -5641,6 +7316,7 @@ components:
               edgeId: null
               edgeKey: a0Bg8000000Ab12EAC
               label: Harness-011
+              rowKey: a0Bg8000000Ab12
               path:
                 - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
             left:
@@ -5653,6 +7329,7 @@ components:
                 parentItemNumber: Assy-100
                 childItemId: a02g8000000Ab22EAC
                 childItemNumber: Harness-011
+                childItemName: Main wiring harness
                 childItemRevisionId: a0Ag8000000Ab61EAC
                 childRevisionLabel: rev-1
                 quantity: 3
@@ -5668,6 +7345,7 @@ components:
               edgeId: null
               edgeKey: a0Bg8000000Ab13EAC
               label: Panel-300
+              rowKey: null
               path:
                 - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
             left: null
@@ -5681,14 +7359,17 @@ components:
                 parentItemNumber: Assy-100
                 childItemId: a02g8000000Ab23EAC
                 childItemNumber: Panel-300
+                childItemName: Front access panel
                 childItemRevisionId: a0Ag8000000Ab52EAC
                 childRevisionLabel: rev-2
                 quantity: 1
                 findNumber: 40
         leftWarnings: []
         rightWarnings: []
-        truncated: false
-        entriesLimit: 200
+        page:
+          limit: 200
+          hasMore: false
+          nextCursor: null
         generatedAt: '2026-04-05T17:22:03.518Z'
 
     ComparisonIncludingUnchanged:
@@ -5741,6 +7422,7 @@ components:
               edgeId: null
               edgeKey: null
               label: Assy-100
+              rowKey: null
               path:
                 - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
             left:
@@ -5753,6 +7435,7 @@ components:
                 parentItemNumber: null
                 childItemId: a02g8000000Ab01EAC
                 childItemNumber: Assy-100
+                childItemName: Gear drive assembly
                 childItemRevisionId: a0Ag8000000Ab01EAC
                 childRevisionLabel: rev-1
                 quantity: null
@@ -5767,6 +7450,7 @@ components:
                 parentItemNumber: null
                 childItemId: a02g8000000Ab01EAC
                 childItemNumber: Assy-100
+                childItemName: Gear drive assembly
                 childItemRevisionId: a0Ag8000000Ab02EAC
                 childRevisionLabel: rev-2
                 quantity: null
@@ -5781,6 +7465,7 @@ components:
               edgeId: a1Eg8000000AbD1EAK
               edgeKey: a0Bg8000000Ab10EAC
               label: Motor-002
+              rowKey: a0Bg8000000Ab10
               path:
                 - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
             left:
@@ -5793,6 +7478,7 @@ components:
                 parentItemNumber: Assy-100
                 childItemId: a02g8000000Ab20EAC
                 childItemNumber: Motor-002
+                childItemName: 'Brushless motor, 24 V'
                 childItemRevisionId: a0Ag8000000Ab41EAC
                 childRevisionLabel: rev-1
                 quantity: 4
@@ -5807,6 +7493,7 @@ components:
                 parentItemNumber: Assy-100
                 childItemId: a02g8000000Ab20EAC
                 childItemNumber: Motor-002
+                childItemName: 'Brushless motor, 24 V'
                 childItemRevisionId: a0Ag8000000Ab42EAC
                 childRevisionLabel: rev-2
                 quantity: 1
@@ -5824,6 +7511,7 @@ components:
               edgeId: null
               edgeKey: a0Bg8000000Ab11EAC
               label: Bracket-005
+              rowKey: a0Bg8000000Ab11
               path:
                 - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
             left:
@@ -5836,6 +7524,7 @@ components:
                 parentItemNumber: Assy-100
                 childItemId: a02g8000000Ab21EAC
                 childItemNumber: Bracket-005
+                childItemName: Motor mounting bracket
                 childItemRevisionId: a0Ag8000000Ab31EAC
                 childRevisionLabel: rev-3
                 quantity: 2
@@ -5850,6 +7539,7 @@ components:
                 parentItemNumber: Assy-100
                 childItemId: a02g8000000Ab21EAC
                 childItemNumber: Bracket-005
+                childItemName: Motor mounting bracket
                 childItemRevisionId: a0Ag8000000Ab31EAC
                 childRevisionLabel: rev-3
                 quantity: 2
@@ -5864,6 +7554,7 @@ components:
               edgeId: null
               edgeKey: a0Bg8000000Ab12EAC
               label: Harness-011
+              rowKey: a0Bg8000000Ab12
               path:
                 - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
             left:
@@ -5876,6 +7567,7 @@ components:
                 parentItemNumber: Assy-100
                 childItemId: a02g8000000Ab22EAC
                 childItemNumber: Harness-011
+                childItemName: Main wiring harness
                 childItemRevisionId: a0Ag8000000Ab61EAC
                 childRevisionLabel: rev-1
                 quantity: 3
@@ -5891,6 +7583,7 @@ components:
               edgeId: null
               edgeKey: a0Bg8000000Ab13EAC
               label: Panel-300
+              rowKey: null
               path:
                 - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
             left: null
@@ -5904,17 +7597,20 @@ components:
                 parentItemNumber: Assy-100
                 childItemId: a02g8000000Ab23EAC
                 childItemNumber: Panel-300
+                childItemName: Front access panel
                 childItemRevisionId: a0Ag8000000Ab52EAC
                 childRevisionLabel: rev-2
                 quantity: 1
                 findNumber: 40
         leftWarnings: []
         rightWarnings: []
-        truncated: false
-        entriesLimit: 200
+        page:
+          limit: 200
+          hasMore: false
+          nextCursor: null
         generatedAt: '2026-04-05T17:22:03.518Z'
 
-    ComparisonTruncated:
+    ComparisonPaged:
       value:
         left:
           kind: branch
@@ -5938,9 +7634,9 @@ components:
           sourceTimePoint: '2026-04-02T00:00:00.000Z'
         identical: false
         summary:
-          # `ComparisonWithDifferences` at `entriesLimit=2`. The summary is BYTE-IDENTICAL to the
-          # untruncated response — truncation trims the rows and touches nothing else, which is
-          # what makes `truncated: true` actionable: 4 entries exist, 2 came back.
+          # `ComparisonWithDifferences` at `limit=2`. The summary is BYTE-IDENTICAL to the
+          # single-page response — it counts the whole comparison, never one page, which is
+          # what makes `page.hasMore` actionable: 4 entries exist, 2 came back.
           total: 4
           added: 1
           removed: 1
@@ -5962,6 +7658,7 @@ components:
               edgeId: null
               edgeKey: null
               label: Assy-100
+              rowKey: null
               path:
                 - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
             left:
@@ -5974,6 +7671,7 @@ components:
                 parentItemNumber: null
                 childItemId: a02g8000000Ab01EAC
                 childItemNumber: Assy-100
+                childItemName: Gear drive assembly
                 childItemRevisionId: a0Ag8000000Ab01EAC
                 childRevisionLabel: rev-1
                 quantity: null
@@ -5988,6 +7686,7 @@ components:
                 parentItemNumber: null
                 childItemId: a02g8000000Ab01EAC
                 childItemNumber: Assy-100
+                childItemName: Gear drive assembly
                 childItemRevisionId: a0Ag8000000Ab02EAC
                 childRevisionLabel: rev-2
                 quantity: null
@@ -6002,6 +7701,7 @@ components:
               edgeId: a1Eg8000000AbD1EAK
               edgeKey: a0Bg8000000Ab10EAC
               label: Motor-002
+              rowKey: a0Bg8000000Ab10
               path:
                 - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
             left:
@@ -6014,6 +7714,7 @@ components:
                 parentItemNumber: Assy-100
                 childItemId: a02g8000000Ab20EAC
                 childItemNumber: Motor-002
+                childItemName: 'Brushless motor, 24 V'
                 childItemRevisionId: a0Ag8000000Ab41EAC
                 childRevisionLabel: rev-1
                 quantity: 4
@@ -6028,12 +7729,15 @@ components:
                 parentItemNumber: Assy-100
                 childItemId: a02g8000000Ab20EAC
                 childItemNumber: Motor-002
+                childItemName: 'Brushless motor, 24 V'
                 childItemRevisionId: a0Ag8000000Ab42EAC
                 childRevisionLabel: rev-2
                 quantity: 1
                 findNumber: 10
         leftWarnings: []
         rightWarnings: []
-        truncated: true
-        entriesLimit: 2
+        page:
+          limit: 2
+          hasMore: true
+          nextCursor: 'c1.N2IzMWMwZDVlOWEyNGYxOHwy'
         generatedAt: '2026-04-05T17:22:03.518Z'
