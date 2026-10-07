@@ -1622,9 +1622,8 @@ paths:
         All three **warn rather than throw**: the rows returned are still the honest answer for the
         stored timepoint. The same canaries are raised on a comparison's baseline side.
 
-        None is complete, and the response does not pretend otherwise. A same-second revision of
-        a claiming row's quantity moves no count on either axis, and an edit to a `base` line's
-        own fields moves none either.
+        None is complete, and the response does not pretend otherwise. An edit that changes only
+        a line's own fields, such as its quantity, moves no count.
       parameters:
         - $ref: '#/components/parameters/BaselineId'
         - $ref: '#/components/parameters/ParentRowKey'
@@ -3176,9 +3175,7 @@ components:
               recorded.
             - `BASELINE_PROVENANCE_DRIFT` — a baseline re-derived a different number of **`claiming`**
               rows than its cut recorded. Separate from the count drift because severing a claim
-              moves no row: the same rows come back, one of them no longer a claim. Narrow —
-              only reachable when the severing delta lands in the same whole second as the cut,
-              since the cut's time is stored to the whole second.
+              moves no row: the same rows come back, one of them no longer a claim.
             - `NESTED_CYCLE_PRUNED` — the structure of a locally added or substituted assembly, or
               of a pinned revision, was dropped because walking it reached a cycle. The rest of the
               tree is still returned; when pins were involved it falls back to the unsuppressed
