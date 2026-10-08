@@ -1150,9 +1150,10 @@ paths:
         ## Access
 
         Requires **create** on `Assembly_CI__c`, `CI__c`, `Assembly_CI_Rev__c`, `CI_Rev__c` and
-        `Branch_Member__c`, **and edit** on `Assembly_CI__c` (upserted) and `CI_Rev__c` (updated when
-        an operation freezes a predecessor). Create and edit are not the same permission, and both
-        are named so a partial grant is a 403 before anything is written.
+        `Branch_Member__c`, **and edit** on `Assembly_CI__c` and `Assembly_CI_Rev__c` (upserted or
+        edited in place), `CI_Rev__c` (updated when an operation freezes a predecessor) and
+        `Branch__c` (every write advances the branch's write clock). Create and edit are not the same
+        permission, and both are named so a partial grant is a 403 before anything is written.
       parameters:
         - $ref: '#/components/parameters/BranchId'
         - name: Idempotency-Key
@@ -1500,8 +1501,8 @@ paths:
 
         ## Access
 
-        Requires **create** on `Baseline__c`, and **edit** on `Baseline__c` and `CI_Rev__c` (the
-        freeze). Named separately because a partial grant would otherwise fail half way through the
+        Requires **create** on `Baseline__c`, and **edit** on `CI_Rev__c` (the freeze) and
+        `Branch__c` (the cut advances the branch's write clock). Named separately because a partial grant would otherwise fail half way through the
         cut — after the members resolve and before the freeze, the one state a baseline must never
         be left in.
       parameters:
@@ -1912,8 +1913,8 @@ paths:
 
         ## Access
 
-        **Gated on write, not read.** A read-only user is rejected before a pull is even previewed —
-        the same `Branch_Source__c` update grant `pull` itself requires.
+        **Gated on write, not read.** A read-only user is rejected before a pull is even previewed:
+        the preview requires exactly the create and edit grants that `pull` itself requires.
       parameters:
         - $ref: '#/components/parameters/SourceId'
         - name: candidateRootRevisionId
@@ -1998,7 +1999,7 @@ paths:
       summary: Commit a previewed pull, advancing T_R
       description: |
         Accepts a newer eBOM root revision into the branch: appends a new `Branch_Source_Rev__c`
-        advancing T_R, advances the source's root pointer, applies the caller's `claim-orphaned`
+        advancing T_R, applies the caller's `claim-orphaned`
         dispositions and any optional decisions, and retires any `member-add-converged` local
         edge — **all in one transaction, all or nothing**.
 
@@ -2123,8 +2124,8 @@ paths:
         ## Access
 
         Requires **create** on `Branch_Source_Rev__c`, `Branch_Member__c`, `CI__c`, `CI_Rev__c`,
-        `Assembly_CI__c` and `Assembly_CI_Rev__c`, **and edit** on `Branch_Source__c`,
-        `Assembly_CI__c` and `CI_Rev__c`. Both gates run **before the body is read**.
+        `Assembly_CI__c` and `Assembly_CI_Rev__c`, **and edit** on `Branch__c`, `Assembly_CI__c`,
+        `Assembly_CI_Rev__c` and `CI_Rev__c`. Both gates run **before the body is read**.
       parameters:
         - $ref: '#/components/parameters/SourceId'
       requestBody:
