@@ -1883,9 +1883,12 @@ paths:
         `summary`, `diffFingerprint` and `previewId` describe the **complete** diff on every page,
         so a caller knows the size of the diff before paging, and can commit from any page. Follow
         `page.nextCursor` for the rest. Each page continues after the last entry the previous page
-        returned, so no entry is skipped or repeated, and the set of positions is fixed by the state
-        the first page resolved. A Draft row's quantity or find number edited in place between pages
-        shows its newer value on later pages.
+        returned, and the set of positions is fixed by the state the first page resolved, so no
+        entry is skipped or repeated while the diff stays the same. A Draft row's quantity or find
+        number edited in place between pages shows its newer value on later pages. If that edit
+        changes how an entry is reported, that one entry may be skipped or repeated, and
+        `diffFingerprint` and `previewId` change with it, so a commit carrying the earlier ones
+        answers `409 STALE_REVISION`.
 
         `previewId` names this preview. Send it on the commit. Today it is checked like
         `diffFingerprint`; a later version may hold a large diff server-side under it.
@@ -2379,10 +2382,12 @@ paths:
         comparison is read against a tree, and hash order scatters siblings.
 
         Entries come in pages of `limit` (default 200); follow `page.nextCursor` for the rest. Each
-        page continues after the last entry the previous page returned, so no entry is skipped or
-        repeated, and the set of positions is fixed by the state the first page resolved. A Draft
-        row's quantity or find number edited in place between pages shows its newer value on later
-        pages. The default page size is **not**
+        page continues after the last entry the previous page returned, and the set of positions is
+        fixed by the state the first page resolved. A Draft row's quantity or find number edited in
+        place between pages shows its newer value on later pages. Because entries are ordered by
+        path and find number, a find number edited in place, or an item renamed, between pages can
+        move an entry across the page boundary, so that one entry may be skipped or repeated;
+        without such an edit, none is. The default page size is **not**
         raised by `includeUnchanged=true`, deliberately: a 500-edge BOM comes back over three
         pages rather than as one response an order of magnitude larger than the caller expected.
 
@@ -3887,7 +3892,9 @@ components:
           type: string
           description: |
             Opaque name of this preview — the candidate, the branch state it was taken against, and
-            the diff. The same on every page. Send it on the commit. Never parse it.
+            the diff. The same on every page, unless a Draft row edited in place between pages
+            changes the diff; it then changes with `diffFingerprint`, and a commit carrying the
+            earlier one answers `409 STALE_REVISION`. Send it on the commit. Never parse it.
           examples: ['pv1.Xk3q9fA2c41ab7e0']
         diffFingerprint:
           type: string
