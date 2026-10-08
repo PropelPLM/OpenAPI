@@ -2398,7 +2398,7 @@
           "rowKey": {
             "type": "string",
             "maxLength": 1024,
-            "description": "Opaque, server-issued identity of this occurrence. It encodes the path from\nthe root, so two occurrences of one item have two keys. URL-safe, at most 16\ncharacters per level, and **stable** across edits and snapshots while the occurrence\nexists. Send it as `parentRowKey` to read beneath this row. Never compose or parse it.\n",
+            "description": "Opaque, server-issued identity of this occurrence. It encodes the path from\nthe root, so two occurrences of one item have two keys. URL-safe, at most 16\ncharacters per level, and **stable** across edits and snapshots while the occurrence\nexists. A pull that accepts a new root revision replaces the source's BOM lines, so\nit ends the occurrences that follow them: base rows, and claimed rows that follow\ntheir source line, come back with new keys, while rows the branch added itself keep\ntheirs. Send it as `parentRowKey` to read beneath this row. Never compose or parse it.\n",
             "examples": [
               "a0Bg8000000Ab10"
             ]

@@ -3027,7 +3027,10 @@ components:
             Opaque, server-issued identity of this occurrence. It encodes the path from
             the root, so two occurrences of one item have two keys. URL-safe, at most 16
             characters per level, and **stable** across edits and snapshots while the occurrence
-            exists. Send it as `parentRowKey` to read beneath this row. Never compose or parse it.
+            exists. A pull that accepts a new root revision replaces the source's BOM lines, so
+            it ends the occurrences that follow them: base rows, and claimed rows that follow
+            their source line, come back with new keys, while rows the branch added itself keep
+            theirs. Send it as `parentRowKey` to read beneath this row. Never compose or parse it.
           examples: ['a0Bg8000000Ab10']
         parentRowKey:
           oneOf: [{ type: string }, { type: 'null' }]
