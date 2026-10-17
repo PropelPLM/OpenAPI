@@ -999,10 +999,11 @@ paths:
         the last write wins. There is no row-level or branch-wide precondition to send. MBOM
         editing is not a high-concurrency workload, so this keeps the contract simple.
 
-        Most writes — `claim`, `exclude`, `restore`, `revert`, `convert-to-native`, `replace`, and
-        an `update` that forks — append to the branch's delta log, so the state they replaced
-        stays in the branch's history. An `update` that edits a Draft revision in place
-        (`forked: false`) rewrites that revision and keeps no copy of the value it replaced.
+        Every write but one keeps the state it replaced in the branch's history. `claim`,
+        `exclude`, `restore`, `revert`, `convert-to-native` and `replace` append to the branch's
+        delta log, and an `update` that forks creates a new revision beside the old one. The
+        exception is an `update` that edits a Draft revision in place (`forked: false`): it
+        rewrites that revision and keeps no copy of the value it replaced.
 
         ## After the write: `snapshot` and `invalidatedParentRowKeys`
 
