@@ -2705,6 +2705,10 @@ components:
         - `branch:{branchId}` — another branch, now.
         - `ebom:{itemRevisionId}` — a released eBOM revision, at its release date.
 
+        On a live read the target resolves at the tree's own clock, so both describe one instant;
+        on a read at its own `asOf` it resolves now. A later page that sends the `snapshot` keeps
+        that pairing, including when it brings a different `compare`.
+
         The target resolves exactly as the comparison's right side does with no `rightAsOf`. See
         the [branch tree read](#operation/getBranchTree) for what each redline status means. Any
         other form is `400 INVALID_REQUEST`; an id that names nothing, or the wrong object, is
