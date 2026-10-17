@@ -1007,7 +1007,7 @@
             }
           },
           "400": {
-            "description": "`INVALID_REQUEST` — the body could not be read; or (under `atomic: true`) an operation\nfailed validation with a 400-mapped code: a missing required field, an unknown `op`, or\nan operation that refuses a past `asOf`.\n\n`ASOF_INVALID` / `ASOF_IN_FUTURE` — the batch's own `asOf`.\n\nAlso `INVALID_REQUEST`, on `update`: none of `quantity`, `findNumber`,\n`childItemRevisionId`, `trackChildRevision: true` sent; `autoClaim` claiming a `base`\nedge at a past `asOf` (as a `claim` is; on an owned edge a past `asOf` stays\ntolerated); and a second operation on a row that is refused by the batch-slot rules\n(`already revised earlier in this same batch` / `that row already has a membership\nchange earlier in this same batch`). `\"op\": \"set-revision\"` is an unknown op.\n",
+            "description": "`INVALID_REQUEST` — the body could not be read; or (under `atomic: true`) an operation\nfailed validation with a 400-mapped code: a missing required field, an unknown `op`, or\nan operation that refuses a past `asOf`.\n\n`ASOF_IN_FUTURE` — the batch's own `asOf` is later than now. An `asOf` that is not a\nvalid date-time fails the body parse, so it answers `INVALID_REQUEST`, not `ASOF_INVALID`.\n\nAlso `INVALID_REQUEST`, on `update`: none of `quantity`, `findNumber`,\n`childItemRevisionId`, `trackChildRevision: true` sent; `autoClaim` claiming a `base`\nedge at a past `asOf` (as a `claim` is; on an owned edge a past `asOf` stays\ntolerated); and a second operation on a row that is refused by the batch-slot rules\n(`already revised earlier in this same batch` / `that row already has a membership\nchange earlier in this same batch`). `\"op\": \"set-revision\"` is an unknown op.\n",
             "content": {
               "application/json": {
                 "schema": {
@@ -1180,7 +1180,7 @@
             }
           },
           "400": {
-            "description": "`INVALID_REQUEST` — unreadable body, or a `label` longer than 80 characters.\n`ASOF_IN_FUTURE` — `cutDateTime` is later than now; a baseline of content that does not\nexist yet is not a baseline. `ASOF_INVALID` — it could not be parsed.\n",
+            "description": "`INVALID_REQUEST` — an unreadable body (a `cutDateTime` that is not a valid date-time\nincluded, since it fails the body parse), or a `label` that is missing, blank or longer\nthan 80 characters.\n`ASOF_IN_FUTURE` — `cutDateTime` is later than now; a baseline of content that does not\nexist yet is not a baseline.\n",
             "content": {
               "application/json": {
                 "schema": {
@@ -2930,11 +2930,15 @@
       },
       "BaselineCutRequest": {
         "type": "object",
+        "required": [
+          "label"
+        ],
         "properties": {
           "label": {
             "type": "string",
+            "minLength": 1,
             "maxLength": 80,
-            "description": "`Baseline__c.Name`. Over 80 characters is a 400, not a 500.",
+            "description": "`Baseline__c.Name`. Required: a missing or blank label is a 400. Over 80 characters is a 400, not a 500.",
             "examples": [
               "Pilot build 1"
             ]

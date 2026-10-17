@@ -1307,7 +1307,8 @@ paths:
             failed validation with a 400-mapped code: a missing required field, an unknown `op`, or
             an operation that refuses a past `asOf`.
 
-            `ASOF_INVALID` / `ASOF_IN_FUTURE` — the batch's own `asOf`.
+            `ASOF_IN_FUTURE` — the batch's own `asOf` is later than now. An `asOf` that is not a
+            valid date-time fails the body parse, so it answers `INVALID_REQUEST`, not `ASOF_INVALID`.
 
             Also `INVALID_REQUEST`, on `update`: none of `quantity`, `findNumber`,
             `childItemRevisionId`, `trackChildRevision: true` sent; `autoClaim` claiming a `base`
@@ -1518,9 +1519,11 @@ paths:
                     memberCount: 4
         '400':
           description: |
-            `INVALID_REQUEST` — unreadable body, or a `label` longer than 80 characters.
+            `INVALID_REQUEST` — an unreadable body (a `cutDateTime` that is not a valid date-time
+            included, since it fails the body parse), or a `label` that is missing, blank or longer
+            than 80 characters.
             `ASOF_IN_FUTURE` — `cutDateTime` is later than now; a baseline of content that does not
-            exist yet is not a baseline. `ASOF_INVALID` — it could not be parsed.
+            exist yet is not a baseline.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/RestError' }
@@ -3575,11 +3578,13 @@ components:
 
     BaselineCutRequest:
       type: object
+      required: [label]
       properties:
         label:
           type: string
+          minLength: 1
           maxLength: 80
-          description: '`Baseline__c.Name`. Over 80 characters is a 400, not a 500.'
+          description: '`Baseline__c.Name`. Required: a missing or blank label is a 400. Over 80 characters is a 400, not a 500.'
           examples: ['Pilot build 1']
         cutDateTime:
           type: string
