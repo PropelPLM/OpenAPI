@@ -3143,19 +3143,19 @@ components:
         revisionChosenById:
           oneOf: [{ $ref: '#/components/schemas/SalesforceId' }, { type: 'null' }]
           description: |
-            The user Id of the creator of the branch revision (`CI_Rev__c`) the row resolves
-            through. Populated wherever `hasChosenRevision` is true — on live tree reads
-            and baseline rows alike — and null wherever it is false.
+            The user Id of whoever chose the revision the row stores: the user whose `claim`,
+            `add`, `replace`, `update` or `convert-to-native` set or changed it. Populated wherever
+            `hasChosenRevision` is true — on live tree reads and baseline rows alike — and null
+            wherever it is false.
 
-            It is not always "who first chose the revision": an `update` edits a Draft revision in
-            place, keeping the original author, but forks a Frozen one, and the fork names the user
-            who made it — even if that `update` changed only the quantity and carried the pin
-            forward.
+            An edit that keeps the stored revision never changes it, even when that edit forks a
+            new branch revision (the first quantity edit after a baseline cut always does). Only a
+            change of the stored revision names a new chooser.
         revisionChosenAt:
           oneOf: [{ type: string, format: date-time }, { type: 'null' }]
           description: |
-            When that branch revision was created, to the whole second. Null exactly
-            where `revisionChosenById` is.
+            When the revision was chosen — the write time of the request that set or changed it
+            — to the whole second. Null exactly where `revisionChosenById` is.
 
     TreeWarning:
       type: object

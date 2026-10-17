@@ -2525,7 +2525,7 @@
                 "type": "null"
               }
             ],
-            "description": "The user Id of the creator of the branch revision (`CI_Rev__c`) the row resolves\nthrough. Populated wherever `hasChosenRevision` is true — on live tree reads\nand baseline rows alike — and null wherever it is false.\n\nIt is not always \"who first chose the revision\": an `update` edits a Draft revision in\nplace, keeping the original author, but forks a Frozen one, and the fork names the user\nwho made it — even if that `update` changed only the quantity and carried the pin\nforward.\n"
+            "description": "The user Id of whoever chose the revision the row stores: the user whose `claim`,\n`add`, `replace`, `update` or `convert-to-native` set or changed it. Populated wherever\n`hasChosenRevision` is true — on live tree reads and baseline rows alike — and null\nwherever it is false.\n\nAn edit that keeps the stored revision never changes it, even when that edit forks a\nnew branch revision (the first quantity edit after a baseline cut always does). Only a\nchange of the stored revision names a new chooser.\n"
           },
           "revisionChosenAt": {
             "oneOf": [
@@ -2537,7 +2537,7 @@
                 "type": "null"
               }
             ],
-            "description": "When that branch revision was created, to the whole second. Null exactly\nwhere `revisionChosenById` is.\n"
+            "description": "When the revision was chosen — the write time of the request that set or changed it\n— to the whole second. Null exactly where `revisionChosenById` is.\n"
           }
         }
       },
