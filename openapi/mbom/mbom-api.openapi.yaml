@@ -1307,7 +1307,8 @@ paths:
             failed validation with a 400-mapped code: a missing required field, an unknown `op`, or
             an operation that refuses a past `asOf`.
 
-            `ASOF_INVALID` / `ASOF_IN_FUTURE` — the batch's own `asOf`.
+            `ASOF_IN_FUTURE` — the batch's own `asOf` is later than now. An `asOf` that is not a
+            valid date-time fails the body parse, so it answers `INVALID_REQUEST`, not `ASOF_INVALID`.
 
             Also `INVALID_REQUEST`, on `update`: none of `quantity`, `findNumber`,
             `childItemRevisionId`, `trackChildRevision: true` sent; `autoClaim` claiming a `base`
@@ -1518,9 +1519,11 @@ paths:
                     memberCount: 4
         '400':
           description: |
-            `INVALID_REQUEST` — unreadable body, or a `label` longer than 80 characters.
+            `INVALID_REQUEST` — an unreadable body (a `cutDateTime` that is not a valid date-time
+            included, since it fails the body parse), or a `label` that is missing, blank or longer
+            than 80 characters.
             `ASOF_IN_FUTURE` — `cutDateTime` is later than now; a baseline of content that does not
-            exist yet is not a baseline. `ASOF_INVALID` — it could not be parsed.
+            exist yet is not a baseline.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/RestError' }
@@ -2702,6 +2705,10 @@ components:
         - `branch:{branchId}` — another branch, now.
         - `ebom:{itemRevisionId}` — a released eBOM revision, at its release date.
 
+        On a live read the target resolves at the tree's own clock, so both describe one instant;
+        on a read at its own `asOf` it resolves now. A later page that sends the `snapshot` keeps
+        that pairing, including when it brings a different `compare`.
+
         The target resolves exactly as the comparison's right side does with no `rightAsOf`. See
         the [branch tree read](#operation/getBranchTree) for what each redline status means. Any
         other form is `400 INVALID_REQUEST`; an id that names nothing, or the wrong object, is
@@ -3136,19 +3143,19 @@ components:
         revisionChosenById:
           oneOf: [{ $ref: '#/components/schemas/SalesforceId' }, { type: 'null' }]
           description: |
-            The user Id of the creator of the branch revision (`CI_Rev__c`) the row resolves
-            through. Populated wherever `hasChosenRevision` is true — on live tree reads
-            and baseline rows alike — and null wherever it is false.
+            The user Id of whoever chose the revision the row stores: the user whose `claim`,
+            `add`, `replace`, `update` or `convert-to-native` set or changed it. Populated wherever
+            `hasChosenRevision` is true — on live tree reads and baseline rows alike — and null
+            wherever it is false.
 
-            It is not always "who first chose the revision": an `update` edits a Draft revision in
-            place, keeping the original author, but forks a Frozen one, and the fork names the user
-            who made it — even if that `update` changed only the quantity and carried the pin
-            forward.
+            An edit that keeps the stored revision never changes it, even when that edit forks a
+            new branch revision (the first quantity edit after a baseline cut always does). Only a
+            change of the stored revision names a new chooser.
         revisionChosenAt:
           oneOf: [{ type: string, format: date-time }, { type: 'null' }]
           description: |
-            When that branch revision was created, to the whole second. Null exactly
-            where `revisionChosenById` is.
+            When the revision was chosen — the write time of the request that set or changed it
+            — to the whole second. Null exactly where `revisionChosenById` is.
 
     TreeWarning:
       type: object
@@ -3575,11 +3582,13 @@ components:
 
     BaselineCutRequest:
       type: object
+      required: [label]
       properties:
         label:
           type: string
+          minLength: 1
           maxLength: 80
-          description: '`Baseline__c.Name`. Over 80 characters is a 400, not a 500.'
+          description: '`Baseline__c.Name`. Required: a missing or blank label is a 400. Over 80 characters is a 400, not a 500.'
           examples: ['Pilot build 1']
         cutDateTime:
           type: string
@@ -4706,7 +4715,7 @@ components:
             stale:
               value:
                 code: STALE_REVISION
-                message: 'This row has been revised since the view you are working from. Reload it and try again. (the diff has changed since this fingerprint was generated; re-preview and retry)'
+                message: 'What you are working from has changed since you loaded it. Reload it and try again. (the diff has changed since this fingerprint was generated; re-preview and retry)'
             dispositionRequired:
               value:
                 code: DISPOSITION_REQUIRED

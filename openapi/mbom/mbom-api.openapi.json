@@ -1007,7 +1007,7 @@
             }
           },
           "400": {
-            "description": "`INVALID_REQUEST` — the body could not be read; or (under `atomic: true`) an operation\nfailed validation with a 400-mapped code: a missing required field, an unknown `op`, or\nan operation that refuses a past `asOf`.\n\n`ASOF_INVALID` / `ASOF_IN_FUTURE` — the batch's own `asOf`.\n\nAlso `INVALID_REQUEST`, on `update`: none of `quantity`, `findNumber`,\n`childItemRevisionId`, `trackChildRevision: true` sent; `autoClaim` claiming a `base`\nedge at a past `asOf` (as a `claim` is; on an owned edge a past `asOf` stays\ntolerated); and a second operation on a row that is refused by the batch-slot rules\n(`already revised earlier in this same batch` / `that row already has a membership\nchange earlier in this same batch`). `\"op\": \"set-revision\"` is an unknown op.\n",
+            "description": "`INVALID_REQUEST` — the body could not be read; or (under `atomic: true`) an operation\nfailed validation with a 400-mapped code: a missing required field, an unknown `op`, or\nan operation that refuses a past `asOf`.\n\n`ASOF_IN_FUTURE` — the batch's own `asOf` is later than now. An `asOf` that is not a\nvalid date-time fails the body parse, so it answers `INVALID_REQUEST`, not `ASOF_INVALID`.\n\nAlso `INVALID_REQUEST`, on `update`: none of `quantity`, `findNumber`,\n`childItemRevisionId`, `trackChildRevision: true` sent; `autoClaim` claiming a `base`\nedge at a past `asOf` (as a `claim` is; on an owned edge a past `asOf` stays\ntolerated); and a second operation on a row that is refused by the batch-slot rules\n(`already revised earlier in this same batch` / `that row already has a membership\nchange earlier in this same batch`). `\"op\": \"set-revision\"` is an unknown op.\n",
             "content": {
               "application/json": {
                 "schema": {
@@ -1180,7 +1180,7 @@
             }
           },
           "400": {
-            "description": "`INVALID_REQUEST` — unreadable body, or a `label` longer than 80 characters.\n`ASOF_IN_FUTURE` — `cutDateTime` is later than now; a baseline of content that does not\nexist yet is not a baseline. `ASOF_INVALID` — it could not be parsed.\n",
+            "description": "`INVALID_REQUEST` — an unreadable body (a `cutDateTime` that is not a valid date-time\nincluded, since it fails the body parse), or a `label` that is missing, blank or longer\nthan 80 characters.\n`ASOF_IN_FUTURE` — `cutDateTime` is later than now; a baseline of content that does not\nexist yet is not a baseline.\n",
             "content": {
               "application/json": {
                 "schema": {
@@ -2027,7 +2027,7 @@
         "name": "compare",
         "in": "query",
         "required": false,
-        "description": "Adds a `redline` to every row, comparing this tree against a target:\n\n- `source` — what this branch's own source supplies (branch tree read only).\n- `baseline:{baselineId}` — a baseline, at its own recorded timepoint.\n- `branch:{branchId}` — another branch, now.\n- `ebom:{itemRevisionId}` — a released eBOM revision, at its release date.\n\nThe target resolves exactly as the comparison's right side does with no `rightAsOf`. See\nthe [branch tree read](#operation/getBranchTree) for what each redline status means. Any\nother form is `400 INVALID_REQUEST`; an id that names nothing, or the wrong object, is\n`404 NOT_FOUND`. Omitted, every row's `redline` is null.\n",
+        "description": "Adds a `redline` to every row, comparing this tree against a target:\n\n- `source` — what this branch's own source supplies (branch tree read only).\n- `baseline:{baselineId}` — a baseline, at its own recorded timepoint.\n- `branch:{branchId}` — another branch, now.\n- `ebom:{itemRevisionId}` — a released eBOM revision, at its release date.\n\nOn a live read the target resolves at the tree's own clock, so both describe one instant;\non a read at its own `asOf` it resolves now. A later page that sends the `snapshot` keeps\nthat pairing, including when it brings a different `compare`.\n\nThe target resolves exactly as the comparison's right side does with no `rightAsOf`. See\nthe [branch tree read](#operation/getBranchTree) for what each redline status means. Any\nother form is `400 INVALID_REQUEST`; an id that names nothing, or the wrong object, is\n`404 NOT_FOUND`. Omitted, every row's `redline` is null.\n",
         "schema": {
           "type": "string",
           "pattern": "^(source|baseline:[a-zA-Z0-9]{15,18}|branch:[a-zA-Z0-9]{15,18}|ebom:[a-zA-Z0-9]{15,18})$"
@@ -2525,7 +2525,7 @@
                 "type": "null"
               }
             ],
-            "description": "The user Id of the creator of the branch revision (`CI_Rev__c`) the row resolves\nthrough. Populated wherever `hasChosenRevision` is true — on live tree reads\nand baseline rows alike — and null wherever it is false.\n\nIt is not always \"who first chose the revision\": an `update` edits a Draft revision in\nplace, keeping the original author, but forks a Frozen one, and the fork names the user\nwho made it — even if that `update` changed only the quantity and carried the pin\nforward.\n"
+            "description": "The user Id of whoever chose the revision the row stores: the user whose `claim`,\n`add`, `replace`, `update` or `convert-to-native` set or changed it. Populated wherever\n`hasChosenRevision` is true — on live tree reads and baseline rows alike — and null\nwherever it is false.\n\nAn edit that keeps the stored revision never changes it, even when that edit forks a\nnew branch revision (the first quantity edit after a baseline cut always does). Only a\nchange of the stored revision names a new chooser.\n"
           },
           "revisionChosenAt": {
             "oneOf": [
@@ -2537,7 +2537,7 @@
                 "type": "null"
               }
             ],
-            "description": "When that branch revision was created, to the whole second. Null exactly\nwhere `revisionChosenById` is.\n"
+            "description": "When the revision was chosen — the write time of the request that set or changed it\n— to the whole second. Null exactly where `revisionChosenById` is.\n"
           }
         }
       },
@@ -2930,11 +2930,15 @@
       },
       "BaselineCutRequest": {
         "type": "object",
+        "required": [
+          "label"
+        ],
         "properties": {
           "label": {
             "type": "string",
+            "minLength": 1,
             "maxLength": 80,
-            "description": "`Baseline__c.Name`. Over 80 characters is a 400, not a 500.",
+            "description": "`Baseline__c.Name`. Required: a missing or blank label is a 400. Over 80 characters is a 400, not a 500.",
             "examples": [
               "Pilot build 1"
             ]
@@ -4545,7 +4549,7 @@
               "stale": {
                 "value": {
                   "code": "STALE_REVISION",
-                  "message": "This row has been revised since the view you are working from. Reload it and try again. (the diff has changed since this fingerprint was generated; re-preview and retry)"
+                  "message": "What you are working from has changed since you loaded it. Reload it and try again. (the diff has changed since this fingerprint was generated; re-preview and retry)"
                 }
               },
               "dispositionRequired": {
