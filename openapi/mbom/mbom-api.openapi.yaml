@@ -163,8 +163,9 @@ info:
     - **`snapshot`.** Every structure read returns an opaque `snapshot` naming the state it
       resolved. Send it back on child and page requests and they resolve the same rows, even if
       the branch is edited in between. It pins **which rows exist and where**. A Draft row's
-      quantity or find number edited in place after the snapshot shows its newer value; a row's
-      `version` is what detects that (see the [delta endpoint](#operation/applyDeltaBatch)).
+      quantity or find number edited in place after the snapshot shows its newer value. Edits
+      do not check what the caller last read: the last write wins (see the
+      [delta endpoint](#operation/applyDeltaBatch)).
     - **Whole-configuration outputs are their own resources.** The flattened view and the
       findings (whole-configuration warnings) are separate endpoints, not modes of the tree read.
       Each answers `200` today, and may answer `202 Accepted` + `jobId` for a large configuration
@@ -505,7 +506,7 @@ paths:
 
         - **A removed row is rendered** under every occurrence of its parent item in this tree,
           with the target's own subtree beneath it, all `removed`. Its `detail` is the target's. It
-          is not a row of this branch: `edgeId`, `ciId` and `version` are null, and `isEditable` is
+          is not a row of this branch: `edgeId` and `ciId` are null, and `isEditable` is
           false. A row beneath a removed row carries the comparison's `entryId` for its position
           when the comparison reports that position as `member-added`, and a null `entryId` when
           the comparison pairs that position elsewhere in this tree.
@@ -625,8 +626,7 @@ paths:
         comes back `provenance: base`.
 
         Paging, `rowKey`s and `snapshot` work exactly as on the
-        [branch tree read](#operation/getBranchTree). There is no `compare` here, and every row's
-        `version` is null, because a source row cannot be edited through this source. A source
+        [branch tree read](#operation/getBranchTree). There is no `compare` here. A source
         stores no revisions, so its rows raise no row warnings except `NESTED_CYCLE_PRUNED`.
       parameters:
         - $ref: '#/components/parameters/SourceId'
@@ -992,29 +992,17 @@ paths:
         `convert-to-native`, and any `claim` / `add` / `exclude` / `replace` that has to mint a new
         edge identity.
 
-        ## `version` — detecting that someone else changed the row
+        ## Last write wins
 
-        Every row of a branch tree read carries an opaque `version`. Send it back on the operation
-        that targets that row, and the operation succeeds only if the row has not changed since
-        you read it. If it has, **that operation** fails with `409 STALE_REVISION`; reload the row
-        and decide again. Other rows in the batch are not affected, so two people editing
-        different rows of one MBOM never conflict. The `version` is compared with the row as of
-        the batch's `asOf` — the same state the operation is validated against.
+        An operation does not check whether someone else changed its row since the caller read
+        it. An edit of a row another user changed in the meantime applies over their change, and
+        the last write wins. There is no row-level or branch-wide precondition to send. MBOM
+        editing is not a high-concurrency workload, so this keeps the contract simple.
 
-        - **Optional.** An operation without `version` is not checked: the last writer wins.
-          A grid sends it on every edit; an integration that owns the branch may omit it.
-        - **Any change counts**: another user's claim, exclusion, restore, revert, conversion,
-          substitution, revision change, or an in-place quantity or find-number edit. A pull
-          commit that changes the row counts too.
-        - **Taken by every operation that targets an existing row**: `claim`, `update`,
-          `exclude`, `restore`, `replace` (the row being replaced), `revert` and
-          `convert-to-native`. Ignored on `add`, which creates a row.
-        - **Checked once the row is found**, before any other state guard, so a stale view gets
-          `STALE_REVISION` ("reload") rather than a misleading `CLAIM_REQUIRED` or
-          `ALREADY_CLAIMED`.
-        - Under `atomic: true` a mismatch fails the whole batch, as any validation failure does.
-          Send `atomic: false` to apply the edits that are still current and get the stale ones
-          back.
+        Most writes — `claim`, `exclude`, `restore`, `revert`, `convert-to-native`, `replace`, and
+        an `update` that forks — append to the branch's delta log, so the state they replaced
+        stays in the branch's history. An `update` that edits a Draft revision in place
+        (`forked: false`) rewrites that revision and keeps no copy of the value it replaced.
 
         ## After the write: `snapshot` and `invalidatedParentRowKeys`
 
@@ -1081,14 +1069,13 @@ paths:
         2. `REVISION_CHOICE_REQUIRED`: both `childItemRevisionId` and `trackChildRevision: true`
            (any row, before the lookup).
         3. `NOT_FOUND`
-        4. `STALE_REVISION`: a `version` was sent and the row has changed since.
-        5. `NOT_EDITABLE`: a nested row.
-        6. `CLAIM_REQUIRED`: a `base` row without `autoClaim`.
-        7. For an `autoClaim` claim of a `base` row: `REVISION_CHOICE_REQUIRED` (neither choice),
+        4. `NOT_EDITABLE`: a nested row.
+        5. `CLAIM_REQUIRED`: a `base` row without `autoClaim`.
+        6. For an `autoClaim` claim of a `base` row: `REVISION_CHOICE_REQUIRED` (neither choice),
            `INVALID_REQUEST` (a past `asOf`, as on `claim`), `REVISION_ITEM_MISMATCH`,
            `INVALID_REQUEST` (another operation in the batch already changed the row's
            membership).
-        8. For an owned row: `NOT_SUPPLIED` (a tombstone), `STALE_REVISION` (a past `asOf`),
+        7. For an owned row: `NOT_SUPPLIED` (a tombstone), `STALE_REVISION` (a past `asOf`),
            `REVISION_ITEM_MISMATCH`, `INVALID_REQUEST` (the row was already revised — or, for a
            revision change, had its membership changed — earlier in the batch).
 
@@ -1199,15 +1186,6 @@ paths:
                       assemblyCiId: a1Eg8000000AbD1EAK
                       quantity: 4
                       findNumber: 10
-              updateWithVersion:
-                summary: Revise a row only if nobody changed it since it was read
-                value:
-                  operations:
-                    - op: update
-                      clientRef: grid-row-7
-                      assemblyCiId: a1Eg8000000AbD1EAK
-                      version: 'v1.Ab31kQ9x'
-                      quantity: 5
               updateAutoClaim:
                 summary: Claim a base line (tracking) and change its quantity in one operation
                 value:
@@ -1363,7 +1341,7 @@ paths:
             | `ALREADY_PRESENT` | `add` of a (parent, child) the branch already carries locally; or an op on a **replaced** row | edit the existing row; or act on the substitute |
             | `NO_CLAIM` | `revert` on a row the branch asserts nothing about; `convert-to-native` on a row that is already `new` | nothing to undo or sever |
             | `NOT_SUPPLIED` | `revert` on a row no source supplies — falling back would make it vanish | `exclude` instead |
-            | `STALE_REVISION` | an operation's `version` no longer matches the row; or an `update` at a past `asOf` against a revision superseded since | reload and retry |
+            | `STALE_REVISION` | an `update` at a past `asOf` against a revision superseded since | reload and retry |
             | `NOT_EDITABLE` | the target is inside the subtree of a locally added or substituted assembly, or of a row holding a revision other than its source line's | only source-supplied content is editable |
             | `CONCURRENT_WRITE` | another transaction holds this branch's write lock | send the same request again |
           content:
@@ -1372,8 +1350,6 @@ paths:
               examples:
                 claimRequired:
                   $ref: '#/components/examples/DeltaBatchAtomicFailure'
-                staleVersion:
-                  $ref: '#/components/examples/DeltaBatchStaleVersion'
                 concurrentWrite:
                   $ref: '#/components/examples/ConcurrentWrite'
         '413':
@@ -1597,7 +1573,7 @@ paths:
 
         - **Excluded rows are filtered out.** A tree read renders a tombstone so the editor can see
           what was removed; a baseline is the record of what the branch *contained*.
-        - **`edgeId`, `edgeKey`, `ciId` and `version` are null, and the per-row governing clock is
+        - **`edgeId`, `edgeKey` and `ciId` are null, and the per-row governing clock is
           collapsed** — every row's `governingTimestamp` is the baseline's own
           `resolutionTimePoint`, never null. A baseline row does not pretend to answer questions it
           cannot, and cannot be edited. `isReplaced` **is** populated: leaving it null would render
@@ -2708,7 +2684,7 @@ components:
 
         Without it, the read resolves the current state at `asOf`. A snapshot pins which rows exist
         and where they hang. A Draft row's quantity or find number edited in place since shows its
-        newer value; the row's `version` detects that. A snapshot never expires. One this endpoint
+        newer value. A snapshot never expires. One this endpoint
         did not issue for this record is `400 INVALID_REQUEST`.
       schema:
         type: string
@@ -3048,17 +3024,6 @@ components:
             The `CI__c` the branch holds for this row — the id `exclude`, `restore`, `revert` and
             `convert-to-native` take. **Null for a `base` row**, which has no branch
             record, for a `nested` row, and on source and baseline rows.
-        version:
-          oneOf: [{ type: string }, { type: 'null' }]
-          description: |
-            Opaque token for the row's current state. Send it back as
-            `DeltaOperation.version` to have an edit refused with `409 STALE_REVISION` if anyone
-            changed the row since you read it. It changes on every change to the row, including an
-            in-place quantity edit. A `base` row's `version` also changes when a pull changes that
-            row's content: its quantity, find number or the child revision it resolves to. Populated on every editable row of a branch tree read; null
-            on `nested` rows, on `compare`'s removed rows, and on source and baseline rows. Never
-            parse it.
-          examples: ['v1.Ab31kQ9x']
         warningCodes:
           type: array
           description: |
@@ -3362,17 +3327,6 @@ components:
             the moment anything is reordered, and on `clientRef` alone breaks when you do not set it
             — so `index` is stated too.
           examples: ['row-motor']
-        version:
-          oneOf: [{ type: string }, { type: 'null' }]
-          description: |
-            The target row's `version` from a branch tree read. When sent, the
-            operation applies only if the row is unchanged since that read; otherwise it fails
-            with `409 STALE_REVISION`. It is compared with the row as of the request's `asOf`,
-            the same state the operation is validated against. Omitted or null: no check — the
-            last writer wins. Taken by
-            every operation that targets an existing row; ignored on `add`. See the endpoint's
-            `version` section.
-          examples: ['v1.Ab31kQ9x']
         ebomAssemblyId:
           allOf: [{ $ref: '#/components/schemas/SalesforceId' }]
           description: |
@@ -3684,7 +3638,7 @@ components:
           type: array
           description: |
             One page of the re-resolved rows, reusing the tree shape so clients render both the
-            same way — with `edgeId`, `edgeKey`, `ciId` and `version` nulled, `governingTimestamp`
+            same way — with `edgeId`, `edgeKey` and `ciId` nulled, `governingTimestamp`
             collapsed onto this baseline's own `resolutionTimePoint`, and excluded rows filtered
             out.
           items: { $ref: '#/components/schemas/TreeRow' }
@@ -4904,7 +4858,6 @@ components:
             edgeId: a1Eg8000000AbD1EAK
             edgeKey: a0Bg8000000Ab10EAC
             ciId: a1Gg8000000AbF1EAK
-            version: 'v1.Ab31kQ9x'
             detail:
               ciKind: assembly-edge
               parentItemId: a02g8000000Ab01EAC
@@ -4936,7 +4889,6 @@ components:
             edgeId: null
             edgeKey: a0Bg8000000Ab11EAC
             ciId: null
-            version: 'v1.Bk72mR4p'
             detail:
               ciKind: assembly-edge
               parentItemId: a02g8000000Ab01EAC
@@ -4968,7 +4920,6 @@ components:
             edgeId: a1Eg8000000AbD3EAK
             edgeKey: a0Bg8000000Ab12EAC
             ciId: a1Gg8000000AbF3EAK
-            version: 'v1.Hx40nT6w'
             detail:
               ciKind: assembly-edge
               parentItemId: a02g8000000Ab01EAC
@@ -5000,7 +4951,6 @@ components:
             edgeId: a1Eg8000000AbD9EAK
             edgeKey: 'new-a1Bg8000000AbCdEAK-a02g8000000Ab01EAC-a02g8000000Ab90EAC'
             ciId: a1Gg8000000AbF9EAK
-            version: 'v1.Pk19cJ3s'
             detail:
               ciKind: assembly-edge
               parentItemId: a02g8000000Ab01EAC
@@ -5051,7 +5001,6 @@ components:
             edgeId: a1Eg8000000AbD1EAK
             edgeKey: a0Bg8000000Ab10EAC
             ciId: a1Gg8000000AbF1EAK
-            version: 'v1.Ab31kQ9x'
             detail:
               ciKind: assembly-edge
               parentItemId: a02g8000000Ab01EAC
@@ -5083,7 +5032,6 @@ components:
             edgeId: null
             edgeKey: a0Bg8000000Ab11EAC
             ciId: null
-            version: 'v1.Bk72mR4p'
             detail:
               ciKind: assembly-edge
               parentItemId: a02g8000000Ab01EAC
@@ -5136,7 +5084,6 @@ components:
             edgeId: null
             edgeKey: a0Bg8000000Ab16EAC
             ciId: null
-            version: null
             detail:
               ciKind: assembly-edge
               parentItemId: a02g8000000Ab30EAC
@@ -5168,7 +5115,6 @@ components:
             edgeId: null
             edgeKey: a0Bg8000000Ab17EAC
             ciId: null
-            version: null
             detail:
               ciKind: assembly-edge
               parentItemId: a02g8000000Ab30EAC
@@ -5234,7 +5180,6 @@ components:
             edgeId: a1Eg8000000AbD1EAK
             edgeKey: a0Bg8000000Ab10EAC
             ciId: a1Gg8000000AbF1EAK
-            version: 'v1.Ab31kQ9x'
             detail:
               ciKind: assembly-edge
               parentItemId: a02g8000000Ab01EAC
@@ -5270,7 +5215,6 @@ components:
             edgeId: null
             edgeKey: a0Bg8000000Ab11EAC
             ciId: null
-            version: 'v1.Bk72mR4p'
             detail:
               ciKind: assembly-edge
               parentItemId: a02g8000000Ab01EAC
@@ -5306,7 +5250,6 @@ components:
             edgeId: a1Eg8000000AbD3EAK
             edgeKey: a0Bg8000000Ab12EAC
             ciId: a1Gg8000000AbF3EAK
-            version: 'v1.Hx40nT6w'
             detail:
               ciKind: assembly-edge
               parentItemId: a02g8000000Ab01EAC
@@ -5342,7 +5285,6 @@ components:
             edgeId: a1Eg8000000AbD9EAK
             edgeKey: 'new-a1Bg8000000AbCdEAK-a02g8000000Ab01EAC-a02g8000000Ab90EAC'
             ciId: a1Gg8000000AbF9EAK
-            version: 'v1.Pk19cJ3s'
             detail:
               ciKind: assembly-edge
               parentItemId: a02g8000000Ab01EAC
@@ -5397,7 +5339,6 @@ components:
             edgeId: a1Eg8000000AbD7EAK
             edgeKey: a0Bg8000000Ab14EAC
             ciId: a1Gg8000000AbF7EAK
-            version: 'v1.Sb20pN7c'
             detail:
               ciKind: assembly-edge
               parentItemId: a02g8000000Ab01EAC
@@ -5429,7 +5370,6 @@ components:
             edgeId: null
             edgeKey: a0Bg8000000Ab16EAC
             ciId: null
-            version: null
             detail:
               ciKind: assembly-edge
               parentItemId: a02g8000000Ab30EAC
@@ -5461,7 +5401,6 @@ components:
             edgeId: null
             edgeKey: a0Bg8000000Ab17EAC
             ciId: null
-            version: null
             detail:
               ciKind: assembly-edge
               parentItemId: a02g8000000Ab30EAC
@@ -5525,7 +5464,6 @@ components:
             edgeId: a1Eg8000000AbD1EAK
             edgeKey: a0Bg8000000Ab10EAC
             ciId: a1Gg8000000AbF1EAK
-            version: 'v1.Ob11aQ5e'
             detail:
               ciKind: assembly-edge
               parentItemId: a02g8000000Ab01EAC
@@ -5557,7 +5495,6 @@ components:
             edgeId: a1Eg8000000AbD2EAK
             edgeKey: a0Bg8000000Ab11EAC
             ciId: a1Gg8000000AbF2EAK
-            version: 'v1.Ob12bR6f'
             detail:
               ciKind: assembly-edge
               parentItemId: a02g8000000Ab01EAC
@@ -5589,7 +5526,6 @@ components:
             edgeId: a1Eg8000000AbD9EAK
             edgeKey: 'new-a1Bg8000000AbCdEAK-a02g8000000Ab01EAC-a02g8000000Ab90EAC'
             ciId: a1Gg8000000AbF9EAK
-            version: 'v1.Ob19cS7g'
             detail:
               ciKind: assembly-edge
               parentItemId: a02g8000000Ab01EAC
@@ -5621,7 +5557,6 @@ components:
             edgeId: a1Eg8000000AbD3EAK
             edgeKey: a0Bg8000000Ab12EAC
             ciId: a1Gg8000000AbF3EAK
-            version: 'v1.Ob13dT8h'
             detail:
               ciKind: assembly-edge
               parentItemId: a02g8000000Ab01EAC
@@ -5673,7 +5608,6 @@ components:
             edgeId: a1Eg8000000AbD1EAK
             edgeKey: a0Bg8000000Ab10EAC
             ciId: a1Gg8000000AbF1EAK
-            version: 'v1.Rt41eU9k'
             detail:
               ciKind: assembly-edge
               parentItemId: a02g8000000Ab01EAC
@@ -5726,7 +5660,6 @@ components:
             edgeId: null
             edgeKey: a0Bg8000000Ab10EAC
             ciId: null
-            version: null
             detail:
               ciKind: assembly-edge
               parentItemId: a02g8000000Ab01EAC
@@ -5758,7 +5691,6 @@ components:
             edgeId: null
             edgeKey: a0Bg8000000Ab11EAC
             ciId: null
-            version: null
             detail:
               ciKind: assembly-edge
               parentItemId: a02g8000000Ab01EAC
@@ -5790,7 +5722,6 @@ components:
             edgeId: null
             edgeKey: a0Bg8000000Ab12EAC
             ciId: null
-            version: null
             detail:
               ciKind: assembly-edge
               parentItemId: a02g8000000Ab01EAC
@@ -6054,26 +5985,6 @@ components:
             forked: null
             claimed: null
 
-    DeltaBatchStaleVersion:
-      summary: An update whose `version` no longer matches the row
-      description: |
-        The `updateWithVersion` request, sent after someone else changed the row. Nothing was
-        written. Reload the row, and send the edit again with its new `version` if it still applies.
-      value:
-        code: STALE_REVISION
-        message: 'This row has been revised since the view you are working from. Reload it and try again. (1 of 1 operations failed validation)'
-        failures:
-          - index: 0
-            clientRef: grid-row-7
-            op: update
-            success: false
-            errorCode: STALE_REVISION
-            message: 'This row has been revised since the view you are working from. Reload it and try again. (Assembly_CI__c a1Eg8000000AbD1EAK changed since version v1.Ab31kQ9x was read)'
-            ciId: null
-            edgeId: null
-            forked: null
-            claimed: null
-
     DeltaBatchRevisionChoiceRequired:
       summary: A claim that sent neither childItemRevisionId nor trackChildRevision
       value:
@@ -6135,7 +6046,6 @@ components:
             edgeId: null
             edgeKey: null
             ciId: null
-            version: null
             detail:
               ciKind: assembly-edge
               parentItemId: a02g8000000Ab01EAC
@@ -6187,7 +6097,6 @@ components:
             edgeId: null
             edgeKey: null
             ciId: null
-            version: null
             detail:
               ciKind: assembly-edge
               parentItemId: a02g8000000Ab01EAC
