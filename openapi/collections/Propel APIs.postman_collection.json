@@ -12148,7 +12148,7 @@
 											],
 											"cookie": [],
 											"responseTime": null,
-											"body": "{\n  \"code\": \"STALE_REVISION\",\n  \"message\": \"This row has been revised since the view you are working from. Reload it and try again. (the diff has changed since this fingerprint was generated; re-preview and retry)\"\n}",
+											"body": "{\n  \"code\": \"STALE_REVISION\",\n  \"message\": \"What you are working from has changed since you loaded it. Reload it and try again. (the diff has changed since this fingerprint was generated; re-preview and retry)\"\n}",
 											"createdAt": "2026-09-04T13:53:22.000Z",
 											"updatedAt": "2026-09-04T13:53:22.000Z",
 											"uid": "46943044-73a1fd46-5f23-4d79-a5d6-c53e234af3d3"
