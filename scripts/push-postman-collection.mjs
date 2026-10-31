@@ -3,9 +3,17 @@
 // rest of the fork untouched.
 //
 //   POSTMAN_API_KEY=<key> node scripts/push-postman-collection.mjs <target> <folderName>
+//     [--replace <oldFolderName>] [--rename-vars <oldPrefix>:<newPrefix>]
 //
 // <target> is a key of TARGETS in pull-postman-collection.mjs. <folderName> is matched by exact
-// name anywhere in the collection tree (e.g. "MBOM", nested under REST) — not just top-level.
+// name anywhere in the collection tree (e.g. "Site BOM", nested under REST) — not just top-level.
+//
+// Collection variables the folder references ({{name}} or pm.collectionVariables.set("name"))
+// that the fork doesn't have yet are added from the committed collection.
+//
+// After renaming a folder and its variables locally, push once with both options:
+//   --replace "MBOM"              replaces the fork's old folder in place instead of adding a new one
+//   --rename-vars mbom:siteBom    renames the fork's matching variables, keeping their current values
 //
 //   API key: https://go.postman.co/settings/me/api-keys
 //
@@ -15,10 +23,19 @@ import { readFileSync } from 'node:fs';
 import { argv, env, exit } from 'node:process';
 import { TARGETS } from './pull-postman-collection.mjs';
 
-const [, , targetArg, folderName] = argv;
+const positional = [];
+const options = {};
+for (let i = 2; i < argv.length; i++) {
+  if (argv[i] === '--replace' || argv[i] === '--rename-vars') options[argv[i]] = argv[++i];
+  else positional.push(argv[i]);
+}
+const [targetArg, folderName] = positional;
+const replaceName = options['--replace'];
+const [oldVarPrefix, newVarPrefix] = (options['--rename-vars'] ?? '').split(':');
 
-if (!targetArg || !folderName) {
+if (!targetArg || !folderName || (options['--rename-vars'] !== undefined && !(oldVarPrefix && newVarPrefix))) {
   console.error('usage: POSTMAN_API_KEY=<key> node scripts/push-postman-collection.mjs <target> <folderName>');
+  console.error('         [--replace <oldFolderName>] [--rename-vars <oldPrefix>:<newPrefix>]');
   console.error(`targets: ${Object.keys(TARGETS).join(', ')}`);
   exit(1);
 }
@@ -86,9 +103,14 @@ if (!remote?.info?.name) {
   exit(1);
 }
 
-const remoteMatches = findFolders(remote.item, folderName);
+const remoteName = replaceName ?? folderName;
+const remoteMatches = findFolders(remote.item, remoteName);
+if (replaceName && remoteMatches.length === 0) {
+  console.error(`--replace: no folder named "${replaceName}" in the fork. Nothing pushed.`);
+  exit(1);
+}
 if (remoteMatches.length > 1) {
-  console.error(`"${folderName}" is ambiguous in the fork — found at:`);
+  console.error(`"${remoteName}" is ambiguous in the fork — found at:`);
   remoteMatches.forEach((m) => console.error(`  ${m.path}`));
   console.error('Rename one of them in Postman first, then retry.');
   exit(1);
@@ -102,6 +124,31 @@ if (remoteMatches.length === 1) {
   remote.item = remote.item ?? [];
   remote.item.push(localFolder);
   console.log(`"${folderName}" not found in the fork — adding it as a new top-level folder`);
+}
+
+remote.variable = remote.variable ?? [];
+if (oldVarPrefix) {
+  for (const v of remote.variable) {
+    if (!v.key?.startsWith(oldVarPrefix)) continue;
+    const renamed = newVarPrefix + v.key.slice(oldVarPrefix.length);
+    console.log(`renaming variable ${v.key} -> ${renamed}`);
+    v.key = renamed;
+  }
+}
+
+// Variables the folder uses that the fork lacks come from the committed collection.
+const folderText = JSON.stringify(localFolder);
+const used = new Set(
+  [...folderText.matchAll(/\{\{([A-Za-z0-9_]+)\}\}|collectionVariables\.set\(\\?["']([A-Za-z0-9_]+)/g)].map(
+    (m) => m[1] ?? m[2]
+  )
+);
+const remoteKeys = new Set(remote.variable.map((v) => v.key));
+for (const v of local.variable ?? []) {
+  if (used.has(v.key) && !remoteKeys.has(v.key)) {
+    remote.variable.push(v);
+    console.log(`adding variable ${v.key}`);
+  }
 }
 
 const putResponse = await fetch(`https://api.getpostman.com/collections/${encodeURIComponent(uid)}`, {
