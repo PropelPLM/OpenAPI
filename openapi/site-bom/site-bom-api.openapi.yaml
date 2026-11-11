@@ -91,9 +91,10 @@ info:
 
     Removal is an **exclude delta** — a tombstone appended to an append-only log. `restore` lifts
     it. No branch row is edited in place either: every save appends new rows at the next log
-    position and only closes the rows they supersede. No operation in this API deletes a log row.
-    A hard delete of a Site BOM, branch, source, source acceptance or baseline record is refused
-    (`HARD_DELETE_BLOCKED`). This is what makes a read at a past `asOf`, and therefore a baseline,
+    position and only closes the rows they supersede. No operation in this API deletes a log row,
+    or a Site BOM, branch, source, source acceptance or baseline record. Outside the API, guards
+    on those records refuse a direct hard delete with `HARD_DELETE_BLOCKED`; no route answers
+    that code. This is what makes a read at a past `asOf`, and therefore a baseline,
     reproducible.
 
     ### 7. A baseline stores a log position, not rows
@@ -124,7 +125,8 @@ info:
     - **Error bodies key the code as `code`, not `errorCode`.** `errorCode` appears in this API only
       *inside* a delta batch's per-operation `results[]`.
     - **Nulls are not suppressed.** A field left null for that case is meaningfully null — see
-      `DeltaResult.forked`, where `null` and `true` say different things.
+      `DeltaResult.claimed`, which is `true` when an operation claimed a row and null when it
+      did not.
     - **The code is the contract; the message is not.** Messages are translated. Switch on `code`,
       never on text.
 
@@ -460,7 +462,7 @@ paths:
         - **A substitute never absorbs another line of its new child.** When a
           `replace` substitute's child item also has its own, unrelated eBOM line under the same
           parent, both render. The substitute is its own row with its own
-          `ci-<Branch_CI__c Id>` key, and the other line keeps its own row and `edgeKey`. The ambiguous position match is declined rather than refused,
+          `ci-<Branch_CI__c Id>` key, and the other line keeps its own row and `targetKey`. The ambiguous position match is declined rather than refused,
           so this read never answers `AMBIGUOUS_CORRELATION`. If upstream later makes the same
           substitution itself, two rows render — the substitute beside upstream's new line —
           rather than one.
@@ -560,7 +562,7 @@ paths:
 
         - **A removed row is rendered** under every occurrence of its parent item in this tree,
           with the target's own subtree beneath it, all `removed`. Its `detail` is the target's. It
-          is not a row of this branch: `edgeId` and `ciId` are null, and `isEditable` is
+          is not a row of this branch: `ciId` is null, and `isEditable` is
           false. A row beneath a removed row carries the comparison's `entryId` for its position
           when the comparison reports that position as `member-added`, and a null `entryId` when
           the comparison pairs that position elsewhere in this tree.
@@ -662,8 +664,8 @@ paths:
             target's root is `CYCLE_DETECTED`, as on the comparison. A redline never answers
             `AMBIGUOUS_CORRELATION`; it degrades instead (see above).
 
-            `UNSUPPORTED_CI_TYPE` and `CI_IDENTITY_UNRESOLVED` — the branch's stored rows cannot
-            be read, as on every read of a branch (see `StructureUnprocessable`).
+            `UNSUPPORTED_CI_TYPE` — the branch's stored rows cannot be read, as on every read of
+            a branch (see `StructureUnprocessable`).
           content:
             application/json:
               schema: { $ref: '#/components/schemas/RestError' }
@@ -996,7 +998,7 @@ paths:
         > **Dependent edits are two requests, not two operations.**
 
         > The most common dependent pair, claim then change a quantity, is **one** operation:
-        > `{"op": "update", "ebomAssemblyId": "…", "quantity": 3, "autoClaim": true, "trackChildRevision": true}`.
+        > `{"op": "update", "targetKey": "…", "quantity": 3, "autoClaim": true, "trackChildRevision": true}`.
         > The batch still does not sequence, so `[claim(L), update(L)]` still answers
         > `CLAIM_REQUIRED`. Send that payload only to a row you know is `base`: on a row the branch
         > already owns, `trackChildRevision: true` **clears** whatever revision the row stores
@@ -1071,24 +1073,33 @@ paths:
         root. Re-reading those rows' children with the new `snapshot` brings a grid up to date
         without reloading the whole tree.
 
-        ## `Idempotency-Key`
+        Whether an operation wrote is told by its `success` and `claimed`, and by the batch's
+        `snapshot` and `invalidatedParentRowKeys`.
 
-        Read and passed through, and **ignored in this version**. It is accepted so a client can start
-        sending it now without its first request failing, and a later version can honour it without a
-        breaking change.
+        ## Naming the row: `targetKey`
+
+        Every operation that acts on an existing row names it by one field, `targetKey`, whatever
+        the row's state — inherited, claimed, excluded, the branch's own, or hidden behind a pin.
+        Send the `targetKey` the [tree read](#operation/getBranchTree) returned for that row; the
+        server works out the rest. `add` names no existing row, so it takes `parentItemId` and
+        `childItemId` instead.
+
+        A `targetKey` addresses a row in the read it came from. It is **not stable across reads**:
+        it can change when a revision is cancelled, or after a pull. It is not the line key, so
+        do not store it as a row's lasting identity.
 
         ## The operations
 
         | `op` | Required fields | What it does |
         |---|---|---|
-        | `claim` | `ebomAssemblyId`, and **exactly one of** `childItemRevisionId` \| `trackChildRevision: true` | Takes one live eBOM line into the branch as a copy-on-write claim, so the branch can diverge from it. Copies quantity and find number as they stand; the child revision is the caller's choice — a chosen revision **pins** it, `trackChildRevision: true` **tracks** the source line at T_R. Writes the line's branch row (`Branch_CI__c`) and one log row. |
-        | `update` | `assemblyCiId` **or** `ebomAssemblyId`; **at least one of** `quantity`, `findNumber`, a `fields` pair, `childItemRevisionId`, `trackChildRevision: true`; optional `autoClaim` and the `expect*` fields | Revises a branch-owned edge. Omitted fields keep the row's value. It appends a new log row that supersedes the row's current one, and returns `forked: true`. A `childItemRevisionId` different from the one the row **stores** pins it to that revision; `trackChildRevision: true` clears a stored revision. With `autoClaim: true` it also claims a `base` edge first (see `DeltaOperation.autoClaim`). |
+        | `claim` | `targetKey`, and **exactly one of** `childItemRevisionId` \| `trackChildRevision: true` | Takes one live eBOM line into the branch as a copy-on-write claim, so the branch can diverge from it. Copies quantity and find number as they stand; the child revision is the caller's choice — a chosen revision **pins** it, `trackChildRevision: true` **tracks** the source line at T_R. Writes the line's branch row (`Branch_CI__c`) and one log row. |
+        | `update` | `targetKey`; **at least one of** `quantity`, `findNumber`, a `fields` pair, `childItemRevisionId`, `trackChildRevision: true`; optional `autoClaim` and the `expect*` fields | Revises a branch-owned edge. Omitted fields keep the row's value. It appends a new log row that supersedes the row's current one. A `childItemRevisionId` different from the one the row **stores** pins it to that revision; `trackChildRevision: true` clears a stored revision. With `autoClaim: true` it also claims a `base` edge first (see `DeltaOperation.autoClaim`). |
         | `add` | `parentItemId`, `childItemId`, `quantity`, `findNumber`; optional `childItemRevisionId`, `fields` | Adds a part the eBOM never supplied — packaging, fixtures, consumables. Provenance `new`. The child **floats** at `asOf`, unless `childItemRevisionId` pins it. A line cannot appear twice under one parent: if the branch already holds a row for the pair (its own earlier `add`, or a claim or exclusion of an eBOM line with no secondary unique key), the add is refused `409 ALREADY_PRESENT` (change it with `update`) or, when that row is excluded, `409 ALREADY_EXCLUDED` (`restore` it). |
-        | `exclude` | `ebomAssemblyId` **or** `ciId` | Tombstones a row. **No cascade is written** — the descendant prune is computed at read time, because a descendant still supplied through another path must survive. |
-        | `restore` | `ciId` | Lifts an exclusion. When the exclusion superseded a branch row, `restore` appends a row that copies that row's values, claim and chosen revision, so the line renders as it did before. When it superseded none (a `base` row excluded without being claimed), it appends a revert, and the line falls back to what its source supplies. |
-        | `replace` | `replacedEbomAssemblyId`, `newChildItemId`, `quantity`, `findNumber`; optional `childItemRevisionId`, `fields` | Substitutes a different child for the one an eBOM line supplies, **recording that it is a substitution**, so the pair does not read as an unrelated removal plus an unrelated addition. The substitute floats at `asOf` unless `childItemRevisionId` pins it. `replacedEbomAssemblyId` is the `Assembly__c` Id of the eBOM line; a `ci-…` key there is `400 INVALID_REQUEST`, and a `Branch_CI__c` Id is `404 NOT_FOUND`. |
-        | `revert` | `ciId` **or** `ebomAssemblyId` | Discards the branch's claim so the row falls back to what its source supplies. Nothing is deleted: the revert is recorded in the branch log, and the branch content for the row stops applying. |
-        | `convert-to-native` | `ciId`, and **exactly one of** `childItemRevisionId` \| `trackChildRevision: true` | Severs a claiming edge's link to the source it claims: same quantity and find number, but now branch-owned in its own right (`provenance` flips `claiming` → `new`). The child revision is the caller's choice — a chosen revision is stamped on, `trackChildRevision: true` floats at `asOf`. |
+        | `exclude` | `targetKey` | Tombstones a row. **No cascade is written** — the descendant prune is computed at read time, because a descendant still supplied through another path must survive. |
+        | `restore` | `targetKey` | Lifts an exclusion. When the exclusion superseded a branch row, `restore` appends a row that copies that row's values, claim and chosen revision, so the line renders as it did before. When it superseded none (a `base` row excluded without being claimed), it appends a revert, and the line falls back to what its source supplies. |
+        | `replace` | `targetKey`, `newChildItemId`, `quantity`, `findNumber`; optional `childItemRevisionId`, `fields` | Substitutes a different child for the one a source line supplies, **recording that it is a substitution**, so the pair does not read as an unrelated removal plus an unrelated addition. The substitute floats at `asOf` unless `childItemRevisionId` pins it. `targetKey` names a `base` or claimed row, including a claimed row whose eBOM line a pull removed (rendered under `ci-<Branch_CI__c Id>`). A row the branch added, or a substitute, is refused `400 INVALID_REQUEST`. |
+        | `revert` | `targetKey` | Discards the branch's claim so the row falls back to what its source supplies. Nothing is deleted: the revert is recorded in the branch log, and the branch content for the row stops applying. |
+        | `convert-to-native` | `targetKey`, and **exactly one of** `childItemRevisionId` \| `trackChildRevision: true` | Severs a claiming edge's link to the source it claims: same quantity and find number, but now branch-owned in its own right (`provenance` flips `claiming` → `new`). The child revision is the caller's choice — a chosen revision is stamped on, `trackChildRevision: true` floats at `asOf`. |
 
         ### `update` in detail
 
@@ -1104,22 +1115,22 @@ paths:
         - **A revision change** is a requested stored value that differs from what the row
           **stores** — not what it renders. Pinning a tracking claim to the very revision it shows
           is a change ("follow" becomes "hold"). Like any change, it appends a new log row carrying
-          the request's values or the row's own; `forked: true`.
+          the request's values or the row's own.
         - **What a clear leaves.** A cleared claim becomes a tracking claim: it renders its source
           line's revision at T_R and moves only when a pull accepts a newer source. A cleared
           `new` row or substitute floats at `asOf`. Setting a pin that differs from the source
           line's revision starts rendering that revision's structure beneath the row; clearing it,
           or pinning the source line's revision, stops that, and any edits it hid render again.
         - **A revision-only request equal to the stored state** (the same pin, or a clear of a row
-          storing nothing) succeeds and writes nothing; `forked` is null. A retry after a lost
+          storing nothing) succeeds and writes nothing. A retry after a lost
           response therefore succeeds.
         - **A past `asOf`** is accepted on an owned row. If another save changed the row after that
           `asOf`, the whole batch is refused `STALE_REVISION` (see "Nothing is overwritten
           silently").
 
         **`autoClaim: true`** lets an `update` of a `base` edge claim and revise in one operation
-        instead of answering `CLAIM_REQUIRED`; the result says so with `claimed: true` and
-        `forked: null`. Because it claims, it then needs **exactly one of**
+        instead of answering `CLAIM_REQUIRED`; the result says so with `claimed: true`.
+        Because it claims, it then needs **exactly one of**
         `childItemRevisionId` | `trackChildRevision: true` (the claim's revision choice) — but
         only when the row turns out to be `base`. On a row the branch already owns, the flag is a
         no-op (`claimed` null) and the revision fields mean what they mean on any `update`.
@@ -1180,24 +1191,20 @@ paths:
 
         ### Addressing quirks worth knowing
 
-        - `update` accepts `ebomAssemblyId` **and has to**: a `base` row has no edge record, so
-          that is the only id a client holds for the row whose update must come back
-          `CLAIM_REQUIRED`. Without it the rejection could never be reached.
-        - `revert` accepts `ebomAssemblyId` for the mirror reason: a reverted row renders with no
-          branch record (`ciId` is null), so a *second* revert — which must answer `NO_CLAIM` — cannot be
-          addressed any other way.
-        - `replace` only works on rows with an eBOM line. A row with no eBOM line (an `add`, a
-          substitute, or a claim whose line a pull removed) has the `edgeKey`
-          `ci-<Branch_CI__c Id>` and no `Assembly__c` line to name, so replacing it is `update`,
-          or `exclude` plus `add`.
+        - A `base` row has no branch record (`ciId` is null), but it has a `targetKey`, so an
+          `update` of it can come back `CLAIM_REQUIRED`, and a *second* `revert` of a reverted
+          row can answer `NO_CLAIM`.
+        - `replace` reaches every row a source line supplies, including a claimed row whose eBOM
+          line a pull removed, which renders under `ci-<Branch_CI__c Id>`. A row the branch
+          added, or a substitute, also renders under a `ci-…` key, and a `replace` naming it is
+          refused `400 INVALID_REQUEST`: replacing it is `update`, or `exclude` plus `add`.
         - A row **hidden behind a pin** (see `PINNED_SUBTREE_HIDES_EDITS`), or on a parent
           revision nothing renders any more (see the [branch tree read](#operation/getBranchTree)),
-          is addressable by
-          `ciId` for `exclude`, `restore`, `revert` and `convert-to-native`, and by `assemblyCiId`
-          for `update` (its new quantity / find number render once the pin no longer
-          hides the row). An `update` addressed by `ebomAssemblyId` still answers `NOT_FOUND`
-          for it. `claim` of a hidden line answers `NOT_FOUND` too, deliberately: a line that
-          renders nowhere has nothing visible to claim.
+          is reached by `update`, `exclude`, `restore`, `revert` and `convert-to-native` through
+          the `targetKey` it last rendered under (an `update`'s new quantity / find number render
+          once the pin no longer hides the row). `claim` acts only on a rendered inherited row:
+          `claim` of a hidden line answers `NOT_FOUND`, deliberately, because a line that renders
+          nowhere has nothing visible to claim.
 
         ### Line values: `fields`
 
@@ -1237,13 +1244,6 @@ paths:
         values also needs field Edit from a core Propel permission set.
       parameters:
         - $ref: '#/components/parameters/BranchId'
-        - name: Idempotency-Key
-          in: header
-          required: false
-          description: |
-            Accepted and **ignored** in this version. Present so a client can start sending it without
-            its first request failing.
-          schema: { type: string }
       requestBody:
         required: true
         content:
@@ -1258,11 +1258,11 @@ paths:
                   operations:
                     - op: claim
                       clientRef: row-motor
-                      ebomAssemblyId: a0Bg8000000Ab10EAC
+                      targetKey: a0Bg8000000Ab10EAC
                       trackChildRevision: true
                     - op: claim
                       clientRef: row-bracket
-                      ebomAssemblyId: a0Bg8000000Ab11EAC
+                      targetKey: a0Bg8000000Ab11EAC
                       childItemRevisionId: a0Ag8000000Ab31EAC
               claimRevisionChoiceMissing:
                 summary: A claim that chose neither — refused REVISION_CHOICE_REQUIRED
@@ -1270,14 +1270,14 @@ paths:
                   operations:
                     - op: claim
                       clientRef: no-choice
-                      ebomAssemblyId: a0Bg8000000Ab10EAC
+                      targetKey: a0Bg8000000Ab10EAC
               update:
                 summary: Revise quantity and find number on a claiming edge
                 value:
                   operations:
                     - op: update
                       clientRef: qty-fix
-                      assemblyCiId: a1Gg8000000AbF1EAK
+                      targetKey: a0Bg8000000Ab10EAC
                       quantity: 4
                       findNumber: 10
               updateAutoClaim:
@@ -1286,7 +1286,7 @@ paths:
                   operations:
                     - op: update
                       clientRef: qty-in-one
-                      ebomAssemblyId: a0Bg8000000Ab11EAC
+                      targetKey: a0Bg8000000Ab11EAC
                       quantity: 3
                       autoClaim: true
                       trackChildRevision: true
@@ -1296,7 +1296,7 @@ paths:
                   operations:
                     - op: update
                       clientRef: take-rev-2
-                      assemblyCiId: a1Gg8000000AbF1EAK
+                      targetKey: a0Bg8000000Ab10EAC
                       childItemRevisionId: a0Ag8000000Ab42EAC
               updateRevisionAndQuantity:
                 summary: Change a row's revision and its quantity together — one operation, one new log row
@@ -1304,7 +1304,7 @@ paths:
                   operations:
                     - op: update
                       clientRef: line-editor-save
-                      assemblyCiId: a1Gg8000000AbF1EAK
+                      targetKey: a0Bg8000000Ab10EAC
                       childItemRevisionId: a0Ag8000000Ab42EAC
                       quantity: 3
               updateRevisionClear:
@@ -1313,7 +1313,7 @@ paths:
                   operations:
                     - op: update
                       clientRef: stop-pinning
-                      assemblyCiId: a1Gg8000000AbF1EAK
+                      targetKey: a0Bg8000000Ab10EAC
                       trackChildRevision: true
               updateLineValues:
                 summary: Change a line's notes and quantity, refusing the save if either moved since it was shown
@@ -1321,7 +1321,7 @@ paths:
                   operations:
                     - op: update
                       clientRef: notes-and-qty
-                      assemblyCiId: a1Gg8000000AbF1EAK
+                      targetKey: a0Bg8000000Ab10EAC
                       fields:
                         - { field: PDLM__Quantity__c, value: '3' }
                         - { field: PDLM__Notes__c, value: Torque to 2.5 Nm }
@@ -1355,7 +1355,7 @@ paths:
                   operations:
                     - op: convert-to-native
                       clientRef: keep-harness
-                      ciId: a1Gg8000000AbF3EAK
+                      targetKey: a0Bg8000000Ab12EAC
                       childItemRevisionId: a0Ag8000000Ab61EAC
               excludeAndReplace:
                 summary: Substitute an alternate part, and drop another line
@@ -1363,13 +1363,13 @@ paths:
                   operations:
                     - op: replace
                       clientRef: alt-motor
-                      replacedEbomAssemblyId: a0Bg8000000Ab10EAC
+                      targetKey: a0Bg8000000Ab10EAC
                       newChildItemId: a02g8000000Ab91EAC
                       quantity: 1
                       findNumber: 10
                     - op: exclude
                       clientRef: drop-harness
-                      ebomAssemblyId: a0Bg8000000Ab12EAC
+                      targetKey: a0Bg8000000Ab12EAC
               nonAtomic:
                 summary: Best-effort — apply what is valid, report the rest
                 value:
@@ -1377,11 +1377,11 @@ paths:
                   operations:
                     - op: claim
                       clientRef: ok
-                      ebomAssemblyId: a0Bg8000000Ab11EAC
+                      targetKey: a0Bg8000000Ab11EAC
                       trackChildRevision: true
                     - op: update
                       clientRef: will-fail
-                      ebomAssemblyId: a0Bg8000000Ab12EAC
+                      targetKey: a0Bg8000000Ab12EAC
                       quantity: 9
       responses:
         '200':
@@ -1398,9 +1398,9 @@ paths:
                 partial:
                   summary: '`atomic: false` — one applied, one refused'
                   $ref: '#/components/examples/DeltaBatchPartial'
-                forked:
-                  summary: An update that superseded the row's current branch row
-                  $ref: '#/components/examples/DeltaBatchForked'
+                updated:
+                  summary: An update of a row the branch already owns
+                  $ref: '#/components/examples/DeltaBatchUpdated'
                 autoClaimed:
                   summary: An update that claimed a base line (autoClaim)
                   $ref: '#/components/examples/DeltaBatchAutoClaimed'
@@ -1421,7 +1421,7 @@ paths:
             `childItemRevisionId` nor `trackChildRevision: true`
             (`update requires a line value, childItemRevisionId or trackChildRevision: true`); an
             `update` whose `autoClaim` claims a `base` edge with an `asOf` supplied (as a `claim`
-            is); a `replace` whose `replacedEbomAssemblyId` is a `ci-…` key; and a second operation
+            is); a `replace` whose `targetKey` names a row the branch added, or a substitute; and a second operation
             on a line an earlier operation of the batch already changes (*"Operation N of this
             request already changes this line…"*, see "One act per line in a batch").
             `"op": "set-revision"` is an unknown op.
@@ -1444,8 +1444,6 @@ paths:
                         errorCode: INVALID_REQUEST
                         message: 'Operation 1 of this request already changes this line. Send every change to a line in one operation.'
                         ciId: null
-                        edgeId: null
-                        forked: null
                         claimed: null
                 asOfRefused:
                   summary: A convert-to-native sent with an asOf
@@ -1506,7 +1504,7 @@ paths:
             | `CYCLE_DETECTED` | the requested edge would make a child an ancestor of its own parent |
             | `PARENT_NOT_IN_BRANCH` | `add` targeted a parent that is not part of this configuration |
             | `EBOM_CYCLE` | the source eBOM already contains a cycle |
-            | `UNSUPPORTED_CI_TYPE`, `CI_IDENTITY_UNRESOLVED` | the branch's stored rows cannot be read (see `StructureUnprocessable`) |
+            | `UNSUPPORTED_CI_TYPE` | the branch's stored rows cannot be read (see `StructureUnprocessable`) |
             | `REVISION_CHOICE_REQUIRED` | a `claim` or `convert-to-native` sent neither `childItemRevisionId` nor `trackChildRevision: true`, or sent both; an `update` sent both; an `update` with `autoClaim` that claims a `base` edge sent neither |
             | `REVISION_ITEM_MISMATCH` | a `childItemRevisionId` is not a revision of the operation's child item — or names no revision you can see |
 
@@ -1515,7 +1513,7 @@ paths:
             already-claimed line that also chose nothing answers `REVISION_CHOICE_REQUIRED`, not
             `ALREADY_CLAIMED`. `REVISION_ITEM_MISMATCH` is checked after the state guards. On
             `update`, "neither" is refused only once the lookup shows the row is `base` and
-            `autoClaim` is claiming it (message `update with autoClaim claims Assembly__c <edgeKey>,
+            `autoClaim` is claiming it (message `update with autoClaim claims Assembly__c <targetKey>,
             and a claim requires childItemRevisionId or trackChildRevision: true`), so an
             `autoClaim` update with no choice on a missing row answers `NOT_FOUND`.
           content:
@@ -1536,8 +1534,6 @@ paths:
                         errorCode: REVISION_ITEM_MISMATCH
                         message: "The chosen revision is not a revision of this line's part that you can access. Choose a revision of this line's part. (Item_Revision__c a0Ag8000000Ab41EAC is not a revision of Item__c a02g8000000Ab91EAC)"
                         ciId: null
-                        edgeId: null
-                        forked: null
                         claimed: null
                 cycle:
                   value:
@@ -1662,8 +1658,8 @@ paths:
           description: |
             `EBOM_CYCLE` — the source eBOM contains a cycle, so nothing can be resolved to cut.
 
-            `UNSUPPORTED_CI_TYPE` and `CI_IDENTITY_UNRESOLVED` — the branch's stored rows cannot
-            be read (see `StructureUnprocessable`).
+            `UNSUPPORTED_CI_TYPE` — the branch's stored rows cannot be read (see
+            `StructureUnprocessable`).
 
             `PROVENANCE_INVALID` — the branch has more than one source and the conflict between
             them is not resolved. A branch has exactly one source in this version, so this does
@@ -1698,7 +1694,7 @@ paths:
 
         - **Excluded rows are filtered out.** A tree read renders a tombstone so the editor can see
           what was removed; a baseline is the record of what the branch *contained*.
-        - **`edgeId`, `edgeKey` and `ciId` are null, and the per-row governing clock is
+        - **`targetKey` and `ciId` are null, and the per-row governing clock is
           collapsed** — every row's `governingTimestamp` is the baseline's own
           `resolutionTimePoint`, never null. A baseline row does not pretend to answer questions it
           cannot, and cannot be edited. `isReplaced` **is** populated: leaving it null would render
@@ -1781,7 +1777,7 @@ paths:
           description: |
             `CYCLE_DETECTED` — a cycle beneath the `compare` target's root.
 
-            `EBOM_CYCLE`, `UNSUPPORTED_CI_TYPE` and `CI_IDENTITY_UNRESOLVED` — the baseline's
+            `EBOM_CYCLE` and `UNSUPPORTED_CI_TYPE` — the baseline's
             structure cannot be resolved, as on every read of a branch (see
             `StructureUnprocessable`).
           content:
@@ -1818,14 +1814,14 @@ paths:
 
         The two traversals are correlated on the BOM line's **`(Parent_Item__c, Item__c,
         Secondary_Unique_Key__c)`** — the parent *item*, not the parent revision. **Not** on the
-        line's `edgeKey`.
+        line's `Assembly__c` Id (a tree row's `targetKey`, a diff target's `edgeKey`).
 
         This is the load-bearing decision of the whole feature. When a parent item revs, Propel
         clones its entire BOM into new `Assembly__c` rows with new ids — so a branch that claimed a
-        line under rev-1 holds a line id that does not exist under rev-2. A join on `edgeKey` would
+        line under rev-1 holds a line id that does not exist under rev-2. A join on that id would
         orphan every claimed edge and re-add every upstream line **on every single pull**. The
         parent item does not move when its revision does, which is exactly what lets this key survive
-        the clone. `edgeKey` still identifies the edge *for display*; it just is not the join key.
+        the clone. The line id still identifies the edge *for display*; it just is not the join key.
 
         `Secondary_Unique_Key__c` rather than `Find_Number__c` because find-number uniqueness is org
         configuration, and a key built on it would give two orgs with identical data different diffs.
@@ -2206,7 +2202,7 @@ paths:
         Nothing is persisted *unless the caller decided*: an `accept-fields` decision writes one
         `update` for its row, and a `release` one `revert`.
 
-        A claim's `edgeKey` is likewise not the correlation key: it stays the `Assembly__c` Id of the
+        A claim's `targetKey` is likewise not the correlation key: it stays the `Assembly__c` Id of the
         eBOM line the claim was made on, independent of the correlation key a pull actually joins
         on. Once a pull removes that line, the claim has no eBOM line left and renders under
         `ci-<Branch_CI__c Id>`.
@@ -3237,8 +3233,8 @@ components:
         ciId:
           oneOf: [{ $ref: '#/components/schemas/SalesforceId' }, { type: 'null' }]
           description: |
-            The `Branch_CI__c` the branch holds for this line — the id `exclude`, `restore`, `revert`
-            and `convert-to-native` take, and the same value as `edgeId`. **Null for a `base` row**,
+            The `Branch_CI__c` the branch holds for this line. An operation names the row by its
+            `targetKey`, not by this id. **Null for a `base` row**,
             which has no branch record, for a `nested` row, and on source and baseline rows. Two
             occurrences of one line (a subassembly rendered twice) carry the same `ciId`, because
             they are one branch row.
@@ -3253,21 +3249,20 @@ components:
         redline:
           oneOf: [{ $ref: '#/components/schemas/RowRedline' }, { type: 'null' }]
           description: How this row differs from the `compare` target. Null without `compare`.
-        edgeId:
-          oneOf: [{ $ref: '#/components/schemas/SalesforceId' }, { type: 'null' }]
-          description: The id an `update` takes as `assemblyCiId`. Always equal to `ciId`, the `Branch_CI__c` Id. **Null for a `base` row** that no branch has claimed. Suppressed on baseline rows.
-        edgeKey:
+        targetKey:
           oneOf: [{ type: string }, { type: 'null' }]
           description: |
-            The eBOM `Assembly__c` line id for a row on an eBOM line (a `base` row, or a claim or
-            exclusion of one). A branch row with no eBOM line has the key `ci-<Branch_CI__c Id>`:
-            an `add`, a `replace` substitute, a claim whose eBOM line a pull removed, and a branch
-            row whose eBOM line the read skips because its child has nothing released at the read
-            time. Such a row's key can therefore change when a revision is cancelled. Suppressed on
-            baseline rows.
+            The key a [delta operation](#operation/applyDeltaBatch) names this row by
+            (`DeltaOperation.targetKey`). The eBOM `Assembly__c` line id for a row on an eBOM line
+            (a `base` row, or a claim or exclusion of one). A branch row with no eBOM line has the
+            key `ci-<Branch_CI__c Id>`: an `add`, a `replace` substitute, a claim whose eBOM line a
+            pull removed, and a branch row whose eBOM line the read skips because its child has
+            nothing released at the read time. Null on baseline rows, which no operation can act on.
 
-            Treat it as opaque; never parse the prefix. `replace` takes an `Assembly__c` id only,
-            so it cannot name a `ci-…` row.
+            It addresses this row **in the read it came from**. It is **not stable across reads**:
+            it can change when a revision is cancelled, or after a pull. It is not the line key,
+            so never store it as a row's lasting identity. Treat it as opaque; never parse the
+            prefix.
 
             A substitute always carries its own `ci-…` key, even when its child item already
             has its own line under the same parent: the two render as two rows, each under its own
@@ -3571,37 +3566,31 @@ components:
             the moment anything is reordered, and on `clientRef` alone breaks when you do not set it
             — so `index` is stated too.
           examples: ['row-motor']
-        ebomAssemblyId:
-          allOf: [{ $ref: '#/components/schemas/SalesforceId' }]
+        targetKey:
+          type: string
           description: |
-            The eBOM `Assembly__c` line. Used by: `claim`, `exclude`, `update` (the `CLAIM_REQUIRED` path, and the `autoClaim` path), `revert` (the second-revert path).
+            The existing row this operation acts on: the `targetKey` the
+            [tree read](#operation/getBranchTree) returned for that row (`TreeRow.targetKey`) — an
+            eBOM line's `Assembly__c` Id, or `ci-<Branch_CI__c Id>` for a branch row with no eBOM
+            line under it. Required by `claim`, `update`, `exclude`, `restore`, `replace`, `revert`
+            and `convert-to-native`; `add` takes none. Missing, it answers `INVALID_REQUEST`; naming
+            no row of the branch, `NOT_FOUND`.
 
-            Never finds a row hidden behind a pin: an `update` addressed by it answers `NOT_FOUND`
-            there.
-        assemblyCiId:
-          allOf: [{ $ref: '#/components/schemas/SalesforceId' }]
-          description: |
-            The row to `update`, by its `Branch_CI__c` Id: a tree row's `edgeId` (equal to its
-            `ciId`). The ordinary form.
+            It addresses a row **in the read it came from**. It is **not stable across reads**: it
+            can change when a revision is cancelled, or after a pull. It is not the line key.
 
-            The **request** keeps this name while the result publishes the same id as `edgeId`.
-            Not an oversight: a request carries every operation's fields in one flat shape, and
-            the operation an id belongs to is known only after `op` is read — so a request field
-            cannot be grouped per configuration-item type the way a response's can.
-
-            It also finds a row hidden behind a pin, which `ebomAssemblyId` never does.
-        ciId:
-          allOf: [{ $ref: '#/components/schemas/SalesforceId' }]
-          description: 'The `Branch_CI__c` (a tree row''s `ciId`) to `exclude`, `restore`, `revert` or `convert-to-native`.'
+            `update`, `exclude`, `restore`, `revert` and `convert-to-native` also reach a row hidden
+            behind a pin (`PINNED_SUBTREE_HIDES_EDITS`) by the key it last rendered under; `claim`
+            acts only on a rendered inherited row. `replace` reaches a claimed row with no eBOM
+            line under it (`ci-<Branch_CI__c Id>`), but a `replace` naming a row the branch added,
+            or a substitute, is refused `INVALID_REQUEST`.
+          examples: ['a0Bg8000000Ab10EAC']
         parentItemId:
           allOf: [{ $ref: '#/components/schemas/SalesforceId' }]
           description: '`add` only — the parent **item** (never a revision).'
         childItemId:
           allOf: [{ $ref: '#/components/schemas/SalesforceId' }]
           description: '`add` only — the part being added.'
-        replacedEbomAssemblyId:
-          allOf: [{ $ref: '#/components/schemas/SalesforceId' }]
-          description: '`replace` only — the `Assembly__c` Id of the eBOM line being superseded. A row with no eBOM line (`edgeKey` `ci-…`) cannot be replaced: a `ci-…` value here is `400 INVALID_REQUEST`, and a `Branch_CI__c` Id is `404 NOT_FOUND`.'
         newChildItemId:
           allOf: [{ $ref: '#/components/schemas/SalesforceId' }]
           description: '`replace` only — the substitute part. Its revision **floats** at the read clock unless `childItemRevisionId` pins it.'
@@ -3734,8 +3723,7 @@ components:
             - **No quantity or find number is needed** on a `base` row: `autoClaim` +
               `trackChildRevision: true` alone is a plain tracking claim with the line's own
               quantity and find number.
-            - **The result reports the claim.** `DeltaResult.claimed` is `true` and `forked` is
-              null (the claim writes the line's first branch row, which supersedes nothing). `CLAIM_REQUIRED` would have disclosed
+            - **The result reports the claim.** `DeltaResult.claimed` is `true`. `CLAIM_REQUIRED` would have disclosed
               the eBOM line before the fact; this discloses it after.
             - **On an edge the branch already owns**, the flag is a no-op: `claimed` stays null and
               the revision fields mean what they mean on any `update` — neither keeps the stored
@@ -3751,8 +3739,8 @@ components:
                 (`INVALID_REQUEST`), and `REVISION_ITEM_MISMATCH`.
               - On an edge the branch already owns, no claim happens, so a past `asOf` is accepted
                 as on plain `update`.
-            - A row hidden behind a pin is found by `assemblyCiId` only (it is owned, so the flag
-              is a no-op there); by `ebomAssemblyId` it answers `NOT_FOUND`.
+            - A row hidden behind a pin is found by the `targetKey` it last rendered under; it is
+              owned, so the flag is a no-op there.
 
             `false` and null both mean off: `CLAIM_REQUIRED`, still carrying the eBOM line.
             Ignored, not refused, on every other operation.
@@ -3826,31 +3814,16 @@ components:
           description: Human-readable, from a Custom Label. Never parsed.
         ciId:
           oneOf: [{ $ref: '#/components/schemas/SalesforceId' }, { type: 'null' }]
-          description: The `Branch_CI__c` this operation created or acted on.
-        edgeId:
-          oneOf: [{ $ref: '#/components/schemas/SalesforceId' }, { type: 'null' }]
           description: |
-            The row this operation created or acted on: the same `Branch_CI__c` Id as `ciId`, and
-            the same value, under the same name, that `TreeRow.edgeId` publishes. Send it back as
-            `assemblyCiId` on an `update`.
-        forked:
-          oneOf: [{ type: boolean }, { type: 'null' }]
-          description: |
-            `true` on every `update` that supersedes the line's current branch row. No row is
-            edited in place, so every `update` that writes appends a new log row that supersedes
-            the current one.
-
-            **Never `false`.** `null` means no branch row was superseded: on every operation but
-            `update`; on an `update` that auto-claimed (`claimed: true`), which writes the line's
-            first branch row, exactly as `claim` does; and on an `update` that the row already
-            satisfied, which writes nothing. Not defaulted, so a client can tell an update that
-            wrote from one that did not.
+            The `Branch_CI__c` this operation created or acted on — the same value a tree row
+            publishes as `ciId`. To act on the row again, read the tree and send the row's
+            `targetKey`.
         claimed:
           oneOf: [{ type: boolean }, { type: 'null' }]
           description: |
             `true` when this operation took ownership of a `base` edge on the caller's behalf,
             which only an `update` sent with `autoClaim: true` can do. Nothing else in
-            the response would say so: `edgeId` is populated either way.
+            the response would say so: `ciId` is populated either way.
 
             **Never `false`.** It is `null` whenever no claim was performed: `autoClaim` off, an
             `autoClaim` on an edge the branch already owned, a failure, and every other operation.
@@ -3925,7 +3898,7 @@ components:
           type: array
           description: |
             One page of the re-resolved rows, reusing the tree shape so clients render both the
-            same way — with `edgeId`, `edgeKey` and `ciId` nulled, `governingTimestamp`
+            same way — with `targetKey` and `ciId` nulled, `governingTimestamp`
             collapsed onto this baseline's own `resolutionTimePoint`, and excluded rows filtered
             out.
           items: { $ref: '#/components/schemas/TreeRow' }
@@ -4309,14 +4282,14 @@ components:
       required: [ciKind, label]
       properties:
         ciKind: { $ref: '#/components/schemas/CiKind' }
-        edgeId:
+        ciId:
           oneOf: [{ $ref: '#/components/schemas/SalesforceId' }, { type: 'null' }]
-          description: The `Branch_CI__c` for this member (the same value as a tree row's `edgeId` and `ciId`). Null for `base` content, which has no branch-owned record until something claims it.
+          description: The `Branch_CI__c` for this member (the same value as a tree row's `ciId`). Null for `base` content, which has no branch-owned record until something claims it.
         edgeKey:
           oneOf: [{ type: string }, { type: 'null' }]
           description: |
             The **display** key — the eBOM `Assembly__c` line id, or the synthetic key of
-            branch-local content (see `TreeRow.edgeKey`).
+            branch-local content (see `TreeRow.targetKey`).
             **Not** what a pull correlates on: it moves when a parent item revs, which is exactly why
             the diff cannot join on it.
         label:
@@ -4347,7 +4320,7 @@ components:
       properties:
         ciKind: { $ref: '#/components/schemas/CiKind' }
         label: { type: string, examples: ['Assy-100'] }
-        edgeId:
+        ciId:
           oneOf: [{ $ref: '#/components/schemas/SalesforceId' }, { type: 'null' }]
         edgeKey:
           oneOf: [{ type: string }, { type: 'null' }]
@@ -4652,9 +4625,9 @@ components:
             whatever the request's casing. `null` for every other action and for undecided entries.
           examples:
             - { quantity: candidate, childItemRevisionId: candidate }
-        edgeId:
+        ciId:
           oneOf: [{ $ref: '#/components/schemas/SalesforceId' }, { type: 'null' }]
-          description: The branch-owned `Branch_CI__c` this entry's target names, if any. For a live `replace` substitute's `claim-retained`, the substitute's edge.
+          description: The branch-owned `Branch_CI__c` this entry's target names, if any. For a live `replace` substitute's `claim-retained`, the substitute's.
 
     # -------------------------------------------------- comparison
 
@@ -4924,19 +4897,16 @@ components:
             The stable error code. Every value below is a client error; a 500 carries
             `INTERNAL_ERROR`, which is listed here for completeness but is not a code to branch on.
 
-            A code is never removed from this list, because removing one would break a client that
-            switches on it, so a few are listed that this version does not answer through the API:
+            A few are listed that no route of this API answers in ordinary use:
 
-            - `CI_IDENTITY_COLLISION` is no longer raised.
-            - `UNSUPPORTED_CI_TYPE` and `CI_IDENTITY_UNRESOLVED` are raised only when the branch's
-              stored rows cannot be read, which the API itself never causes (see
-              `StructureUnprocessable`).
-            - `HARD_DELETE_BLOCKED` and `IMMUTABLE_FIELD` (409) come from the guards on the Site BOM,
-              branch, source, source acceptance and baseline records: a hard delete of one of those
-              records, or a change to a field that may not change. No operation in this API
-              deletes a record or changes such a field, so a client sees them only if a write
-              collides with one of those guards. The branch's own log rows have no such guard yet;
-              the API never deletes or edits them.
+            - `UNSUPPORTED_CI_TYPE` is raised only when the branch's stored rows cannot be read,
+              which the API itself never causes (see `StructureUnprocessable`).
+            - `HARD_DELETE_BLOCKED` and `IMMUTABLE_FIELD` (409) are raised by the guards on the
+              Site BOM, branch, source, source acceptance and baseline records against direct
+              DML — a hard delete of one of those records, or a change to a field that may not
+              change — not by a REST route. No operation in this API deletes such a record or
+              changes such a field. The branch's own log rows have no such guard yet; the API
+              never deletes or edits them.
             - `PROVENANCE_INVALID` is raised only by a baseline cut of a branch with more than one
               source, which this version cannot create.
           enum:
@@ -4944,8 +4914,7 @@ components:
              HARD_DELETE_BLOCKED, IMMUTABLE_FIELD, NOT_RELEASED, STALE_REVISION, CONCURRENT_WRITE,
              ALREADY_PRESENT,
              CANDIDATE_NOT_NEWER, DISPOSITION_REQUIRED, CYCLE_DETECTED, EBOM_CYCLE,
-             PARENT_NOT_IN_BRANCH, UNSUPPORTED_CI_TYPE, CI_IDENTITY_UNRESOLVED,
-             CI_IDENTITY_COLLISION, PROVENANCE_INVALID, CANDIDATE_ROOT_MISMATCH,
+             PARENT_NOT_IN_BRANCH, UNSUPPORTED_CI_TYPE, PROVENANCE_INVALID, CANDIDATE_ROOT_MISMATCH,
              AMBIGUOUS_CORRELATION, REVISION_ITEM_MISMATCH, REVISION_CHOICE_REQUIRED,
              BATCH_TOO_LARGE, STRUCTURE_TOO_LARGE, ASOF_IN_FUTURE, ASOF_INVALID, NOT_EDITABLE,
              INVALID_REQUEST, NOT_FOUND, FORBIDDEN, FEATURE_NOT_ENABLED, INTERNAL_ERROR]
@@ -5065,11 +5034,9 @@ components:
         |---|---|---|
         | `EBOM_CYCLE` | the source eBOM itself contains a cycle | fix the eBOM |
         | `UNSUPPORTED_CI_TYPE` | a stored branch row names a configuration item type this version has no handler for | contact Propel Support |
-        | `CI_IDENTITY_UNRESOLVED` | a stored branch row cannot be turned into a row of the tree — data corruption, refused rather than silently skipped | contact Propel Support |
 
-        The API never writes rows that raise `UNSUPPORTED_CI_TYPE` or `CI_IDENTITY_UNRESOLVED`; they
-        mean the branch's stored data was changed outside it. `CI_IDENTITY_COLLISION` is no longer
-        raised.
+        The API never writes rows that raise `UNSUPPORTED_CI_TYPE`; it means the branch's stored
+        data was changed outside it.
       content:
         application/json:
           schema: { $ref: '#/components/schemas/RestError' }
@@ -5131,7 +5098,7 @@ components:
         | `AMBIGUOUS_CORRELATION` | the correlation join cannot tell which upstream line corresponds to which branch line — one of the three shapes below |
         | `REVISION_CHOICE_REQUIRED` | *commit only* — a `convert-to-native` decision carried neither or both of `childItemRevisionId` and `trackChildRevision: true` |
         | `REVISION_ITEM_MISMATCH` | *commit only* — a `convert-to-native` decision's `childItemRevisionId` is not a revision of the row's child item |
-        | `UNSUPPORTED_CI_TYPE` / `CI_IDENTITY_UNRESOLVED` | the branch's stored rows cannot be read (see `StructureUnprocessable`) |
+        | `UNSUPPORTED_CI_TYPE` | the branch's stored rows cannot be read (see `StructureUnprocessable`) |
 
         `AMBIGUOUS_CORRELATION` is raised in three shapes. Which remedy applies depends on the
         shape, and the message's detail names the edges involved:
@@ -5204,7 +5171,7 @@ components:
         |---|---|
         | `AMBIGUOUS_CORRELATION` | the correlation join cannot tell which member on one side corresponds to which on the other. The same three shapes as on the pull (see `PullUnprocessable`): two edges on one side sharing a key **and** a parent revision, edges at one key left on both sides under different parent revisions with more than one on a side, or two or more edges at one key left unpaired on one side. A comparison reports every one-sided member on a side as one kind, so for the third shape any two members count — a substitute beside a line of the same child that the other side lacks refuses whether that line is claimed or not — and excluding the substitute clears it, since tombstones are not members. A fourth shape is the comparison's alone: two entries it would publish carry one `entryId` — two pairs at one key reported as the same kind, both `member-differs` or (with `includeUnchanged=true`) both `member-unchanged`. That happens when both configurations hold a substitute beside a line of the same child, or a claimed line beside a local `add` of the same child, and either both rows changed (two `member-differs`) or neither did and `includeUnchanged=true` (two `member-unchanged`). With one row changed, or with neither changed and `includeUnchanged` off, the comparison completes. Removing or reverting one of the branch's changes at that position clears it. Known gap: when the two sides' root items differ (`COMPARE_ROOTS_DIFFER`) the comparison runs no join and this check does not apply, so two members at one key on one side — such a substitute and its line, say — are published as two `member-removed` (or `member-added`) entries under one `entryId` rather than refused. On a baseline side no branch edit clears any of these: a baseline cannot be edited. One parent item rendering at two revisions is not one of them |
         | `CYCLE_DETECTED` | a cycle in the eBOM beneath either side's root, so that side cannot be resolved at all |
-        | `UNSUPPORTED_CI_TYPE` / `CI_IDENTITY_UNRESOLVED` | a branch or baseline side's stored rows cannot be read (see `StructureUnprocessable`) |
+        | `UNSUPPORTED_CI_TYPE` | a branch or baseline side's stored rows cannot be read (see `StructureUnprocessable`) |
 
         Both sides are resolved, so either can raise any of these codes. `AMBIGUOUS_CORRELATION`'s detail
         names the offending side in the **comparison's** own vocabulary — `left side`,
@@ -5249,8 +5216,8 @@ components:
     # Tree examples share one id → display-value map, used everywhere in this file:
     #   Assy-100 (root, rev-1 / rev-2), Motor-002, Bracket-005, Harness-011, Panel-300, Label-400,
     #   Pack-900 (the branch's own `add`), Sub-200 with Gear-210 and Bearing-230 beneath it.
-    # A source-supplied row's `rowKey` segment is the first 15 characters of its `edgeKey`; a
-    # branch `new` row's is the first 15 of its `edgeId`. Both are opaque on the wire.
+    # A source-supplied row's `rowKey` segment is the first 15 characters of its `targetKey`; a
+    # branch `new` row's is the first 15 of its `ciId`. Both are opaque on the wire.
 
     BranchTreeWhole:
       value:
@@ -5265,8 +5232,7 @@ components:
             parentRowKey: null
             level: 1
             hasChildren: false
-            edgeId: a1Gg8000000AbF1EAK
-            edgeKey: a0Bg8000000Ab10EAC
+            targetKey: a0Bg8000000Ab10EAC
             ciId: a1Gg8000000AbF1EAK
             detail:
               ciKind: assembly-edge
@@ -5297,8 +5263,7 @@ components:
             parentRowKey: null
             level: 1
             hasChildren: false
-            edgeId: null
-            edgeKey: a0Bg8000000Ab11EAC
+            targetKey: a0Bg8000000Ab11EAC
             ciId: null
             detail:
               ciKind: assembly-edge
@@ -5329,8 +5294,7 @@ components:
             parentRowKey: null
             level: 1
             hasChildren: false
-            edgeId: a1Gg8000000AbF3EAK
-            edgeKey: a0Bg8000000Ab12EAC
+            targetKey: a0Bg8000000Ab12EAC
             ciId: a1Gg8000000AbF3EAK
             detail:
               ciKind: assembly-edge
@@ -5361,8 +5325,7 @@ components:
             parentRowKey: null
             level: 1
             hasChildren: false
-            edgeId: a1Gg8000000AbF9EAK
-            edgeKey: 'ci-a1Gg8000000AbF9EAK'
+            targetKey: 'ci-a1Gg8000000AbF9EAK'
             ciId: a1Gg8000000AbF9EAK
             detail:
               ciKind: assembly-edge
@@ -5412,8 +5375,7 @@ components:
             parentRowKey: null
             level: 1
             hasChildren: false
-            edgeId: a1Gg8000000AbF1EAK
-            edgeKey: a0Bg8000000Ab10EAC
+            targetKey: a0Bg8000000Ab10EAC
             ciId: a1Gg8000000AbF1EAK
             detail:
               ciKind: assembly-edge
@@ -5444,8 +5406,7 @@ components:
             parentRowKey: null
             level: 1
             hasChildren: false
-            edgeId: null
-            edgeKey: a0Bg8000000Ab11EAC
+            targetKey: a0Bg8000000Ab11EAC
             ciId: null
             detail:
               ciKind: assembly-edge
@@ -5497,8 +5458,7 @@ components:
             parentRowKey: a0Bg8000000Ab14
             level: 2
             hasChildren: false
-            edgeId: null
-            edgeKey: a0Bg8000000Ab16EAC
+            targetKey: a0Bg8000000Ab16EAC
             ciId: null
             detail:
               ciKind: assembly-edge
@@ -5529,8 +5489,7 @@ components:
             parentRowKey: a0Bg8000000Ab14
             level: 2
             hasChildren: false
-            edgeId: null
-            edgeKey: a0Bg8000000Ab17EAC
+            targetKey: a0Bg8000000Ab17EAC
             ciId: null
             detail:
               ciKind: assembly-edge
@@ -5595,8 +5554,7 @@ components:
             parentRowKey: null
             level: 1
             hasChildren: false
-            edgeId: a1Gg8000000AbF1EAK
-            edgeKey: a0Bg8000000Ab10EAC
+            targetKey: a0Bg8000000Ab10EAC
             ciId: a1Gg8000000AbF1EAK
             detail:
               ciKind: assembly-edge
@@ -5631,8 +5589,7 @@ components:
             parentRowKey: null
             level: 1
             hasChildren: false
-            edgeId: null
-            edgeKey: a0Bg8000000Ab11EAC
+            targetKey: a0Bg8000000Ab11EAC
             ciId: null
             detail:
               ciKind: assembly-edge
@@ -5667,8 +5624,7 @@ components:
             parentRowKey: null
             level: 1
             hasChildren: false
-            edgeId: a1Gg8000000AbF3EAK
-            edgeKey: a0Bg8000000Ab12EAC
+            targetKey: a0Bg8000000Ab12EAC
             ciId: a1Gg8000000AbF3EAK
             detail:
               ciKind: assembly-edge
@@ -5703,8 +5659,7 @@ components:
             parentRowKey: null
             level: 1
             hasChildren: false
-            edgeId: a1Gg8000000AbF9EAK
-            edgeKey: 'ci-a1Gg8000000AbF9EAK'
+            targetKey: 'ci-a1Gg8000000AbF9EAK'
             ciId: a1Gg8000000AbF9EAK
             detail:
               ciKind: assembly-edge
@@ -5758,8 +5713,7 @@ components:
             parentRowKey: null
             level: 1
             hasChildren: true
-            edgeId: a1Gg8000000AbF7EAK
-            edgeKey: a0Bg8000000Ab14EAC
+            targetKey: a0Bg8000000Ab14EAC
             ciId: a1Gg8000000AbF7EAK
             detail:
               ciKind: assembly-edge
@@ -5790,8 +5744,7 @@ components:
             parentRowKey: a0Bg8000000Ab14
             level: 2
             hasChildren: false
-            edgeId: null
-            edgeKey: a0Bg8000000Ab16EAC
+            targetKey: a0Bg8000000Ab16EAC
             ciId: null
             detail:
               ciKind: assembly-edge
@@ -5822,8 +5775,7 @@ components:
             parentRowKey: a0Bg8000000Ab14
             level: 2
             hasChildren: false
-            edgeId: null
-            edgeKey: a0Bg8000000Ab17EAC
+            targetKey: a0Bg8000000Ab17EAC
             ciId: null
             detail:
               ciKind: assembly-edge
@@ -5886,8 +5838,7 @@ components:
             parentRowKey: null
             level: 1
             hasChildren: false
-            edgeId: a1Gg8000000AbF1EAK
-            edgeKey: a0Bg8000000Ab10EAC
+            targetKey: a0Bg8000000Ab10EAC
             ciId: a1Gg8000000AbF1EAK
             detail:
               ciKind: assembly-edge
@@ -5918,8 +5869,7 @@ components:
             parentRowKey: null
             level: 1
             hasChildren: false
-            edgeId: a1Gg8000000AbF2EAK
-            edgeKey: a0Bg8000000Ab11EAC
+            targetKey: a0Bg8000000Ab11EAC
             ciId: a1Gg8000000AbF2EAK
             detail:
               ciKind: assembly-edge
@@ -5950,8 +5900,7 @@ components:
             parentRowKey: null
             level: 1
             hasChildren: false
-            edgeId: a1Gg8000000AbF9EAK
-            edgeKey: 'ci-a1Gg8000000AbF9EAK'
+            targetKey: 'ci-a1Gg8000000AbF9EAK'
             ciId: a1Gg8000000AbF9EAK
             detail:
               ciKind: assembly-edge
@@ -5982,8 +5931,7 @@ components:
             parentRowKey: null
             level: 1
             hasChildren: false
-            edgeId: a1Gg8000000AbF3EAK
-            edgeKey: a0Bg8000000Ab12EAC
+            targetKey: a0Bg8000000Ab12EAC
             ciId: a1Gg8000000AbF3EAK
             detail:
               ciKind: assembly-edge
@@ -6034,8 +5982,7 @@ components:
             parentRowKey: null
             level: 1
             hasChildren: false
-            edgeId: a1Gg8000000AbF1EAK
-            edgeKey: a0Bg8000000Ab10EAC
+            targetKey: a0Bg8000000Ab10EAC
             ciId: a1Gg8000000AbF1EAK
             detail:
               ciKind: assembly-edge
@@ -6087,8 +6034,7 @@ components:
             parentRowKey: null
             level: 1
             hasChildren: false
-            edgeId: null
-            edgeKey: a0Bg8000000Ab10EAC
+            targetKey: a0Bg8000000Ab10EAC
             ciId: null
             detail:
               ciKind: assembly-edge
@@ -6119,8 +6065,7 @@ components:
             parentRowKey: null
             level: 1
             hasChildren: false
-            edgeId: null
-            edgeKey: a0Bg8000000Ab11EAC
+            targetKey: a0Bg8000000Ab11EAC
             ciId: null
             detail:
               ciKind: assembly-edge
@@ -6151,8 +6096,7 @@ components:
             parentRowKey: null
             level: 1
             hasChildren: false
-            edgeId: null
-            edgeKey: a0Bg8000000Ab12EAC
+            targetKey: a0Bg8000000Ab12EAC
             ciId: null
             detail:
               ciKind: assembly-edge
@@ -6273,8 +6217,6 @@ components:
             errorCode: null
             message: null
             ciId: a1Gg8000000AbF1EAK
-            edgeId: a1Gg8000000AbF1EAK
-            forked: null
             claimed: null
           - index: 1
             clientRef: row-bracket
@@ -6283,8 +6225,6 @@ components:
             errorCode: null
             message: null
             ciId: a1Gg8000000AbF2EAK
-            edgeId: a1Gg8000000AbF2EAK
-            forked: null
             claimed: null
         snapshot: 's2.MjAyNi0wNC0wNVQxNzoyMjowNVp8NDM'
         invalidatedParentRowKeys: ['']
@@ -6304,8 +6244,6 @@ components:
             errorCode: null
             message: null
             ciId: a1Gg8000000AbF2EAK
-            edgeId: a1Gg8000000AbF2EAK
-            forked: null
             claimed: null
           - index: 1
             clientRef: will-fail
@@ -6314,16 +6252,14 @@ components:
             errorCode: CLAIM_REQUIRED
             message: 'This row is supplied by the source and read-only. Claim it before editing. (claim Assembly__c a0Bg8000000Ab12EAC before revising it)'
             ciId: null
-            edgeId: null
-            forked: null
             claimed: null
         snapshot: 's2.MjAyNi0wNC0wNVQxNzoyNToxMVp8NDQ'
         invalidatedParentRowKeys: ['']
 
-    DeltaBatchForked:
+    DeltaBatchUpdated:
       description: |
         An update of a row the branch already owns. It appends a new log row that supersedes the
-        current one, so `forked` is `true`, as on every update that writes.
+        current one.
       value:
         branchId: a1Bg8000000AbCdEAK
         atomic: true
@@ -6338,8 +6274,6 @@ components:
             errorCode: null
             message: null
             ciId: a1Gg8000000AbF1EAK
-            edgeId: a1Gg8000000AbF1EAK
-            forked: true
             claimed: null
         snapshot: 's2.MjAyNi0wNC0wNlQxNTowMjowMFp8NDU'
         invalidatedParentRowKeys: ['']
@@ -6348,8 +6282,7 @@ components:
       summary: update with autoClaim on a base line
       description: |
         One operation claimed the line and revised its quantity. `claimed: true` is the
-        after-the-fact disclosure. `forked` is null because the claim wrote the line's first
-        branch row, which supersedes nothing.
+        after-the-fact disclosure.
       value:
         branchId: a1Bg8000000AbCdEAK
         atomic: true
@@ -6364,8 +6297,6 @@ components:
             errorCode: null
             message: null
             ciId: a1Gg8000000AbF2EAK
-            edgeId: a1Gg8000000AbF2EAK
-            forked: null
             claimed: true
         snapshot: 's2.MjAyNi0wNC0wNVQxNzoyNDo0MFp8NDY'
         invalidatedParentRowKeys: ['']
@@ -6374,7 +6305,7 @@ components:
       summary: An update that changed a claim's stored revision
       description: |
         A new log row was appended, with the row's quantity and find number carried forward. It
-        supersedes the row's current branch row, so `forked` is `true`.
+        supersedes the row's current branch row.
       value:
         branchId: a1Bg8000000AbCdEAK
         atomic: true
@@ -6389,8 +6320,6 @@ components:
             errorCode: null
             message: null
             ciId: a1Gg8000000AbF1EAK
-            edgeId: a1Gg8000000AbF1EAK
-            forked: true
             claimed: null
         snapshot: 's2.MjAyNi0wNC0wNlQxNToxMDowMFp8NDc'
         invalidatedParentRowKeys: ['']
@@ -6407,8 +6336,6 @@ components:
             errorCode: CLAIM_REQUIRED
             message: 'This row is supplied by the source and read-only. Claim it before editing. (claim Assembly__c a0Bg8000000Ab12EAC before revising it)'
             ciId: null
-            edgeId: null
-            forked: null
             claimed: null
           - index: 2
             clientRef: also-fails
@@ -6417,8 +6344,6 @@ components:
             errorCode: ALREADY_EXCLUDED
             message: 'This row is already excluded from this configuration. Restore it first if you want to change it. (edge a0Bg8000000Ab13EAC is already excluded)'
             ciId: null
-            edgeId: null
-            forked: null
             claimed: null
 
     DeltaBatchRevisionChoiceRequired:
@@ -6434,8 +6359,6 @@ components:
             errorCode: REVISION_CHOICE_REQUIRED
             message: "Choose how this line's part revision behaves: pick a specific revision to hold, or leave it to follow the timepoint in effect. (claim requires childItemRevisionId or trackChildRevision: true)"
             ciId: null
-            edgeId: null
-            forked: null
             claimed: null
 
     ConcurrentWrite:
@@ -6456,8 +6379,6 @@ components:
             errorCode: INVALID_REQUEST
             message: 'That request could not be read. Check that the body is valid JSON and that every required value is supplied. (unknown op claimm)'
             ciId: null
-            edgeId: null
-            forked: null
             claimed: null
 
     StructureTooLarge:
@@ -6479,8 +6400,7 @@ components:
             parentRowKey: null
             level: 1
             hasChildren: false
-            edgeId: null
-            edgeKey: null
+            targetKey: null
             ciId: null
             detail:
               ciKind: assembly-edge
@@ -6530,8 +6450,7 @@ components:
             parentRowKey: null
             level: 1
             hasChildren: false
-            edgeId: null
-            edgeKey: null
+            targetKey: null
             ciId: null
             detail:
               ciKind: assembly-edge
@@ -6661,12 +6580,12 @@ components:
             message: 'The newer revision removes a member you changed. Choose whether to keep it as your own content or remove it.'
             target:
               ciKind: assembly-edge
-              edgeId: a1Gg8000000AbF3EAK
+              ciId: a1Gg8000000AbF3EAK
               edgeKey: a0Bg8000000Ab12EAC
               label: Harness-011
               rowKey: a0Bg8000000Ab12
               path:
-                - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
+                - { ciKind: source, label: Assy-100, ciId: null, edgeKey: null }
             current:
               provenance: claiming
               governingClock: branch
@@ -6694,12 +6613,12 @@ components:
             message: 'The source assembly moves to a newer released revision.'
             target:
               ciKind: source
-              edgeId: null
+              ciId: null
               edgeKey: null
               label: Assy-100
               rowKey: null
               path:
-                - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
+                - { ciKind: source, label: Assy-100, ciId: null, edgeKey: null }
             current: null
             candidate: null
 
@@ -6713,12 +6632,12 @@ components:
             message: 'This member resolves differently at the newer source timepoint. Nothing to decide: a revision is an outcome of the timepoint, not a value you can set.'
             target:
               ciKind: assembly-edge
-              edgeId: null
+              ciId: null
               edgeKey: a0Bg8000000Ab11EAC
               label: Bracket-005
               rowKey: a0Bg8000000Ab11
               path:
-                - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
+                - { ciKind: source, label: Assy-100, ciId: null, edgeKey: null }
             current:
               provenance: base
               governingClock: source
@@ -6760,12 +6679,12 @@ components:
             message: "Your change to this member is kept, and the newer revision's version of it is suppressed."
             target:
               ciKind: assembly-edge
-              edgeId: a1Gg8000000AbF1EAK
+              ciId: a1Gg8000000AbF1EAK
               edgeKey: a0Bg8000000Ab10EAC
               label: Motor-002
               rowKey: a0Bg8000000Ab10
               path:
-                - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
+                - { ciKind: source, label: Assy-100, ciId: null, edgeKey: null }
             current:
               provenance: claiming
               governingClock: branch
@@ -6807,12 +6726,12 @@ components:
             message: 'The newer revision adds this member. It comes in automatically.'
             target:
               ciKind: assembly-edge
-              edgeId: null
+              ciId: null
               edgeKey: a0Bg8000000Ab13EAC
               label: Panel-300
               rowKey: null
               path:
-                - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
+                - { ciKind: source, label: Assy-100, ciId: null, edgeKey: null }
             current: null
             candidate:
               provenance: base
@@ -6840,12 +6759,12 @@ components:
             message: 'The newer revision now supplies exactly what you added locally, so your local addition is retired automatically.'
             target:
               ciKind: assembly-edge
-              edgeId: a1Gg8000000AbF5EAK
+              ciId: a1Gg8000000AbF5EAK
               edgeKey: 'ci-a1Gg8000000AbF5EAK'
               label: Label-400
               rowKey: Hb3nYc8Pf1sJ6uWe
               path:
-                - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
+                - { ciKind: source, label: Assy-100, ciId: null, edgeKey: null }
             current:
               provenance: new
               governingClock: branch
@@ -6940,12 +6859,12 @@ components:
             message: 'The source assembly moves to a newer released revision.'
             target:
               ciKind: source
-              edgeId: null
+              ciId: null
               edgeKey: null
               label: Assy-100
               rowKey: null
               path:
-                - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
+                - { ciKind: source, label: Assy-100, ciId: null, edgeKey: null }
             current: null
             candidate: null
           - entryId: '8a3e5f09c2d71b64'
@@ -6958,12 +6877,12 @@ components:
             message: "Your change to this member is kept, and the newer revision's version of it is suppressed."
             target:
               ciKind: assembly-edge
-              edgeId: a1Gg8000000AbF1EAK
+              ciId: a1Gg8000000AbF1EAK
               edgeKey: a0Bg8000000Ab10EAC
               label: Motor-002
               rowKey: a0Bg8000000Ab10
               path:
-                - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
+                - { ciKind: source, label: Assy-100, ciId: null, edgeKey: null }
             current:
               provenance: claiming
               governingClock: branch
@@ -7004,12 +6923,12 @@ components:
             message: 'The newer revision now matches your change to this member, so your change no longer alters anything.'
             target:
               ciKind: assembly-edge
-              edgeId: a1Gg8000000AbF2EAK
+              ciId: a1Gg8000000AbF2EAK
               edgeKey: a0Bg8000000Ab11EAC
               label: Bracket-005
               rowKey: a0Bg8000000Ab11
               path:
-                - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
+                - { ciKind: source, label: Assy-100, ciId: null, edgeKey: null }
             current:
               provenance: claiming
               governingClock: branch
@@ -7102,12 +7021,12 @@ components:
             message: "Your change to this member is kept, and the newer revision's version of it is suppressed."
             target:
               ciKind: assembly-edge
-              edgeId: a1Gg8000000AbF1EAK
+              ciId: a1Gg8000000AbF1EAK
               edgeKey: a0Bg8000000Ab10EAC
               label: Motor-002
               rowKey: a0Bg8000000Ab10
               path:
-                - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
+                - { ciKind: source, label: Assy-100, ciId: null, edgeKey: null }
             current:
               provenance: claiming
               governingClock: branch
@@ -7148,12 +7067,12 @@ components:
             message: 'The newer revision adds a member this branch already provides itself. Your own version is kept.'
             target:
               ciKind: assembly-edge
-              edgeId: a1Gg8000000AbF5EAK
+              ciId: a1Gg8000000AbF5EAK
               edgeKey: 'ci-a1Gg8000000AbF5EAK'
               label: Label-400
               rowKey: Hb3nYc8Pf1sJ6uWe
               path:
-                - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
+                - { ciKind: source, label: Assy-100, ciId: null, edgeKey: null }
             current:
               provenance: new
               governingClock: branch
@@ -7194,12 +7113,12 @@ components:
             message: 'The newer revision now matches your change to this member, so your change no longer alters anything.'
             target:
               ciKind: assembly-edge
-              edgeId: a1Gg8000000AbF2EAK
+              ciId: a1Gg8000000AbF2EAK
               edgeKey: a0Bg8000000Ab11EAC
               label: Bracket-005
               rowKey: a0Bg8000000Ab11
               path:
-                - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
+                - { ciKind: source, label: Assy-100, ciId: null, edgeKey: null }
             current:
               provenance: claiming
               governingClock: branch
@@ -7320,11 +7239,11 @@ components:
             message: 'The newer revision removes a member you changed. Choose whether to keep it as your own content or remove it.'
             target:
               ciKind: assembly-edge
-              edgeId: a1Gg8000000AbF3EAK
+              ciId: a1Gg8000000AbF3EAK
               edgeKey: a0Bg8000000Ab12EAC
               label: Harness-011
               rowKey: a0Bg8000000Ab12
-              path: [{ ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }]
+              path: [{ ciKind: source, label: Assy-100, ciId: null, edgeKey: null }]
           - entryId: '5c1e0a77f9b34d20'
             kind: source-version-advance
             decision: informational
@@ -7334,7 +7253,7 @@ components:
               ciKind: source
               label: Assy-100
               rowKey: null
-              path: [{ ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }]
+              path: [{ ciKind: source, label: Assy-100, ciId: null, edgeKey: null }]
         warnings: []
         page:
           limit: 2
@@ -7357,17 +7276,17 @@ components:
             kind: claim-orphaned
             action: convert-to-native
             acceptedFields: null
-            edgeId: a1Gg8000000AbF3EAK
+            ciId: a1Gg8000000AbF3EAK
           - entryId: 'e3f19a4c8b2d6071'
             kind: claim-retained
             action: null
             acceptedFields: null
-            edgeId: a1Gg8000000AbF1EAK
+            ciId: a1Gg8000000AbF1EAK
           - entryId: '2d6be1470f83a9c5'
             kind: member-add-converged
             action: retired
             acceptedFields: null
-            edgeId: a1Gg8000000AbF5EAK
+            ciId: a1Gg8000000AbF5EAK
 
     PullCommitAcceptedFields:
       summary: Per-field decisions applied
@@ -7392,17 +7311,17 @@ components:
             kind: claim-retained
             action: accept-fields
             acceptedFields: { childItemRevisionId: candidate }
-            edgeId: a1Gg8000000AbF1EAK
+            ciId: a1Gg8000000AbF1EAK
           - entryId: 'c7d42a9e0b15f386'
             kind: member-add-collision
             action: accept-fields
             acceptedFields: { quantity: candidate }
-            edgeId: a1Gg8000000AbF5EAK
+            ciId: a1Gg8000000AbF5EAK
           - entryId: '3b91c7e0d5a2f846'
             kind: claim-superseded
             action: release
             acceptedFields: null
-            edgeId: a1Gg8000000AbF2EAK
+            ciId: a1Gg8000000AbF2EAK
 
     PullCommitAlreadyCurrent:
       value:
@@ -7513,12 +7432,12 @@ components:
             message: 'The two sides resolve the top-level assembly at different revisions. (Assy-100)'
             target:
               ciKind: source
-              edgeId: null
+              ciId: null
               edgeKey: null
               label: Assy-100
               rowKey: null
               path:
-                - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
+                - { ciKind: source, label: Assy-100, ciId: null, edgeKey: null }
             left:
               provenance: base
               governingClock: source
@@ -7556,12 +7475,12 @@ components:
             message: 'This member is on both sides, and its content differs. The listed fields are the ones that disagree. (Motor-002)'
             target:
               ciKind: assembly-edge
-              edgeId: a1Gg8000000AbF1EAK
+              ciId: a1Gg8000000AbF1EAK
               edgeKey: a0Bg8000000Ab10EAC
               label: Motor-002
               rowKey: a0Bg8000000Ab10
               path:
-                - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
+                - { ciKind: source, label: Assy-100, ciId: null, edgeKey: null }
             left:
               # Claimed, so the branch has spoken about this edge and it answers to the BRANCH
               # clock from then on — which is what `governingClock: branch` states here.
@@ -7601,12 +7520,12 @@ components:
             message: 'This member is present on the left side only. (Harness-011)'
             target:
               ciKind: assembly-edge
-              edgeId: null
+              ciId: null
               edgeKey: a0Bg8000000Ab12EAC
               label: Harness-011
               rowKey: a0Bg8000000Ab12
               path:
-                - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
+                - { ciKind: source, label: Assy-100, ciId: null, edgeKey: null }
             left:
               provenance: base
               governingClock: source
@@ -7630,12 +7549,12 @@ components:
             message: 'This member is present on the right side only. (Panel-300)'
             target:
               ciKind: assembly-edge
-              edgeId: null
+              ciId: null
               edgeKey: a0Bg8000000Ab13EAC
               label: Panel-300
               rowKey: null
               path:
-                - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
+                - { ciKind: source, label: Assy-100, ciId: null, edgeKey: null }
             left: null
             right:
               provenance: base
@@ -7707,12 +7626,12 @@ components:
             message: 'The two sides resolve the top-level assembly at different revisions. (Assy-100)'
             target:
               ciKind: source
-              edgeId: null
+              ciId: null
               edgeKey: null
               label: Assy-100
               rowKey: null
               path:
-                - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
+                - { ciKind: source, label: Assy-100, ciId: null, edgeKey: null }
             left:
               provenance: base
               governingClock: source
@@ -7750,12 +7669,12 @@ components:
             message: 'This member is on both sides, and its content differs. The listed fields are the ones that disagree. (Motor-002)'
             target:
               ciKind: assembly-edge
-              edgeId: a1Gg8000000AbF1EAK
+              ciId: a1Gg8000000AbF1EAK
               edgeKey: a0Bg8000000Ab10EAC
               label: Motor-002
               rowKey: a0Bg8000000Ab10
               path:
-                - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
+                - { ciKind: source, label: Assy-100, ciId: null, edgeKey: null }
             left:
               provenance: claiming
               governingClock: branch
@@ -7796,12 +7715,12 @@ components:
             message: 'This member is on both sides and is identical. (Bracket-005)'
             target:
               ciKind: assembly-edge
-              edgeId: null
+              ciId: null
               edgeKey: a0Bg8000000Ab11EAC
               label: Bracket-005
               rowKey: a0Bg8000000Ab11
               path:
-                - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
+                - { ciKind: source, label: Assy-100, ciId: null, edgeKey: null }
             left:
               provenance: base
               governingClock: source
@@ -7839,12 +7758,12 @@ components:
             message: 'This member is present on the left side only. (Harness-011)'
             target:
               ciKind: assembly-edge
-              edgeId: null
+              ciId: null
               edgeKey: a0Bg8000000Ab12EAC
               label: Harness-011
               rowKey: a0Bg8000000Ab12
               path:
-                - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
+                - { ciKind: source, label: Assy-100, ciId: null, edgeKey: null }
             left:
               provenance: base
               governingClock: source
@@ -7868,12 +7787,12 @@ components:
             message: 'This member is present on the right side only. (Panel-300)'
             target:
               ciKind: assembly-edge
-              edgeId: null
+              ciId: null
               edgeKey: a0Bg8000000Ab13EAC
               label: Panel-300
               rowKey: null
               path:
-                - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
+                - { ciKind: source, label: Assy-100, ciId: null, edgeKey: null }
             left: null
             right:
               provenance: base
@@ -7943,12 +7862,12 @@ components:
             message: 'The two sides resolve the top-level assembly at different revisions. (Assy-100)'
             target:
               ciKind: source
-              edgeId: null
+              ciId: null
               edgeKey: null
               label: Assy-100
               rowKey: null
               path:
-                - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
+                - { ciKind: source, label: Assy-100, ciId: null, edgeKey: null }
             left:
               provenance: base
               governingClock: source
@@ -7986,12 +7905,12 @@ components:
             message: 'This member is on both sides, and its content differs. The listed fields are the ones that disagree. (Motor-002)'
             target:
               ciKind: assembly-edge
-              edgeId: a1Gg8000000AbF1EAK
+              ciId: a1Gg8000000AbF1EAK
               edgeKey: a0Bg8000000Ab10EAC
               label: Motor-002
               rowKey: a0Bg8000000Ab10
               path:
-                - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
+                - { ciKind: source, label: Assy-100, ciId: null, edgeKey: null }
             left:
               provenance: claiming
               governingClock: branch
