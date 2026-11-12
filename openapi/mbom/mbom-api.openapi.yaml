@@ -3100,6 +3100,13 @@ components:
         isReplaced:
           type: boolean
           description: True when this row stands in for another (`replace`). Populated on baseline rows too — a null would render a substituted part identically to an ordinary one.
+        isSuperseded:
+          type: boolean
+          description: |
+            True on an excluded row that a live substitute now stands in for: the other side of
+            `isReplaced`. `restore` refuses such a row with `ALREADY_PRESENT` until the substitute
+            is excluded, so a UI should not offer Restore on it. Defaults to `false`; always `false`
+            on baseline rows, which filter excluded rows out.
         isEditable:
           type: boolean
           description: |
@@ -4896,6 +4903,7 @@ components:
             isClaimed: true
             isExcluded: false
             isReplaced: false
+            isSuperseded: false
             isEditable: true
             hasChosenRevision: false
             wasClaimed: false
@@ -4927,6 +4935,7 @@ components:
             isClaimed: false
             isExcluded: false
             isReplaced: false
+            isSuperseded: false
             isEditable: true
             hasChosenRevision: false
             wasClaimed: false
@@ -4958,6 +4967,7 @@ components:
             isClaimed: true
             isExcluded: true
             isReplaced: false
+            isSuperseded: false
             isEditable: true
             hasChosenRevision: false
             wasClaimed: false
@@ -4989,6 +4999,7 @@ components:
             isClaimed: false
             isExcluded: false
             isReplaced: false
+            isSuperseded: false
             isEditable: true
             hasChosenRevision: false
             wasClaimed: false
@@ -5039,6 +5050,7 @@ components:
             isClaimed: true
             isExcluded: false
             isReplaced: false
+            isSuperseded: false
             isEditable: true
             hasChosenRevision: false
             wasClaimed: false
@@ -5070,6 +5082,7 @@ components:
             isClaimed: false
             isExcluded: false
             isReplaced: false
+            isSuperseded: false
             isEditable: true
             hasChosenRevision: false
             wasClaimed: false
@@ -5122,6 +5135,7 @@ components:
             isClaimed: false
             isExcluded: false
             isReplaced: false
+            isSuperseded: false
             isEditable: false
             hasChosenRevision: false
             wasClaimed: false
@@ -5153,6 +5167,7 @@ components:
             isClaimed: false
             isExcluded: false
             isReplaced: false
+            isSuperseded: false
             isEditable: false
             hasChosenRevision: false
             wasClaimed: false
@@ -5218,6 +5233,7 @@ components:
             isClaimed: true
             isExcluded: false
             isReplaced: false
+            isSuperseded: false
             isEditable: true
             hasChosenRevision: false
             wasClaimed: false
@@ -5253,6 +5269,7 @@ components:
             isClaimed: false
             isExcluded: false
             isReplaced: false
+            isSuperseded: false
             isEditable: true
             hasChosenRevision: false
             wasClaimed: false
@@ -5288,6 +5305,7 @@ components:
             isClaimed: true
             isExcluded: true
             isReplaced: false
+            isSuperseded: false
             isEditable: true
             hasChosenRevision: false
             wasClaimed: false
@@ -5323,6 +5341,7 @@ components:
             isClaimed: false
             isExcluded: false
             isReplaced: false
+            isSuperseded: false
             isEditable: true
             hasChosenRevision: false
             wasClaimed: false
@@ -5377,6 +5396,7 @@ components:
             isClaimed: true
             isExcluded: false
             isReplaced: false
+            isSuperseded: false
             isEditable: true
             hasChosenRevision: true
             wasClaimed: false
@@ -5408,6 +5428,7 @@ components:
             isClaimed: false
             isExcluded: false
             isReplaced: false
+            isSuperseded: false
             isEditable: false
             hasChosenRevision: false
             wasClaimed: false
@@ -5439,6 +5460,7 @@ components:
             isClaimed: false
             isExcluded: false
             isReplaced: false
+            isSuperseded: false
             isEditable: false
             hasChosenRevision: false
             wasClaimed: false
@@ -5502,6 +5524,7 @@ components:
             isClaimed: true
             isExcluded: false
             isReplaced: false
+            isSuperseded: false
             isEditable: true
             hasChosenRevision: true
             wasClaimed: false
@@ -5533,6 +5556,7 @@ components:
             isClaimed: true
             isExcluded: false
             isReplaced: false
+            isSuperseded: false
             isEditable: true
             hasChosenRevision: false
             wasClaimed: false
@@ -5564,6 +5588,7 @@ components:
             isClaimed: false
             isExcluded: false
             isReplaced: false
+            isSuperseded: false
             isEditable: true
             hasChosenRevision: false
             wasClaimed: false
@@ -5595,6 +5620,7 @@ components:
             isClaimed: false
             isExcluded: false
             isReplaced: false
+            isSuperseded: false
             isEditable: true
             hasChosenRevision: true
             wasClaimed: true
@@ -5646,6 +5672,7 @@ components:
             isClaimed: true
             isExcluded: false
             isReplaced: false
+            isSuperseded: false
             isEditable: true
             hasChosenRevision: true
             wasClaimed: false
@@ -5698,6 +5725,7 @@ components:
             isClaimed: false
             isExcluded: false
             isReplaced: false
+            isSuperseded: false
             isEditable: true
             hasChosenRevision: false
             wasClaimed: false
@@ -5729,6 +5757,7 @@ components:
             isClaimed: false
             isExcluded: false
             isReplaced: false
+            isSuperseded: false
             isEditable: true
             hasChosenRevision: false
             wasClaimed: false
@@ -5760,6 +5789,7 @@ components:
             isClaimed: false
             isExcluded: false
             isReplaced: false
+            isSuperseded: false
             isEditable: true
             hasChosenRevision: false
             wasClaimed: false
@@ -6084,6 +6114,7 @@ components:
             isClaimed: true
             isExcluded: false
             isReplaced: false
+            isSuperseded: false
             isEditable: true
             hasChosenRevision: false
             wasClaimed: false
@@ -6135,6 +6166,7 @@ components:
             isClaimed: true
             isExcluded: false
             isReplaced: false
+            isSuperseded: false
             isEditable: true
             hasChosenRevision: true
             wasClaimed: false
