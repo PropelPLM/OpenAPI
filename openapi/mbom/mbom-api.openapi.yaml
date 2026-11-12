@@ -56,7 +56,10 @@ info:
     A row's **child revision** can also be the caller's explicit choice rather than any clock's
     output. Every operation that creates or takes over a row (`claim`, `add`, `replace`,
     `convert-to-native`) accepts a `childItemRevisionId`; a row that stores one is **pinned** and
-    renders exactly that revision whatever T_R or `asOf` say. A row that stores none **tracks**:
+    renders exactly that revision whatever T_R or `asOf` say.
+    (**🚧 Planned — MVP-30378, not yet implemented.** `set-revision` changes or clears it
+    afterwards.) A row that stores none
+    **tracks**:
 
     | Row | Stored revision | Child revision it renders |
     |---|---|---|
@@ -83,6 +86,8 @@ info:
 
     A `base` row is read-only. Editing it is refused with `CLAIM_REQUIRED`, carrying the eBOM
     line id so the client can offer the claim. Divergence from upstream is always an explicit act.
+    (**🚧 Planned — MVP-30377, not yet implemented.** `update` with `autoClaim: true` claims and
+    revises in one operation. It is still explicit, and the result reports `claimed: true`.)
 
     ### 6. Nothing is ever deleted
 
@@ -96,6 +101,8 @@ info:
     **re-resolves** the branch at that timestamp. Two stored counts act as canaries if something the
     resolution depends on has moved since — `BASELINE_COUNT_DRIFT` for the row count, and
     `BASELINE_PROVENANCE_DRIFT` for how many of those rows are the branch's own claims.
+    (**🚧 Planned — MVP-30375, not yet implemented.** A third, `BASELINE_PIN_DRIFT`, for how many
+    rows hold an explicitly chosen revision.)
 
     ### 8. "Pull", not "merge"
 
@@ -150,6 +157,37 @@ info:
     There is **no `branchId` path segment on the source endpoints**: a source already names its
     owning branch. `branchId` still appears in the pull-preview *body*, denormalised for display.
 
+    ---
+
+    ## Planned changes (not yet implemented)
+
+    This version of the contract also describes tickets that are **designed but not built**, so
+    their test cases can be written ahead of the code. Nothing below is live yet:
+
+    - Every planned operation, schema, property or parameter carries
+      `x-planned: { ticket, assumptions }`, and its description opens with
+      **🚧 Planned — MVP-xxxxx, not yet implemented.**
+    - A planned value added to an existing enum is listed in the enum. The enum's description
+      has a `Value | Status` table saying which values are planned.
+    - Behaviour changes to existing elements are called out inline with the same banner.
+    - Where a ticket left a design question open, the answer assumed here is recorded in the
+      assumptions ledger, `docs/architecture/cm/cm-api-planned-assumptions.md` (PLM repo), under
+      an ID like `A-30378-2`. Each passage that depends on an answer cites its ID.
+    - Each planned example shows **only its own ticket's surface**. Other tickets' planned fields
+      are left out, so an example still matches its ticket if that ticket ships alone. Once
+      several have shipped, a real response carries all of their fields (for example, a
+      `STORED_REVISION_RETIRED` tree also carries `isPinned`).
+
+    When a ticket ships, remove its markers: grep for its key.
+
+    | Ticket | Surface it adds or changes |
+    |---|---|
+    | [MVP-30375](https://propelplm.atlassian.net/browse/MVP-30375) | `TreeRow.isPinned` and `TreeRow.wasClaimed` on every tree read. `TreeRow.pinnedById` / `pinnedAt` on baseline rows. A `BASELINE_PIN_DRIFT` warning on the baseline read. |
+    | [MVP-30376](https://propelplm.atlassian.net/browse/MVP-30376) | A `STORED_REVISION_RETIRED` warning on the branch tree read, one per row whose chosen revision is now Cancelled or Expired. The revision still renders. |
+    | [MVP-30377](https://propelplm.atlassian.net/browse/MVP-30377) | `DeltaOperation.autoClaim` on `update`, which claims and revises a `base` edge in one operation and carries the same revision choice as `claim`. `DeltaResult.claimed` reports it. |
+    | [MVP-30378](https://propelplm.atlassian.net/browse/MVP-30378) | A `set-revision` delta op that sets, changes or clears a stored child revision, with clearing spelled `trackChildRevision: true`. An optional `accept-source-revision` pull action on a retargeted `claim-retained` entry. `DiffEntry.revisionAdvances`. `update` refuses a `childItemRevisionId`, and `update` / `set-revision` reach a row hidden behind a pin by `assemblyCiId`. |
+    | [MVP-30379](https://propelplm.atlassian.net/browse/MVP-30379) | Per-field pull decisions: `PullCommitRequest.decisions[].acceptedFields`, with `candidate` / `release` per field. Optional `accept-fields` on `claim-retained` and `member-add-collision`, and `release` on `claim-superseded`. `claim-orphaned` stays the only required decision. |
+
   contact:
     name: Propel PLM Engineering
   license:
@@ -167,6 +205,13 @@ info:
     comparison: MVP-30296
     vocabularyRename: MVP-30309
     revisionChoice: MVP-30357
+    perOccurrencePins: MVP-30214
+    # 🚧 planned, not yet implemented; see info.description "Planned changes".
+    overrideDisclosure: MVP-30375
+    retiredStoredRevision: MVP-30376
+    autoClaim: MVP-30377
+    setRevision: MVP-30378
+    perFieldDecisions: MVP-30379
   x-design-doc: docs/architecture/mbom/mbom-pull-api.md
   x-demo-plan: docs/architecture/mbom/mbom-demo-test-plan.md
 
@@ -368,9 +413,42 @@ paths:
           it are suppressed. A branch edit sitting on one of those suppressed lines — a claim,
           exclusion, update or substitute, or an `add` under an item only the suppressed structure
           supplied — takes no effect, and the read says so with `PINNED_SUBTREE_HIDES_EDITS`
-          rather than failing. (When one item is rendered at two different revisions in the same
-          tree, it keeps the source's lines under both occurrences and is flagged
-          `MIXED_REVISION` instead — per-occurrence structure is not built yet.)
+          rather than failing.
+        - **Each occurrence renders its own structure (MVP-30214).** One item can render in two
+          places at two revisions — one occurrence pinned and another still at the source's
+          revision, or two pins. Each occurrence follows its own revision: a pinned occurrence
+          renders that revision's `nested` rows beneath it, and an unpinned occurrence keeps the
+          source's lines. An edit on a suppressed line is hidden only when no occurrence still
+          renders that line, and `PINNED_SUBTREE_HIDES_EDITS` then names every pinned revision
+          that hid it. `MIXED_REVISION` still fires, never blocking. A branch `add` under such an
+          item binds to the item, not to one rendering: it appears under **every** occurrence,
+          with no warning of its own, and survives the parent advancing to a newer revision. No
+          field is added to the row. The occurrences themselves are told apart by `edgeKey` and
+          `detail.parentItemId`; their children are not, in the flat shape (see below).
+        - **A row whose source line is gone renders only where the source's structure does
+          (MVP-30214).** A claim or exclusion on a line upstream has since removed (see
+          `claim-orphaned` on the pull) still hangs under its parent item, but only beneath an
+          occurrence showing the source's own structure of that item. Beneath a pinned row, or
+          inside a locally added or substituted assembly's `nested` copy of the item at another
+          revision, a different structure renders, so the row does not appear there. A copy at
+          the very revision the source renders is the same structure and shows it too.
+        - **A substitute never absorbs another line of its new child (MVP-30214).** When a
+          `replace` substitute's child item also has its own, unrelated eBOM line under the same
+          parent, both render. The substitute is its own row with its own
+          `replaces-{branchId}-{supersededEdgeKey}-{newChildItemId}` key, and the other line keeps
+          its own row and `edgeKey`. The ambiguous position match is declined rather than refused,
+          so this read never answers `AMBIGUOUS_CORRELATION`. If upstream later makes the same
+          substitution itself, two rows render — the substitute beside upstream's new line —
+          rather than one.
+        - **🚧 Planned — MVP-30375, not yet implemented.** **Every row says whether its revision was a
+          choice.** `isPinned` is true exactly when the row stores a chosen child revision. A
+          clock-resolved row that happens to resolve to the same revision is `false`. `wasClaimed`
+          marks a `new` row that `convert-to-native` flipped from `claiming`. Both follow the
+          explicit decision, not the structural pin above. [assumes A-30375-1, A-30375-2]
+        - **🚧 Planned — MVP-30376, not yet implemented.** **A dead chosen revision is warned about,
+          never replaced.** A row whose stored `childItemRevisionId` has since been Cancelled or
+          Expired still renders that revision, and the read raises one `STORED_REVISION_RETIRED`
+          per such row. This read is the only one that raises it. [assumes A-30376-2, A-30376-3]
         - **Unreachable rows are dropped.** A delta can name a parent item that is not in the tree —
           a subassembly whose item had nothing released at T_R drops out, and a claim beneath it
           survives the overlay as a row with an absent parent. This read walks down from the root and
@@ -383,6 +461,12 @@ paths:
 
         `flat=true` (the **default**) returns one row per edge, each carrying `detail.parentItemId` and an
         empty `childRows` — losslessly re-nestable by the client. `flat=false` nests via `childRows`.
+
+        The one exception is an item that renders at two revisions, each occurrence with its own
+        structure (above). The children of both occurrences name the same `parentItemId`, and a
+        flat row does not say which revision's line it is, so re-nesting by `parentItemId` hangs
+        every occurrence's children under each. Read such a tree with `flat=false`, which places
+        each row under the occurrence it belongs to.
 
         **The nested shape duplicates a shared subassembly; the flat shape does not.** The traversal
         walks a DAG and emits a shared subtree once; nesting re-materialises it under every parent
@@ -418,6 +502,12 @@ paths:
                 pinnedClaim:
                   summary: A claim pinned to another revision — its structure nested beneath, and a hidden edit warned
                   $ref: '#/components/examples/BranchTreePinnedClaim'
+                overrideBadges:
+                  summary: '🚧 MVP-30375 (planned) — isPinned / wasClaimed badges'
+                  $ref: '#/components/examples/BranchTreeOverrideBadges'
+                retiredStoredRevision:
+                  summary: '🚧 MVP-30376 (planned) — STORED_REVISION_RETIRED on a pinned row'
+                  $ref: '#/components/examples/BranchTreeRetiredStoredRevision'
         '400':
           description: |
             `ASOF_INVALID` — `asOf` could not be parsed. `ASOF_IN_FUTURE` — `asOf` is later than now;
@@ -494,7 +584,8 @@ paths:
       description: |
         The single write endpoint for editing a branch. Eight operations — `claim`, `update`, `add`,
         `exclude`, `restore`, `replace`, `revert`, `convert-to-native` — arrive in one array and are
-        applied under one envelope.
+        applied under one envelope. (**🚧 Planned — MVP-30378, not yet implemented.** A ninth,
+        `set-revision`.)
 
         **Returns `200`, not `201`**, even though rows are created: the response is a *report* on a
         set of operations, not a pointer to one new resource, and under `atomic: false` some of them
@@ -520,6 +611,12 @@ paths:
         on the update — and under the default `atomic: true` that rejects the whole batch.
 
         > **Dependent edits are two requests, not two operations.**
+
+        > **🚧 Planned — MVP-30377, not yet implemented.** The most common dependent pair, claim then
+        > change a quantity, becomes **one** operation:
+        > `{"op": "update", "ebomAssemblyId": "…", "quantity": 3, "autoClaim": true, "trackChildRevision": true}`.
+        > The batch still does not sequence, so `[claim(L), update(L)]` still answers
+        > `CLAIM_REQUIRED`. [assumes A-30377-1]
 
         ## `atomic` — the failure contract is yours to choose
 
@@ -563,6 +660,40 @@ paths:
         | `revert` | `ciId` **or** `ebomAssemblyId` | Discards the branch's claim so the row falls back to what its source supplies. Nothing on disk is touched — a `Revert` marker is appended and the fold drops it entirely. |
         | `convert-to-native` | `ciId`, and **exactly one of** `childItemRevisionId` \| `trackChildRevision: true` | Severs a claiming edge's link to the source it claims: same quantity and find number, but now branch-owned in its own right (`provenance` flips `claiming` → `new`). Appends an `Add` with `Claims_Source__c` null; the child revision is the caller's choice — a chosen revision is stamped on, `trackChildRevision: true` floats at `asOf`. |
 
+        > **🚧 Planned — MVP-30378, not yet implemented.** A ninth operation:
+        >
+        > | `op` | Required fields | What it does |
+        > |---|---|---|
+        > | `set-revision` | `assemblyCiId` **or** `ebomAssemblyId`, and **exactly one of** `childItemRevisionId` \| `trackChildRevision: true` | Sets, changes or **clears** a branch-owned row's stored child revision, keeping its quantity and find number. It always appends a new `CI_Rev__c` and never edits one in place. A `childItemRevisionId` **pins** the row. `trackChildRevision: true` **clears** the pin, and what the row then follows depends on the row. A cleared claim becomes a tracking claim: it renders its source line's revision at T_R and moves only when a pull accepts a newer source. A cleared `new` row or substitute floats at `asOf`. Setting a pin that differs from the source line's revision starts rendering that revision's structure beneath the row. Clearing it, or setting it back to the source line's revision, stops that, and any edits it hid render again. |
+        >
+        > It refuses the following, in this order:
+        >
+        > 1. `INVALID_REQUEST`: no id.
+        > 2. `REVISION_CHOICE_REQUIRED`: neither or both choice fields.
+        > 3. `NOT_FOUND`
+        > 4. `NOT_EDITABLE`: a nested row.
+        > 5. `NOT_SUPPLIED`: a tombstone.
+        > 6. `CLAIM_REQUIRED`: a row that is still `base`. There is nothing to store a revision on
+        >    until the branch owns the row.
+        > 7. `REVISION_ITEM_MISMATCH`
+        >
+        > Sending the revision the row already stores succeeds and writes nothing. `forked` is
+        > always null. A past `asOf` is tolerated, as on `update`.
+        > [assumes A-30378-1, A-30378-2, A-30378-8, A-30378-9]
+
+        > **🚧 Planned — MVP-30379, not yet implemented.** `set-revision` also takes an optional
+        > `quantity` and `findNumber`, applied partially as on `update`. One operation can then
+        > change a row's revision and its quantity together, which is what a pull's
+        > `accept-fields` compiles to when it accepts both. Restating the stored revision then
+        > writes nothing only if the quantity and find number are unchanged too (A-30378-8).
+        > [assumes A-30379-5]
+
+        > **🚧 Planned — MVP-30377, not yet implemented.** `update` gains an optional
+        > `autoClaim: true`. With it, the operation also needs **exactly one of**
+        > `childItemRevisionId` | `trackChildRevision: true`, and an update of a `base` edge claims
+        > and revises in one operation instead of answering `CLAIM_REQUIRED`. The result says so
+        > with `claimed: true`. See `DeltaOperation.autoClaim`. [assumes A-30377-1, A-30377-2]
+
         ### Choosing a child revision (MVP-30357)
 
         A stored revision must always mean somebody chose it, so the operations that create or take
@@ -573,7 +704,21 @@ paths:
         | `claim` | **pins** the claimed row to it | row **tracks** the source line — the revision its unclaimed self would render, at T_R, moving when a pull accepts a newer source | `422 REVISION_CHOICE_REQUIRED` | `422 REVISION_CHOICE_REQUIRED` |
         | `convert-to-native` | **stamped** onto the native row | nothing stored; the native row **floats** at `asOf`, like an `add` | `422 REVISION_CHOICE_REQUIRED` | `422 REVISION_CHOICE_REQUIRED` |
         | `add`, `replace` | **pins** the new row / substitute | ignored — blank already means track | the row **floats** at `asOf` (the default) | pins; the flag is ignored |
+        | 🚧 MVP-30377: `update` with `autoClaim: true`, on a `base` edge | claims and **pins** | claims and **tracks** | `422 REVISION_CHOICE_REQUIRED` | `422 REVISION_CHOICE_REQUIRED` |
+        | 🚧 MVP-30377: `update` with `autoClaim: true`, on an owned edge | accepted if equal to the stored revision, else `400 INVALID_REQUEST` naming `set-revision` | ignored | `422 REVISION_CHOICE_REQUIRED` | `422 REVISION_CHOICE_REQUIRED` |
         | every other op | ignored | ignored | — | — |
+
+        > **🚧 Planned — MVP-30377, not yet implemented.** The two `update` rows above are
+        > planned. [assumes A-30377-1]
+
+        > **🚧 Planned — MVP-30378, not yet implemented.** Two more rows change:
+        >
+        > | `op` | `childItemRevisionId` sent | `trackChildRevision: true` sent | Neither | Both |
+        > |---|---|---|---|---|
+        > | `set-revision` | **sets or changes** the pin | **clears** it | `422 REVISION_CHOICE_REQUIRED` | `422 REVISION_CHOICE_REQUIRED` |
+        > | `update` (without `autoClaim`) | `400 INVALID_REQUEST` naming `set-revision`, where today it is silently ignored | ignored | — | `400 INVALID_REQUEST` |
+        >
+        > [assumes A-30378-2, A-30378-6]
 
         - **There is no server-side "pin what I see".** To pin the revision the tree is showing, or
           to have a convert "keep what it shows", send back that row's own
@@ -584,6 +729,9 @@ paths:
           Otherwise `422 REVISION_ITEM_MISMATCH`. A revision you cannot see answers the same code
           as one that does not exist, so the check is not an existence oracle. Lifecycle
           (Cancelled / Expired) is **not** screened at write time.
+          **🚧 Planned — MVP-30376, not yet implemented.** It is not screened at write time then
+          either, because a revision can be cancelled long after it was chosen. The branch tree
+          read warns about it instead (`STORED_REVISION_RETIRED`). [assumes A-30376-2]
         - **Why `claim` no longer defaults.** Claiming a line to change its quantity used to pin its
           revision as a side effect, which silently also meant "never accept a new revision of
           this part" — two decisions, one of them invisible at the call site.
@@ -592,6 +740,10 @@ paths:
           [branch tree read](#operation/getBranchTree) and `PINNED_SUBTREE_HIDES_EDITS`.
         - Changing or clearing a revision after the row exists is not an operation this release
           offers.
+          **🚧 Planned — MVP-30378, not yet implemented.** `set-revision` changes or clears it
+          and keeps the row's quantity and find number. `convert-to-native` may still stamp **any**
+          revision of the child item, or switch to tracking. That is legitimate, and it is the
+          severing path. `set-revision` is the non-severing one. [assumes A-30378-1, A-30378-7]
 
         ### Addressing quirks worth knowing
 
@@ -604,6 +756,13 @@ paths:
         - `replace` only works on eBOM-derived rows. A `new` row has a synthetic `new-…` edge
           key and no `Assembly__c` line, so replacing branch-added content is `update`, or
           `exclude` plus `add`.
+        - A row **hidden behind a pin** (see `PINNED_SUBTREE_HIDES_EDITS`) is addressable by
+          `ciId` for `exclude`, `restore`, `revert` and `convert-to-native`. `update` and `claim`
+          answer `NOT_FOUND` for it.
+          **🚧 Planned — MVP-30378, not yet implemented.** `update` and `set-revision` addressed
+          by `assemblyCiId` find it too. Addressed by `ebomAssemblyId`, they still answer
+          `NOT_FOUND`. `claim` of a hidden line keeps answering `NOT_FOUND`: a line that renders
+          nowhere has nothing visible to claim. [assumes A-30378-5]
 
         ## Access
 
@@ -656,6 +815,35 @@ paths:
                       assemblyCiId: a1Eg8000000AbD1EAK
                       quantity: 4
                       findNumber: 10
+              updateAutoClaim:
+                summary: '🚧 MVP-30377 (planned) — claim a base line and change its quantity in one operation'
+                x-planned: { ticket: MVP-30377, assumptions: [A-30377-1] }
+                value:
+                  operations:
+                    - op: update
+                      clientRef: qty-in-one
+                      ebomAssemblyId: a0Bg8000000Ab11EAC
+                      quantity: 3
+                      autoClaim: true
+                      trackChildRevision: true
+              setRevisionPin:
+                summary: '🚧 MVP-30378 (planned) — change a claim''s stored revision, keeping its quantity'
+                x-planned: { ticket: MVP-30378, assumptions: [A-30378-1, A-30378-2] }
+                value:
+                  operations:
+                    - op: set-revision
+                      clientRef: take-rev-2
+                      assemblyCiId: a1Eg8000000AbD1EAK
+                      childItemRevisionId: a0Ag8000000Ab42EAC
+              setRevisionClear:
+                summary: '🚧 MVP-30378 (planned) — clear a pin; a claim then tracks its source line at T_R'
+                x-planned: { ticket: MVP-30378, assumptions: [A-30378-2] }
+                value:
+                  operations:
+                    - op: set-revision
+                      clientRef: stop-pinning
+                      assemblyCiId: a1Eg8000000AbD1EAK
+                      trackChildRevision: true
               addLocal:
                 summary: Add a part the eBOM never supplied
                 value:
@@ -729,6 +917,12 @@ paths:
                 forked:
                   summary: An update that had to fork a frozen revision
                   $ref: '#/components/examples/DeltaBatchForked'
+                autoClaimed:
+                  summary: '🚧 MVP-30377 (planned) — an update that claimed a base line'
+                  $ref: '#/components/examples/DeltaBatchAutoClaimed'
+                revisionSet:
+                  summary: '🚧 MVP-30378 (planned) — set-revision applied'
+                  $ref: '#/components/examples/DeltaBatchRevisionSet'
         '400':
           description: |
             `INVALID_REQUEST` — the body could not be read; or (under `atomic: true`) an operation
@@ -736,6 +930,13 @@ paths:
             an operation that refuses a past `asOf`.
 
             `ASOF_INVALID` / `ASOF_IN_FUTURE` — the batch's own `asOf`.
+
+            > **🚧 Planned — MVP-30377, not yet implemented.** Also `INVALID_REQUEST`: an `update`
+            > with `autoClaim: true` on an edge the branch already owns, sending a
+            > `childItemRevisionId` different from the stored one. Use `set-revision` to change it.
+            > An `update` with `autoClaim` on a `base` edge at a past `asOf` is refused too, as a
+            > `claim` is. On an owned edge a past `asOf` stays tolerated. [assumes A-30377-1,
+            > A-30377-5]
           content:
             application/json:
               schema: { $ref: '#/components/schemas/RestError' }
@@ -756,7 +957,7 @@ paths:
 
             | code | Cause | Remedy |
             |---|---|---|
-            | `CLAIM_REQUIRED` | a write targeted a `base` row | `claim` it first |
+            | `CLAIM_REQUIRED` | a write targeted a `base` row | `claim` it first — or, 🚧 once MVP-30377 ships, send the `update` with `autoClaim: true` [assumes A-30377-1] |
             | `ALREADY_CLAIMED` | `claim` on a row this branch already owns | edit it directly |
             | `ALREADY_EXCLUDED` | `exclude` on a tombstoned row; or `convert-to-native` of one, which has no content to retain | `restore` it first |
             | `NOT_EXCLUDED` | `restore` on a row that is not excluded | nothing to restore — your view is stale |
@@ -770,6 +971,10 @@ paths:
             *`NO_CLAIM` was `NO_OVERRIDE` before MVP-30309; `restore` of a row that is not excluded
             answered it too, and now has its own code — a row can be claiming and not excluded at
             once, so "no claim" would be false for exactly that row.*
+
+            > **🚧 Planned — MVP-30378, not yet implemented.** `set-revision` answers
+            > `CLAIM_REQUIRED` on a `base` row, `NOT_EDITABLE` on a nested one and `NOT_SUPPLIED` on
+            > a tombstone. [assumes A-30378-9]
           content:
             application/json:
               schema: { $ref: '#/components/schemas/RestError' }
@@ -808,6 +1013,11 @@ paths:
             target is named and before any claim or exclusion state: a `claim` of an
             already-claimed line that also chose nothing answers `REVISION_CHOICE_REQUIRED`, not
             `ALREADY_CLAIMED`. `REVISION_ITEM_MISMATCH` is checked after the state guards.
+
+            > **🚧 Planned — MVP-30378, not yet implemented.** Both codes also apply to
+            > `set-revision`. `REVISION_CHOICE_REQUIRED` means neither or both of
+            > `childItemRevisionId` and `trackChildRevision: true`. `REVISION_ITEM_MISMATCH` means a
+            > revision of a different item than the row's own child. [assumes A-30378-2, A-30378-9]
           content:
             application/json:
               schema: { $ref: '#/components/schemas/RestError' }
@@ -976,9 +1186,10 @@ paths:
 
         - **Excluded rows are filtered out.** A tree read renders a tombstone so the editor can see
           what was removed; a baseline is the record of what the branch *contained*.
-        - **`edgeId`, `edgeKey` and the per-row governing clock are suppressed** — a baseline row
-          does not pretend to answer questions it cannot. `isReplaced` **is** populated: leaving it
-          null would render a substituted part identically to an ordinary one.
+        - **`edgeId` and `edgeKey` are suppressed, and the per-row governing clock is collapsed** —
+          every row's `governingTimestamp` is the baseline's own `resolutionTimePoint`, never null. A
+          baseline row does not pretend to answer questions it cannot. `isReplaced` **is**
+          populated: leaving it null would render a substituted part identically to an ordinary one.
         - **`warnings` carries drift only.** A `MIXED_REVISION` or `PINNED_SUBTREE_HIDES_EDITS`
           warning is advice about a branch someone is still editing; a baseline is a record of a
           decision already taken, so neither is forwarded.
@@ -986,6 +1197,10 @@ paths:
           revision's `nested` structure beneath it and the source's lines suppressed, just as the
           branch read rendered it at the cut (MVP-30357). Before that, a baseline recorded the pin
           over the source revision's children.
+        - **🚧 Planned — MVP-30375, not yet implemented.** **Pinned rows name who pinned them.** A row
+          with `isPinned: true` carries `pinnedById` and `pinnedAt`, taken from the payload
+          revision that carries its current value. The branch read leaves both null.
+          [assumes A-30375-4]
 
         ## The drift canaries
 
@@ -993,6 +1208,7 @@ paths:
         |---|---|
         | `BASELINE_COUNT_DRIFT` | the baseline re-derived a **different number of rows** than its cut recorded — a corrected release date, an edit to an already-released BOM |
         | `BASELINE_PROVENANCE_DRIFT` | the same rows came back with a **different number of them `claiming`** — a claim severed or added since the cut. The row count cannot see this, because severing one moves no row |
+        | `BASELINE_PIN_DRIFT` | **🚧 Planned — MVP-30375, not yet implemented.** The same rows came back with a **different number of them explicitly pinned** (`isPinned`). A revision decision moved where neither the row count nor the claim count did. [assumes A-30375-5] |
 
         Both **warn rather than throw**: the rows returned are still the honest answer for the
         stored timepoint. Each comparison is skipped when the cut never recorded its counter, so a
@@ -1019,6 +1235,12 @@ paths:
                 drifted:
                   summary: Count drift after a direct edit to an already-released eBOM
                   $ref: '#/components/examples/BaselineTreeDrift'
+                pinnedAuthor:
+                  summary: '🚧 MVP-30375 (planned) — who pinned each row, and when'
+                  $ref: '#/components/examples/BaselineTreePinnedAuthor'
+                pinDrift:
+                  summary: '🚧 MVP-30375 (planned) — BASELINE_PIN_DRIFT'
+                  $ref: '#/components/examples/BaselineTreePinDrift'
         '400':
           description: '`INVALID_REQUEST` — `asOf` was supplied. A baseline is already resolved.'
           content:
@@ -1047,7 +1269,9 @@ paths:
 
         **This call is pure.** It creates and modifies nothing — no `Branch_Member__c`, no
         `CI_Rev__c`, no source revision. Calling it twice with the same inputs against an unchanged
-        org returns identical output, including identical `entryId` values.
+        org returns identical entries, including identical `entryId` values and an identical
+        `diffFingerprint`. Only the read clock moves: `generatedAt`, and the `governingTimestamp` of
+        every state that answers to `asOf`.
 
         **Not every entry is a decision.** Most are informational: the caller is being told what will
         happen, not asked. Only `claim-orphaned` blocks a commit.
@@ -1071,6 +1295,27 @@ paths:
 
         `Secondary_Unique_Key__c` rather than `Find_Number__c` because find-number uniqueness is org
         configuration, and a key built on it would give two orgs with identical data different diffs.
+
+        The key is **not unique** on one side when a parent item renders at two revisions in the
+        same tree, which is routine now that each occurrence of a pinned item renders its own
+        revision's structure (MVP-30214). `ItemCloneBatch` preserves `Secondary_Unique_Key__c`, so
+        both revisions' copies of a line share one key. So within one side, edges at one key are
+        also told apart by their **parent revision**, the revision whose line each sits on, and a
+        pull over such a tree completes. The parent revision separates; it never joins, and it is
+        not part of the key: a branch edge and its source counterpart carry different parent
+        revisions once the source advances. Across the sides, edges at one key pair by equal
+        parent revision first, and then a lone edge left on each side pairs with the other — the
+        source advancing. A null parent revision never pairs by equality, only as a lone survivor;
+        `nested` rows pair in a second pass and never refuse. There is no tie-break on find number.
+
+        A `replace` substitute borrows the key of the line it supersedes. Where it meets a line of
+        its new child under the same parent revision, it stands aside rather than colliding: it is
+        reported on its own, as `claim-orphaned` like any live substitute without a counterpart,
+        and the line pairs as usual.
+
+        Where the join still cannot tell which upstream line corresponds to which branch line, the
+        pull answers `AMBIGUOUS_CORRELATION` (422) rather than guess. The three shapes that raise
+        it, and their remedies, are listed under the 422 response.
 
         ## The two sides are deliberately asymmetric
 
@@ -1107,6 +1352,41 @@ paths:
         *The three `claim-*` kinds were `override-retained` / `override-superseded` /
         `override-orphaned` before MVP-30309.*
 
+        > **🚧 Planned — MVP-30378, not yet implemented.** Two changes to the table:
+        >
+        > - **`claim-retained` with `retargeted: true`** offers
+        >   `availableActions: [accept-source-revision]`. This is an **optional** decision: the
+        >   `decision` stays `informational`, and a commit without it still succeeds, with the pin
+        >   winning as today. Accepting pins the row to the candidate's revision and keeps its
+        >   quantity and find number.
+        > - **`claim-retained` and `claim-superseded`** carry `revisionAdvances`, which is true when
+        >   a **tracking** claim's rendered revision moves with this pull. No new entry kind is
+        >   added, so each position still has exactly one entry. `member-version-advance` still
+        >   means base content only.
+        >
+        > [assumes A-30378-3, A-30378-4, A-30378-10]
+
+        > **🚧 Planned — MVP-30379, not yet implemented.** Per-field decisions on three kinds, all
+        > **optional**. `decision` stays `informational`, and a preview with hundreds of entries
+        > and no `claim-orphaned` still commits with zero decisions.
+        >
+        > A field **diverges** when the value the branch holds differs from the candidate's. A
+        > tracking claim holds no revision, so its revision never diverges, even when `current`
+        > and `candidate` render different revisions.
+        >
+        > | kind | availableActions |
+        > |---|---|
+        > | `claim-retained` | `accept-fields`, over the fields that actually diverge. The revision diverges only on a *pinned* claim, exactly when `retargeted`. `accept-source-revision` is also offered when retargeted. |
+        > | `member-add-collision` | `accept-fields`, over the differing quantity, find number or revision |
+        > | `claim-superseded` | `release` |
+        >
+        > A pull has exactly one **required** kind, `claim-orphaned`, permanently. The other five
+        > kinds are unchanged. `diffFingerprint`'s mechanism is unchanged, but it digests each
+        > entry's `availableActions`, so its value changes with the actions offered: a preview
+        > taken before this ships does not match a commit made after it, and answers
+        > `STALE_REVISION`.
+        > [assumes A-30379-3, A-30379-7]
+
         ### Why a revision advance is never a decision
 
         A revision is not an independently assertable value. Once you accept that the *line* exists,
@@ -1115,6 +1395,12 @@ paths:
         (or `add`, `replace`, `convert-to-native`) carrying a chosen `childItemRevisionId`, a
         separate and deliberate act on the delta endpoint. A *tracking* claim holds nothing: it
         follows the source's revision and moves with it.
+
+        > **🚧 Planned — MVP-30378, not yet implemented.** A `base` row's advance is still never a
+        > decision. A *pinned* claim that upstream has moved past gets an optional
+        > `accept-source-revision`: take the candidate's revision, keep everything else. A
+        > tracking claim's move is flagged with `revisionAdvances` on its `claim-*` entry.
+        > [assumes A-30378-3, A-30378-4]
 
         ### Pins are judged against the tree *after* the pull (MVP-30357)
 
@@ -1127,9 +1413,20 @@ paths:
         the tree read will raise once the commit lands — because the preview is the last point at
         which the caller can see that coming.
 
+        Pins are judged **per occurrence** (MVP-30214), as the tree renders them. A line behind a
+        pin on one occurrence that another, unpinned occurrence of the same item still renders is
+        not hidden: it is reported there like any other line, as `member-added` when it is new.
+        A hidden-edit warning names every pinned revision that hides the edit.
+
         A pinned claim whose line upstream re-revs is reported as `claim-retained` with
         `retargeted: true`: the candidate would resolve the line to a newer revision, and the pin
         wins. The commit leaves the pin in place.
+
+        > **🚧 Planned — MVP-30378, not yet implemented.** Unless the commit carries an
+        > `accept-source-revision` decision for it. Then the pin moves to the candidate's
+        > revision, equals the post-pull source line's, and stops rendering a pinned structure,
+        > so edits it hid render again. The next pull that moves the line reports
+        > `retargeted: true` again. [assumes A-30378-3]
 
         ### Why upstream re-pointing an edge at a *different item* is two entries
 
@@ -1185,6 +1482,12 @@ paths:
                 truncated:
                   summary: Informational entries capped; the required one survives
                   $ref: '#/components/examples/PullPreviewTruncated'
+                revisionMoves:
+                  summary: '🚧 MVP-30378 (planned) — accept-source-revision offered; revisionAdvances flagged'
+                  $ref: '#/components/examples/PullPreviewRevisionMoves'
+                perFieldDecisions:
+                  summary: '🚧 MVP-30379 (planned) — accept-fields and release offered'
+                  $ref: '#/components/examples/PullPreviewPerFieldDecisions'
         '400':
           description: |
             `INVALID_REQUEST` — `entriesLimit` was not a positive integer. Present-but-unusable is a
@@ -1249,6 +1552,40 @@ paths:
         | `convert-to-native` | Severs the provenance link, keeping the branch-owned quantity and find number, which then resolve on the **branch** clock. **Requires exactly one of** `childItemRevisionId` (stamped onto the native row — send the entry's own `current.detail.childItemRevisionId` to keep what it shows) and `trackChildRevision: true` (float at the read clock); neither or both is `422 REVISION_CHOICE_REQUIRED`, checked with the other decision checks before anything is written. Runs through the ordinary `convert-to-native` delta operation — every invariant that batch enforces applies unchanged, including `REVISION_ITEM_MISMATCH`. |
         | `remove` | Appends an **exclude** delta (a deletion marker). **Nothing is hard-deleted.** |
 
+        > **🚧 Planned — MVP-30378, not yet implemented.** An optional decision on a
+        > `claim-retained` entry with `retargeted: true`:
+        >
+        > | action | Effect |
+        > |---|---|
+        > | `accept-source-revision` | Pins the claim to the **candidate's** child revision (`candidate.detail.childItemRevisionId`) through a `set-revision` operation, and keeps the branch's quantity and find number. It never becomes an `update`, which cannot change a revision. The row stays pinned. Its pin now equals the post-pull source line's revision, so no pinned structure renders beneath it. The next pull that moves the line reports `retargeted: true` again. `childItemRevisionId` / `trackChildRevision` are ignored on this decision. |
+        >
+        > These change in the Decisions table above:
+        >
+        > - "A decision naming any other kind → 400" becomes "a decision whose action the entry does
+        >   not offer in `availableActions` → `400 INVALID_REQUEST`".
+        > - A `claim-retained` with no decision still commits: it is optional, and only
+        >   `claim-orphaned` blocks.
+        >
+        > The `convert-to-native` revision-choice check is unchanged.
+        > [assumes A-30378-3, A-30378-10, A-30378-11]
+
+        > **🚧 Planned — MVP-30379, not yet implemented.** Two more optional actions:
+        >
+        > | action | On | Effect |
+        > |---|---|---|
+        > | `accept-fields` | `claim-retained`, `member-add-collision` | Takes the fields named in `acceptedFields` (`candidate` or `release` per field), and keeps every other field's branch value. It compiles to **one** delta operation for the row: `update` for quantity / find number alone, and `set-revision` whenever the revision is accepted, carrying any accepted quantity or find number with it. |
+        > | `release` | `claim-superseded` | On a pinned claim, clears the revision. On a tracking claim, `revert`s the claim so the row becomes `base`. |
+        >
+        > The commit refuses with `400 INVALID_REQUEST`, and writes nothing, when:
+        >
+        > - a field does not diverge, a field name is unknown, or `release` is sent on quantity or
+        >   find number
+        > - `acceptedFields` is sent on `claim-orphaned` or with any action but `accept-fields`
+        > - the decisions would compile to **more than 200 operations**. This is refused whole,
+        >   never chunked, because a pull commit is atomic.
+        >
+        > [assumes A-30379-1, A-30379-2, A-30379-3, A-30379-4, A-30379-5, A-30379-7]
+
         ## Claim reconciliation: reported, never persisted
 
         For every existing claimed/replaced field, the commit compares the claim's current value
@@ -1261,6 +1598,10 @@ paths:
         - **Matches** → reported as `claim-superseded`. Also **never deleted and never written**.
           Retiring it would mean a branch that once happened to agree with upstream would silently
           start accepting upstream changes from then on.
+
+        > **🚧 Planned — MVP-30378, not yet implemented.** Nothing is persisted *unless the caller
+        > decided*. An `accept-source-revision` decision writes one new payload revision for its
+        > row. [assumes A-30378-3]
 
         `Edge_Key__c` and `Alias__c` are likewise **never re-stamped**. They keep meaning "the
         upstream line this edge was originally minted against", independent of the correlation key a
@@ -1327,6 +1668,30 @@ paths:
                     - entryId: f4880c6b3e1a9d75
                       action: convert-to-native
                       trackChildRevision: true
+              acceptSourceRevision:
+                summary: '🚧 MVP-30378 (planned) — take the newer revision on a pinned claim, keep its quantity'
+                x-planned: { ticket: MVP-30378, assumptions: [A-30378-3, A-30378-11] }
+                value:
+                  candidateRootRevisionId: a0Ag8000000Ab02EAC
+                  diffFingerprint: 'sha256:4c0d9e72b1a83f56'
+                  decisions:
+                    - entryId: '8a3e5f09c2d71b64'
+                      action: accept-source-revision
+              acceptFields:
+                summary: '🚧 MVP-30379 (planned) — keep my quantity, take the revision; take a quantity; release a claim'
+                x-planned: { ticket: MVP-30379, assumptions: [A-30379-1, A-30379-3] }
+                value:
+                  candidateRootRevisionId: a0Ag8000000Ab02EAC
+                  diffFingerprint: 'sha256:b5e81c3a9f04d267'
+                  decisions:
+                    - entryId: '8a3e5f09c2d71b64'
+                      action: accept-fields
+                      acceptedFields: { childItemRevisionId: candidate }
+                    - entryId: 'c7d42a9e0b15f386'
+                      action: accept-fields
+                      acceptedFields: { quantity: candidate }
+                    - entryId: '3b91c7e0d5a2f846'
+                      action: release
               removeOrphan:
                 summary: Let the orphaned claim go
                 value:
@@ -1353,10 +1718,26 @@ paths:
                 alreadyCurrent:
                   summary: Committing the revision already accepted
                   $ref: '#/components/examples/PullCommitAlreadyCurrent'
+                acceptedSourceRevision:
+                  summary: '🚧 MVP-30378 (planned) — an accept-source-revision decision applied'
+                  $ref: '#/components/examples/PullCommitAcceptedSourceRevision'
+                acceptedFields:
+                  summary: '🚧 MVP-30379 (planned) — accept-fields and release applied'
+                  $ref: '#/components/examples/PullCommitAcceptedFields'
         '400':
           description: |
             `INVALID_REQUEST` — the body could not be read; a decision names an entry that is not
             `claim-orphaned`; or `action` is not one of `convert-to-native` / `remove`.
+
+            > **🚧 Planned — MVP-30378, not yet implemented.** It becomes: a decision whose `action`
+            > is not in its entry's `availableActions`, so `accept-source-revision` on a
+            > `claim-retained` entry with `retargeted: false` is refused. [assumes A-30378-11]
+
+            > **🚧 Planned — MVP-30379, not yet implemented.** Also: an `acceptedFields` key that
+            > is unknown (`childItem`, `childItemRevision`), a field that does not diverge,
+            > `release` on quantity or find number, an empty `acceptedFields`, `acceptedFields`
+            > with any action but `accept-fields`, or decisions compiling to more than 200
+            > operations. [assumes A-30379-1, A-30379-2, A-30379-4, A-30379-7]
           content:
             application/json:
               schema: { $ref: '#/components/schemas/RestError' }
@@ -1365,6 +1746,12 @@ paths:
                   value:
                     code: INVALID_REQUEST
                     message: 'That request could not be read. Check that the body is valid JSON and that every required value is supplied. (entryId b7204de9a1c6f358 is member-added, which offers no accept/reject decision)'
+                fieldDoesNotDiverge:
+                  summary: '🚧 MVP-30379 (planned) — accepting a field that does not differ'
+                  x-planned: { ticket: MVP-30379, assumptions: [A-30379-7] }
+                  value:
+                    code: INVALID_REQUEST
+                    message: 'That request could not be read. Check that the body is valid JSON and that every required value is supplied. (entryId 8a3e5f09c2d71b64: findNumber does not differ from upstream, so there is nothing to accept)'
         '403': { $ref: '#/components/responses/Forbidden' }
         '404':
           description: '`NOT_FOUND` — the source, or the candidate revision, does not exist.'
@@ -1392,7 +1779,9 @@ paths:
         MBOM-against-its-own-baseline rather than three.
 
         **This call is pure.** No DML anywhere behind it. Two calls with the same inputs against an
-        unchanged org return identical output, `entryId` values included.
+        unchanged org return identical entries, `entryId` values included. Only the read clock moves:
+        `generatedAt`, each side's `asOf` when the caller sent none, and the `governingTimestamp` of
+        every state that answers to `asOf`.
 
         ## The right-hand side
 
@@ -1436,7 +1825,10 @@ paths:
         `(Parent_Item__c, Item__c, Secondary_Unique_Key__c)` — the same join
         [pull-preview](#operation/previewMbomPull) documents in full, for the same reason: the
         parent *item* does not move when its revision does, so the key survives the BOM clone a
-        revision advance performs. Two edges on **one side** sharing a key is
+        revision advance performs. Edges at one key are told apart and paired exactly as on the
+        pull: by parent revision within a side, so a side that renders one parent item at two
+        revisions compares cleanly. A `replace` substitute that stands aside is a one-sided
+        member. Where the join cannot tell which member corresponds to which, the answer is
         `AMBIGUOUS_CORRELATION` (422) rather than a guess.
 
         ### Exclusion tombstones are filtered out before the join
@@ -1979,7 +2371,9 @@ components:
         One row of a resolved tree. The same shape serves both response shapes: in the **nested**
         shape `childRows` holds the subtree and `parentItemId` is still populated; in the **flat**
         shape every row is a sibling and `childRows` is empty — so a client can rebuild the tree from
-        a flat response without a second request.
+        a flat response without a second request. The one exception is an item rendered at two
+        revisions, whose occurrences' children all name the same `parentItemId`; see the branch
+        tree read's "Flat vs. nested".
       required: [provenance, childRows]
       properties:
         edgeId:
@@ -1996,6 +2390,10 @@ components:
             The `add` prefix was `local-` before MVP-30309. Keys minted before the rename keep the
             old prefix — an edge key is identity and is never re-stamped — so treat the key as
             opaque and never parse the prefix.
+
+            A substitute always carries its own `replaces-…` key, even when its child item already
+            has its own line under the same parent: the two render as two rows, each under its own
+            key (see the branch tree read).
           examples: ['a0Bg8000000Ab10EAC']
         detail:
           $ref: '#/components/schemas/AssemblyEdgeDetail'
@@ -2041,6 +2439,58 @@ components:
 
             Defaults to `false`. Populated on baseline rows too, where — because a baseline
             forwards drift warnings only — it is the sole signal of the collapse.
+        isPinned:
+          type: boolean
+          x-planned: { ticket: MVP-30375, assumptions: [A-30375-1] }
+          description: |
+            **🚧 Planned — MVP-30375, not yet implemented.** True when this row stores a child
+            revision somebody **chose**: an `add` or `replace` that sent `childItemRevisionId`, a
+            `claim` that pinned, or a `convert-to-native` that stamped. Never null.
+
+            It follows the explicit choice only, never what the row happens to render:
+
+            - A tracking claim or a floating row is `false`, even when it resolves to exactly the
+              revision a pin would have named.
+            - A pin **equal** to its source line's revision is `true`, although it renders no
+              pinned structure.
+            - A floating `new` row that renders a pinned structure because the read clock moved
+              past T_R is `false`: nobody chose it.
+            - Tombstones, `nested` rows and every row of a source tree are `false`.
+
+            The structural sense of "pinned" is a different signal: a row whose revision differs
+            from its source line's renders that revision's structure and can raise
+            `PINNED_SUBTREE_HIDES_EDITS`. Never derive one from the other. Populated on baseline
+            rows too.
+        wasClaimed:
+          type: boolean
+          x-planned: { ticket: MVP-30375, assumptions: [A-30375-2, A-30375-6] }
+          description: |
+            **🚧 Planned — MVP-30375, not yet implemented.** True on a `new` row that once claimed
+            a source row, and that `convert-to-native` flipped from `claiming` to `new`. The
+            provenance says the row is the branch's own now. This says it did not start that way,
+            which an audit of a released configuration needs to see. Never null.
+
+            A display fact about one row's history, deliberately **not** a provenance value.
+            Populated on baseline rows too, resolved at the baseline's own timepoint. Since
+            MVP-30357 every convert makes a stamp-or-track choice, so a `wasClaimed` row may or may
+            not be `isPinned`.
+        pinnedById:
+          oneOf: [{ $ref: '#/components/schemas/SalesforceId' }, { type: 'null' }]
+          x-planned: { ticket: MVP-30375, assumptions: [A-30375-4] }
+          description: |
+            **🚧 Planned — MVP-30375, not yet implemented.** On a **baseline** row with
+            `isPinned: true`, the user who created the payload revision carrying the row's current
+            value. Null on every live tree read, and on every unpinned row.
+
+            It names who last revised the row, not necessarily who first chose the revision: an
+            `update` that changed only the quantity carries the pin forward and becomes the author.
+            A live read is left null because its winning revision can still move.
+        pinnedAt:
+          oneOf: [{ type: string, format: date-time }, { type: 'null' }]
+          x-planned: { ticket: MVP-30375, assumptions: [A-30375-4] }
+          description: |
+            **🚧 Planned — MVP-30375, not yet implemented.** When that payload revision was
+            created. Null exactly where `pinnedById` is.
         childRows:
           type: array
           description: Populated in the nested shape only; **empty, never null**, in the flat shape.
@@ -2058,12 +2508,25 @@ components:
       properties:
         warningCode:
           type: string
-          enum: [MIXED_REVISION, BASELINE_COUNT_DRIFT, BASELINE_PROVENANCE_DRIFT, NESTED_CYCLE_PRUNED, PINNED_SUBTREE_HIDES_EDITS, MEMBER_ADD_COLLISION, COMPARE_ROOTS_DIFFER]
+          enum: [MIXED_REVISION, BASELINE_COUNT_DRIFT, BASELINE_PROVENANCE_DRIFT, NESTED_CYCLE_PRUNED, PINNED_SUBTREE_HIDES_EDITS, MEMBER_ADD_COLLISION, COMPARE_ROOTS_DIFFER, BASELINE_PIN_DRIFT, STORED_REVISION_RETIRED]
           description: |
             The complete vocabulary.
 
+            | Value | Status |
+            |---|---|
+            | `MIXED_REVISION` | ✅ shipped |
+            | `BASELINE_COUNT_DRIFT` | ✅ shipped |
+            | `BASELINE_PROVENANCE_DRIFT` | ✅ shipped |
+            | `NESTED_CYCLE_PRUNED` | ✅ shipped |
+            | `PINNED_SUBTREE_HIDES_EDITS` | ✅ shipped |
+            | `MEMBER_ADD_COLLISION` | ✅ shipped |
+            | `COMPARE_ROOTS_DIFFER` | ✅ shipped |
+            | `BASELINE_PIN_DRIFT` | 🚧 MVP-30375 |
+            | `STORED_REVISION_RETIRED` | 🚧 MVP-30376 |
+
             - `MIXED_REVISION` — one item rendered at more than one revision in the same tree,
-              because two clocks are in play. Legal and expected; warned, never blocked.
+              because two clocks are in play. Legal and expected; warned, never blocked. Each
+              occurrence renders its own revision's structure.
             - `BASELINE_COUNT_DRIFT` — a baseline re-derived a different **row count** than its cut
               recorded.
             - `BASELINE_PROVENANCE_DRIFT` — a baseline re-derived a different number of **`claiming`**
@@ -2079,10 +2542,16 @@ components:
               because a pinned row's own revision structure replaced the source lines they sit on:
               a claim, exclusion, update or substitute on a suppressed line (and on no line still
               rendered elsewhere), or an `add` under an item only the suppressed structure
-              supplied. Rendered, never refused. Raised on the tree reads and on the pull preview,
+              supplied. Not raised for an exclusion of a line upstream has already removed (what
+              `remove` leaves on a `claim-orphaned` line): it removes nothing that exists.
+              Rendered, never refused. Raised on the tree reads and on the pull preview,
               where it describes the tree **after** the commit. A revision cannot be changed in place
               this release, so the remedy is to `revert` the pinned claim and claim the line again —
               tracking, or pinned to the source line's own revision — in a later request.
+              **🚧 Planned — MVP-30378, not yet implemented.** The remedy becomes `set-revision` on
+              the pinned row. Clear it with `trackChildRevision: true`, or pin it to the source
+              line's own revision. Either keeps the row's quantity and find number, and the hidden
+              edits render again. [assumes A-30378-2]
             - `MEMBER_ADD_COLLISION` — one BOM position was asserted by **both** the branch and its
               source, and the branch's content won. The two rows render as one, carrying
               `isCollapsedCollision: true`. Not raised once a pull has retired a *converged* local
@@ -2095,6 +2564,25 @@ components:
               third, and the left is the side the caller addressed by path. It carries no `itemId`
               and no revisions: there is no single item it is about, and `left` / `right` already
               publish both roots.
+            - `BASELINE_PIN_DRIFT` — **🚧 Planned — MVP-30375, not yet implemented.** A baseline
+              re-derived a different number of **explicitly pinned** rows (`isPinned`) than its cut
+              recorded. The count covers contained members, excluding tombstones, `nested` rows and
+              edits hidden behind a pin. It catches a revision decision moving where no row count
+              or claim count moved. Baseline reads only. It carries no `itemId` and empty arrays,
+              like the other drift codes. A baseline cut before the ticket has no count and never
+              raises it. [assumes A-30375-5]
+            - `STORED_REVISION_RETIRED` — **🚧 Planned — MVP-30376, not yet implemented.** A row
+              holds a chosen child revision that has since been **Cancelled or Expired**. The row
+              still renders that revision: nothing is substituted, and the read does not fail.
+              Nobody chose a replacement, and a read must not break because a revision was
+              cancelled elsewhere in the org.
+
+              One warning per row, not deduplicated by item. `itemId` is the row's child item and
+              `itemRevisionIds` is the stored revision. It is never raised by a row that stores no
+              revision: a tracking claim or a floating row already resolves through a query that
+              skips dead revisions. It is not raised by a tombstone, or by an edit hidden behind a
+              pin. On a dead pin with nested structure, it names the pinned row, not the rows
+              beneath it. Branch tree read only. [assumes A-30376-1, A-30376-2, A-30376-3]
         message:
           type: string
           description: Human-readable, from a Custom Label. Translated; never parse it.
@@ -2105,6 +2593,8 @@ components:
             `MEMBER_ADD_COLLISION`, naming the child item whose position collapsed, and on
             `PINNED_SUBTREE_HIDES_EDITS`, naming the child item of the edited line a pinned
             revision's structure replaced (or, on a pull preview, will replace).
+            **🚧 Planned — MVP-30376, not yet implemented.** Also on `STORED_REVISION_RETIRED`,
+            naming the child item of the row holding the dead revision. [assumes A-30376-3]
         itemRevisionIds:
           type: array
           description: |
@@ -2112,6 +2602,9 @@ components:
             `PINNED_SUBTREE_HIDES_EDITS`, where it lists the pinned revisions whose structure hid
             the edit (each is the `detail.childItemRevisionId` of a pinned row), with
             `governingTimestamps` left empty. Every other code leaves it empty.
+            **🚧 Planned — MVP-30376, not yet implemented.** Also on `STORED_REVISION_RETIRED`,
+            where it holds exactly one id, the Cancelled or Expired stored revision, with
+            `governingTimestamps` left empty. [assumes A-30376-3]
           items: { $ref: '#/components/schemas/SalesforceId' }
         governingTimestamps:
           type: array
@@ -2162,8 +2655,14 @@ components:
       properties:
         op:
           type: string
-          enum: [claim, update, add, exclude, restore, replace, revert, convert-to-native]
-          description: Matched case-insensitively. An unknown value is a **per-operation** validation failure (`INVALID_REQUEST`), not an exception — one mistyped name in a batch of 200 must not read as a server fault.
+          enum: [claim, update, add, exclude, restore, replace, revert, convert-to-native, set-revision]
+          description: |
+            Matched case-insensitively. An unknown value is a **per-operation** validation failure (`INVALID_REQUEST`), not an exception — one mistyped name in a batch of 200 must not read as a server fault.
+
+            | Value | Status |
+            |---|---|
+            | `claim`, `update`, `add`, `exclude`, `restore`, `replace`, `revert`, `convert-to-native` | ✅ shipped |
+            | `set-revision` | 🚧 MVP-30378 — today it answers `INVALID_REQUEST` (unknown op) |
         clientRef:
           type: string
           description: |
@@ -2174,7 +2673,11 @@ components:
           examples: ['row-motor']
         ebomAssemblyId:
           allOf: [{ $ref: '#/components/schemas/SalesforceId' }]
-          description: 'The legacy `Assembly__c` line. Used by: `claim`, `exclude`, `update` (the `CLAIM_REQUIRED` path), `revert` (the second-revert path).'
+          description: |
+            The legacy `Assembly__c` line. Used by: `claim`, `exclude`, `update` (the `CLAIM_REQUIRED` path), `revert` (the second-revert path).
+
+            **🚧 Planned — MVP-30378, not yet implemented.** Also `set-revision`, whose `base`-row
+            answer is `CLAIM_REQUIRED`. [assumes A-30378-1]
         assemblyCiId:
           allOf: [{ $ref: '#/components/schemas/SalesforceId' }]
           description: |
@@ -2184,6 +2687,10 @@ components:
             Not an oversight: a request is deserialized into a flat Apex type whose field names
             are the wire names, and the operation an id belongs to is known only after `op` is
             read — so a request field cannot be enveloped per CI type the way a response can.
+
+            > **🚧 Planned — MVP-30378, not yet implemented.** Also addresses `set-revision`. For
+            > `update` and `set-revision` it also finds a row hidden behind a pin, which
+            > `ebomAssemblyId` never does. [assumes A-30378-1, A-30378-5]
         ciId:
           allOf: [{ $ref: '#/components/schemas/SalesforceId' }]
           description: 'A `CI__c` to `exclude`, `restore`, `revert` or `convert-to-native`.'
@@ -2201,10 +2708,18 @@ components:
           description: '`replace` only — the substitute part. Its revision **floats** at the read clock unless `childItemRevisionId` pins it.'
         quantity:
           type: number
-          description: 'Used by `update`, `add`, `replace`.'
+          description: |
+            Used by `update`, `add`, `replace`.
+
+            **🚧 Planned — MVP-30379, not yet implemented.** Also optional on `set-revision`.
+            [assumes A-30379-5]
         findNumber:
           type: number
-          description: 'Used by `update`, `add`, `replace`.'
+          description: |
+            Used by `update`, `add`, `replace`.
+
+            **🚧 Planned — MVP-30379, not yet implemented.** Also optional on `set-revision`.
+            [assumes A-30379-5]
         childItemRevisionId:
           oneOf: [{ $ref: '#/components/schemas/SalesforceId' }, { type: 'null' }]
           description: |
@@ -2226,6 +2741,17 @@ components:
 
             There is no server-side "pin current". To pin what the tree shows, or to have a convert
             keep what it shows, send back that row's `detail.childItemRevisionId`.
+
+            > **🚧 Planned — MVP-30377, not yet implemented.** Also read by `update` sent with
+            > `autoClaim: true`. On a `base` edge it pins the claim the update performs. On an owned
+            > edge it must equal the stored revision, or the update answers `400 INVALID_REQUEST`
+            > naming `set-revision`. [assumes A-30377-1]
+
+            > **🚧 Planned — MVP-30378, not yet implemented.** It is the payload of `set-revision`:
+            > the revision to pin, validated against the row's own child item. Clearing is
+            > `trackChildRevision: true`, not a null here. A plain `update` that sends a non-null
+            > value is refused with `400 INVALID_REQUEST` naming `set-revision`, instead of being
+            > silently ignored as today. [assumes A-30378-2, A-30378-6]
           examples: ['a0Ag8000000Ab31EAC']
         trackChildRevision:
           oneOf: [{ type: boolean }, { type: 'null' }]
@@ -2243,6 +2769,54 @@ components:
             neither, or both, is `422 REVISION_CHOICE_REQUIRED`. **Ignored, not refused, on every
             other operation** — `add` and `replace` already track when `childItemRevisionId` is
             blank, and refusing it would make one shared client payload shape invalid for them.
+
+            > **🚧 Planned — MVP-30377, not yet implemented.** It is also read by `update` sent with
+            > `autoClaim: true`, which makes the same exactly-one choice. See `autoClaim`.
+            > [assumes A-30377-1]
+
+            > **🚧 Planned — MVP-30378, not yet implemented.** On `set-revision`, `true` **clears**
+            > the stored revision, with the same exactly-one rule. A cleared claim follows its
+            > source line at T_R. A cleared `new` row or substitute floats at the read clock.
+            > [assumes A-30378-2]
+        autoClaim:
+          oneOf: [{ type: boolean }, { type: 'null' }]
+          x-planned: { ticket: MVP-30377, assumptions: [A-30377-1, A-30377-4, A-30377-5] }
+          description: |
+            **🚧 Planned — MVP-30377, not yet implemented.** `update` only. When `true`, an update
+            of a `base` edge **claims it and revises it in one operation**, instead of answering
+            `409 CLAIM_REQUIRED`. Today that needs two requests, because a batch validates every
+            operation against one pre-batch snapshot.
+
+            - **The implicit claim makes the same revision choice `claim` does.** Whenever
+              `autoClaim` is `true`, send exactly one of `trackChildRevision: true` or
+              `childItemRevisionId`. `trackChildRevision: true` is the expected case: the row keeps
+              following its source line. `childItemRevisionId` claims and pins. Neither, or both,
+              answers `422 REVISION_CHOICE_REQUIRED`, whatever state the row is in, and nothing is
+              claimed. There is no default, for the reason `claim` has none.
+            - **The result reports the claim.** `DeltaResult.claimed` is `true`. `CLAIM_REQUIRED`
+              would have disclosed the eBOM line before the fact; this discloses it after.
+            - **On an edge the branch already owns**, the flag is a no-op claim, and the update
+              proceeds normally with `claimed` left null. `trackChildRevision` is ignored there. A
+              `childItemRevisionId` equal to the stored one is accepted. A **different** one is
+              refused with `400 INVALID_REQUEST` naming `set-revision`, rather than being silently
+              dropped.
+            - **It bypasses no other guard.** These all still refuse the operation:
+              - `NOT_EDITABLE` on a nested row, `NOT_SUPPLIED` on an excluded one, `STALE_REVISION`
+              - a non-positive quantity, or a second operation on the same edge in the batch
+              - every guard `claim` applies: a past `asOf` on a `base` edge (`INVALID_REQUEST`),
+                `REVISION_ITEM_MISMATCH`, and a membership change on the same row earlier in the
+                batch. So `[replace(L, X), update(L, autoClaim)]` is refused, as
+                `[replace(L, X), claim(L)]` is.
+              - On an edge the branch already owns, no claim happens, so a past `asOf` stays
+                tolerated as on plain `update`.
+            - A row hidden behind a pin, addressed by `ebomAssemblyId`, answers `NOT_FOUND`, as
+              plain `update` does today. `autoClaim` does not change how a row is found; reaching
+              one by `assemblyCiId` is MVP-30378's concern (A-30378-5).
+
+            `false` and null both mean off: today's `CLAIM_REQUIRED`, still carrying the eBOM line.
+            Ignored, not refused, on every other operation. [assumes A-30377-1, A-30377-4,
+            A-30377-5]
+          examples: [true]
 
     DeltaBatchResponse:
       type: object
@@ -2316,6 +2890,22 @@ components:
             have forked and did not*. A client must treat them differently, so the field must be able
             to say both.
 
+            > **🚧 Planned — MVP-30377, not yet implemented.** `null` on an `update` that
+            > auto-claimed (`claimed: true`). It minted a claim's first revision, exactly as `claim`
+            > does, so there was nothing to fork. [assumes A-30377-3]
+        claimed:
+          oneOf: [{ type: boolean }, { type: 'null' }]
+          x-planned: { ticket: MVP-30377, assumptions: [A-30377-2] }
+          description: |
+            **🚧 Planned — MVP-30377, not yet implemented.** `true` when this operation took
+            ownership of a `base` edge on the caller's behalf, which only an `update` sent with
+            `autoClaim: true` can do. Nothing else in the response would say so: `edgeId` is
+            populated either way.
+
+            **Never `false`.** It is `null` whenever no claim was performed: `autoClaim` off, an
+            `autoClaim` on an edge the branch already owned, a failure, and every other operation.
+            [assumes A-30377-2]
+
     # -------------------------------------------------- baselines
 
     BaselineCutRequest:
@@ -2360,6 +2950,10 @@ components:
             canary behind `BASELINE_COUNT_DRIFT`; `BASELINE_PROVENANCE_DRIFT` is fed by the
             `claiming`-row count recorded alongside it.
 
+            > **🚧 Planned — MVP-30375, not yet implemented.** The cut also records a count of
+            > explicitly pinned rows, feeding `BASELINE_PIN_DRIFT`. Like the `claiming` count, it is
+            > stored and **not** returned here: there is no `pinnedCount`. [assumes A-30375-3]
+
     BaselineTree:
       type: object
       required: [baselineId, resolutionTimePoint, rows, warnings]
@@ -2382,6 +2976,12 @@ components:
           description: |
             **Drift only** — `BASELINE_COUNT_DRIFT` and `BASELINE_PROVENANCE_DRIFT`. Mixed-revision
             and collision warnings from the underlying resolution are not forwarded.
+
+            > **🚧 Planned — MVP-30375, not yet implemented.** A third drift code,
+            > `BASELINE_PIN_DRIFT`. [assumes A-30375-5]
+
+            > **🚧 Planned — MVP-30376, not yet implemented.** `STORED_REVISION_RETIRED` is **not**
+            > forwarded here: it is advice about the branch, not drift. [assumes A-30376-2]
           items: { $ref: '#/components/schemas/TreeWarning' }
 
     # -------------------------------------------------- pull
@@ -2410,6 +3010,11 @@ components:
         third, optional-but-defaultable tier. The only decision point anywhere in a pull is disposing
         an orphaned claim; everything else, including new, removed and colliding upstream content,
         applies automatically.
+
+        > **🚧 Planned — MVP-30378, not yet implemented.** Still two values. An `informational`
+        > entry may now **offer** an optional action in `availableActions`, and the default when
+        > none is sent is today's outcome. `required` still means `claim-orphaned` only: a pull
+        > has exactly one required kind. [assumes A-30378-10]
       enum: [informational, required]
 
     Action:
@@ -2422,7 +3027,40 @@ components:
           content, which then resolves on the branch clock. ("Native" is the framework's existing
           term for branch-owned content with no upstream provenance.)
         - `remove` — append a deletion marker (an exclude delta). Nothing is hard-deleted.
-      enum: [convert-to-native, remove]
+        - `accept-source-revision` — **🚧 Planned — MVP-30378, not yet implemented.** Offered
+          only on `claim-retained` with `retargeted: true`, and optional. The commit pins the
+          claim to the **candidate's** revision through a `set-revision`, never an `update`. The
+          claim keeps its quantity and find number, and stays pinned. The decision carries
+          nothing but `entryId` and `action`. [assumes A-30378-3, A-30378-11]
+
+        - `accept-fields` — **🚧 Planned — MVP-30379, not yet implemented.** Optional, on
+          `claim-retained` and `member-add-collision`. It takes the fields named in
+          `acceptedFields`, and the rest keep the branch's values. On `claim-retained` it equals
+          `accept-source-revision` when the only accepted field is
+          `childItemRevisionId: candidate`, and both are accepted. It compiles to **one**
+          operation per row, never two on one edge:
+          - `update` for `quantity` / `findNumber` alone
+          - `set-revision` for the revision
+          - `set-revision` carrying the quantity or find number too, when both are accepted
+
+          [assumes A-30379-1, A-30379-5, A-30379-6]
+        - `release` — **🚧 Planned — MVP-30379, not yet implemented.** Optional, on
+          `claim-superseded` only, where the claim now matches upstream anyway. It is the conscious
+          way to stop holding a value. On a **pinned** claim it clears the revision, and the claim
+          stays, tracking. On a **tracking** claim it releases the claim itself, compiled as a
+          `revert`, and the row falls back to `base`. Takes no `acceptedFields`.
+          [assumes A-30379-3]
+
+        | Value | Status |
+        |---|---|
+        | `convert-to-native`, `remove` | ✅ shipped — `claim-orphaned` only |
+        | `accept-source-revision` | 🚧 MVP-30378 — today it answers `INVALID_REQUEST` |
+        | `accept-fields`, `release` | 🚧 MVP-30379 — today they answer `INVALID_REQUEST` |
+
+        > **🚧 Planned — MVP-30378, not yet implemented.** A decision is valid when its entry
+        > **offers** its action in `availableActions`, instead of only on `claim-orphaned`.
+        > [assumes A-30378-11]
+      enum: [convert-to-native, remove, accept-source-revision, accept-fields, release]
 
     PullPreview:
       type: object
@@ -2457,7 +3095,11 @@ components:
           items: { $ref: '#/components/schemas/DiffEntry' }
         warnings:
           type: array
-          description: Non-blocking conditions about what would render *after* the pull — typically `MIXED_REVISION`, and `PINNED_SUBTREE_HIDES_EDITS` for a branch edit a post-pull pin will hide. Always present; empty rather than absent.
+          description: |
+            Non-blocking conditions about what would render *after* the pull — typically `MIXED_REVISION`, and `PINNED_SUBTREE_HIDES_EDITS` for a branch edit a post-pull pin will hide. Always present; empty rather than absent.
+
+            **🚧 Planned — MVP-30376, not yet implemented.** `STORED_REVISION_RETIRED` is not
+            raised here. The branch tree read is the one that raises it. [assumes A-30376-2]
           items: { $ref: '#/components/schemas/TreeWarning' }
         truncated:
           type: boolean
@@ -2547,7 +3189,17 @@ components:
         decision: { $ref: '#/components/schemas/Decision' }
         availableActions:
           type: array
-          description: Empty except on `claim-orphaned`, whose two dispositions are the only actions this API offers anywhere.
+          description: |
+            Empty except on `claim-orphaned`, whose two dispositions are the only actions this API offers anywhere.
+
+            **🚧 Planned — MVP-30378, not yet implemented.** Also `[accept-source-revision]` on a
+            `claim-retained` entry with `retargeted: true`. It is optional: the entry's `decision`
+            stays `informational`. [assumes A-30378-3, A-30378-10]
+
+            **🚧 Planned — MVP-30379, not yet implemented.** Optional per-field decisions on three
+            kinds. `claim-retained` gains `accept-fields`, beside `accept-source-revision` when
+            retargeted. `member-add-collision` gains `accept-fields`. `claim-superseded` gains
+            `release`. Every other kind is unchanged. [assumes A-30379-7]
           items: { $ref: '#/components/schemas/Action' }
         retargeted:
           oneOf: [{ type: boolean }, { type: 'null' }]
@@ -2564,6 +3216,27 @@ components:
             on — without parsing `message`.
 
             The child *revision*, not the child *item*: see the endpoint description.
+
+            **🚧 Planned — MVP-30378, not yet implemented.** A `true` here is what makes the entry
+            offer `accept-source-revision`. [assumes A-30378-3]
+        revisionAdvances:
+          oneOf: [{ type: boolean }, { type: 'null' }]
+          x-planned: { ticket: MVP-30378, assumptions: [A-30378-4] }
+          description: |
+            **🚧 Planned — MVP-30378, not yet implemented.** Present on `claim-retained` and
+            `claim-superseded`, and `null` on every other kind, deliberately not defaulted, like
+            `retargeted`.
+
+            `true` when this is a **tracking** claim, one that stores no revision, and the revision
+            it renders moves with this pull: after the commit it renders the candidate's line
+            revision. The entry's kind is still judged on quantity and find number alone. The
+            move is otherwise visible only by comparing `current.detail.childItemRevisionId` with
+            `candidate.detail.childItemRevisionId`.
+
+            **Never true together with `retargeted`.** `retargeted` is about a *pinned* claim that
+            upstream moved away from. A pin does not move, so its `revisionAdvances` is `false`.
+            A tracking claim is never retargeted. The value is covered by `diffFingerprint`.
+            A `base` row's advance is still `member-version-advance`, unchanged.
         claimKind:
           oneOf: [{ type: string, enum: [claim, replace] }, { type: 'null' }]
           description: |
@@ -2730,6 +3403,15 @@ components:
             One entry per `claim-orphaned` entry from the preview. **Every one must appear**, or
             the commit is rejected with `DISPOSITION_REQUIRED`; naming any other kind is rejected
             with `INVALID_REQUEST`. Send `[]` (or omit) when the preview had no required entries.
+
+            > **🚧 Planned — MVP-30378, not yet implemented.** It may also carry **optional**
+            > decisions: `accept-source-revision` on a retargeted `claim-retained` entry. These are
+            > never required, and an entry left undecided keeps today's outcome.
+            > `DISPOSITION_REQUIRED` still keys on `claim-orphaned` alone. [assumes A-30378-10]
+
+            > **🚧 Planned — MVP-30379, not yet implemented.** It may also carry `accept-fields`
+            > (with `acceptedFields`) on `claim-retained` / `member-add-collision`, and `release` on
+            > `claim-superseded`. These are optional too. [assumes A-30379-7]
           items:
             type: object
             required: [entryId, action]
@@ -2753,7 +3435,49 @@ components:
                   row floats at the read clock like an `add`. A `convert-to-native` decision carries
                   **exactly one** of this and `childItemRevisionId`, or the commit answers
                   `422 REVISION_CHOICE_REQUIRED` before any delta or acceptance is written. Ignored
-                  on `remove`.
+                  on `remove`. **🚧 Planned — MVP-30378, not yet implemented.** Also ignored on
+                  `accept-source-revision`, whose revision is always the candidate's.
+                  [assumes A-30378-11]
+              acceptedFields:
+                type: object
+                minProperties: 1
+                additionalProperties: false
+                x-planned: { ticket: MVP-30379, assumptions: [A-30379-1, A-30379-2, A-30379-7] }
+                description: |
+                  **🚧 Planned — MVP-30379, not yet implemented.** `accept-fields` only, and
+                  required there. Each key is a field of the entry and each value says what to do
+                  with it. **Name only what you are taking.** An omitted field keeps the branch's
+                  own value, which is today's outcome.
+
+                  | Value | Meaning | Stores |
+                  |---|---|---|
+                  | `candidate` | Hold what upstream resolves now | the candidate's value. For the revision this is a **pin**, which reports `retargeted: true` again when upstream next moves the line. |
+                  | `release` | Stop holding the branch's own value | nothing. For the revision this is the state `trackChildRevision: true` leaves. A claim becomes a tracking claim that follows T_R and still gets a `claim-*` entry on every pull. A native row (`member-add-collision`) floats at the read clock. |
+
+                  `candidate` and `release` render identically on this pull and differently on
+                  later ones.
+
+                  Refused with `400 INVALID_REQUEST`:
+
+                  - any key other than the three below, including `childItem` and the old spelling
+                    `childItemRevision`
+                  - an empty object
+                  - a field that does not **actually diverge**, meaning the value the branch holds
+                    does not differ from the candidate's. A tracking claim holds no revision, so
+                    its revision never diverges, even when `current` and `candidate` render
+                    different revisions.
+                  - `release` on a value the branch does not hold
+                  - `release` on `quantity` or `findNumber`, which have no clock to fall back to.
+                    Use `revert`, or `release` on `claim-superseded`.
+                  - `acceptedFields` on any action other than `accept-fields`
+
+                  [assumes A-30379-1, A-30379-2, A-30379-7]
+                properties:
+                  quantity: { type: string, enum: [candidate] }
+                  findNumber: { type: string, enum: [candidate] }
+                  childItemRevisionId: { type: string, enum: [candidate, release] }
+                examples:
+                  - { childItemRevisionId: candidate }
 
     PullCommitResult:
       type: object
@@ -2790,7 +3514,14 @@ components:
         entryId: { type: string }
         kind:
           type: string
-          enum: [claim-orphaned, claim-retained, claim-superseded, member-add-converged]
+          enum: [claim-orphaned, claim-retained, claim-superseded, member-add-converged, member-add-collision]
+          description: |
+            | Value | Status |
+            |---|---|
+            | `claim-orphaned`, `claim-retained`, `claim-superseded`, `member-add-converged` | ✅ shipped |
+            | `member-add-collision` | 🚧 MVP-30379 — only when an `accept-fields` decision was taken on it |
+
+            [assumes A-30379-8]
         action:
           oneOf: [{ type: string }, { type: 'null' }]
           description: |
@@ -2801,6 +3532,12 @@ components:
             - `retired` — on `member-add-converged`. The commit appended a `Revert` delta dropping
               the branch's now-redundant local assertion. No decision is accepted for this kind.
             - `null` — on `claim-retained` and `claim-superseded`, where nothing was written.
+            - `accept-source-revision` — **🚧 Planned — MVP-30378, not yet implemented.** On a
+              `claim-retained` entry that took that optional decision. The claim is now pinned to
+              the candidate's revision. [assumes A-30378-11]
+            - `accept-fields` / `release` — **🚧 Planned — MVP-30379, not yet implemented.** On the
+              `claim-retained`, `member-add-collision` or `claim-superseded` entry that took that
+              decision. [assumes A-30379-8]
         edgeId:
           oneOf: [{ $ref: '#/components/schemas/SalesforceId' }, { type: 'null' }]
           description: The branch-owned `Assembly_CI__c` this entry's target names, if any.
@@ -3173,16 +3910,39 @@ components:
 
     PullUnprocessable:
       description: |
-        422 — well formed, but impossible against the model. Retrying the identical request will
-        never succeed.
+        422 — well formed, but impossible against the model. Retrying the identical request against
+        the same state will never succeed.
 
         | code | Cause |
         |---|---|
         | `CANDIDATE_ROOT_MISMATCH` | the candidate belongs to a **different root item** than the source |
         | `CYCLE_DETECTED` / `EBOM_CYCLE` | a cycle in the eBOM below the candidate root |
-        | `AMBIGUOUS_CORRELATION` | two edges on the **same side** of the diff share a correlation key, so which upstream line matches which branch line cannot be determined — no branch state the caller can reach will fix it |
+        | `AMBIGUOUS_CORRELATION` | the correlation join cannot tell which upstream line corresponds to which branch line — one of the three shapes below |
         | `REVISION_CHOICE_REQUIRED` | *commit only* — a `convert-to-native` decision carried neither or both of `childItemRevisionId` and `trackChildRevision: true` |
         | `REVISION_ITEM_MISMATCH` | *commit only* — a `convert-to-native` decision's `childItemRevisionId` is not a revision of the row's child item |
+
+        `AMBIGUOUS_CORRELATION` is raised in three shapes. Which remedy applies depends on the
+        shape, and the message's detail names the edges involved:
+
+        1. **A genuine duplicate line.** Two edges on the **same side** share a correlation key
+           **and** a parent revision. This is data: the BOM has to change, by giving one of the
+           lines its own secondary unique key — unless the pair is two of the branch's own rows
+           at one key, which a branch edit clears.
+        2. **A pairing that would be a guess.** Edges at one key are left on **both** sides under
+           different parent revisions, with more than one on a side. Usually data; a branch row in
+           the mix can be removed to clear it.
+        3. **Two unpaired entries at one position.** Two or more edges at one key would be left
+           without a counterpart on **one** side as the **same kind** of entry, so under one
+           `entryId`, where the diff could report only one of them. Rows that produce no entry
+           (`nested` rows, tombstones, branch-native rows) do not count, and neither do two rows
+           of different kinds. So a `replace` substitute beside a line of the same child that
+           upstream drops completes — the substitute `claim-orphaned`, the line `member-removed`
+           — but with that line **claimed** both are `claim-orphaned`, and the pull refuses. A
+           branch edit clears it: exclude the substitute, or revert the claim on the dropped line,
+           which then reads as `member-removed`.
+
+        One parent item rendering at two revisions is **not** one of these: the parent revision
+        separates those lines.
       content:
         application/json:
           schema: { $ref: '#/components/schemas/RestError' }
@@ -3223,19 +3983,19 @@ components:
 
     ComparisonUnprocessable:
       description: |
-        422 — well formed, but impossible against the model. Retrying the identical request will
-        never succeed.
+        422 — well formed, but impossible against the model. Retrying the identical request against
+        the same state will never succeed.
 
         | code | Cause |
         |---|---|
-        | `AMBIGUOUS_CORRELATION` | two edges on the **same side** share a correlation key, so which member on one side matches which on the other cannot be determined. No state the caller can reach will fix it — the same known gap the pull has |
+        | `AMBIGUOUS_CORRELATION` | the correlation join cannot tell which member on one side corresponds to which on the other. The same three shapes as on the pull (see `PullUnprocessable`): two edges on one side sharing a key **and** a parent revision, edges at one key left on both sides under different parent revisions with more than one on a side, or two or more edges at one key left unpaired on one side. A comparison reports every one-sided member on a side as one kind, so for the third shape any two members count — a substitute beside a line of the same child that the other side lacks refuses whether that line is claimed or not — and excluding the substitute clears it, since tombstones are not members. A fourth shape is the comparison's alone: two entries it would publish carry one `entryId` — two pairs at one key reported as the same kind, both `member-differs` or (with `includeUnchanged=true`) both `member-unchanged`. That happens when both configurations hold a substitute beside a line of the same child, or a claimed line beside a local `add` of the same child, and either both rows changed (two `member-differs`) or neither did and `includeUnchanged=true` (two `member-unchanged`). With one row changed, or with neither changed and `includeUnchanged` off, the comparison completes. Removing or reverting one of the branch's changes at that position clears it. Known gap: when the two sides' root items differ (`COMPARE_ROOTS_DIFFER`) the comparison runs no join and this check does not apply, so two members at one key on one side — such a substitute and its line, say — are published as two `member-removed` (or `member-added`) entries under one `entryId` rather than refused. On a baseline side no branch edit clears any of these: a baseline cannot be edited. One parent item rendering at two revisions is not one of them |
         | `CYCLE_DETECTED` | a cycle in the eBOM beneath either side's root, so that side cannot be resolved at all |
 
-        Both sides are resolved, so either can raise either code. `AMBIGUOUS_CORRELATION`'s message
-        names the offending side in the **join's** vocabulary rather than the comparison's:
-        `current side` is the **left** side and `candidate side` is the **right** one. The message
-        is shared with pull-preview, which is the surface that vocabulary was written for; switch on
-        `code`, and read the ids rather than the nouns.
+        Both sides are resolved, so either can raise either code. `AMBIGUOUS_CORRELATION`'s detail
+        names the offending side in the **comparison's** own vocabulary — `left side`,
+        `right side`, or `right and left sides` — where a pull's says `current` and `candidate`.
+        The label before it is shared with pull-preview; switch on `code`, and read the ids rather
+        than the nouns.
 
         A comparison always reports a cycle as **`CYCLE_DETECTED`**, never as the traversal's own
         `EBOM_CYCLE`: the two mean the same thing to a caller and are both 422, and carrying the
@@ -3248,7 +4008,7 @@ components:
             ambiguous:
               value:
                 code: AMBIGUOUS_CORRELATION
-                message: 'Two BOM lines share the same parent, child and secondary unique key, so this pull cannot tell which line corresponds to which. If these are genuinely duplicate lines, give one its own secondary unique key. If the parent item legitimately renders at two revisions in this tree, this is a known limitation (MVP-30214), not a data error -- contact support rather than editing BOM data that looks correct. (current side: parent item a02g8000000Ab01EAC, child item a02g8000000Ab20EAC, secondary unique key (none); edges a0Bg8000000Ab10EAC and a0Bg8000000Ab19EAC)'
+                message: "Several BOM lines share one position (the same parent, child and secondary unique key), so this pull or comparison cannot tell which line corresponds to which. If two BOM lines are genuine duplicates, give one its own secondary unique key. If this branch's own changes are among them, such as a substitute beside another line of the same part, exclude the substitute first, or in a pull revert your claim on that other line; otherwise remove or revert one of your changes at that position. A baseline cannot be edited, so these remedies apply only to the live branch. (left side: parent item a02g8000000Ab01EAC, child item a02g8000000Ab20EAC, secondary unique key (none); edges a0Bg8000000Ab10EAC and a0Bg8000000Ab19EAC, both under parent revision a0Ag8000000Ab01EAC)"
             cycle:
               value:
                 code: CYCLE_DETECTED
@@ -3446,6 +4206,144 @@ components:
             itemRevisionIds: [a0Ag8000000Ab73EAC]
             governingTimestamps: []
 
+    BranchTreeOverrideBadges:
+      summary: '🚧 MVP-30375 (planned) — isPinned follows the choice, not the rendered revision'
+      description: |
+        **🚧 Planned — MVP-30375, not yet implemented.** Four rows:
+
+        1. A claim pinned to the **same** revision its source line resolves to. It is badged,
+           although it renders no pinned structure.
+        2. A tracking claim. It is unbadged, although it renders a released revision.
+        3. A floating `new` row. It is unbadged.
+        4. A converted row that stamped a revision. It is badged, and it carries `wasClaimed`.
+      x-planned: { ticket: MVP-30375, assumptions: [A-30375-1, A-30375-2, A-30375-4] }
+      value:
+        asOf: '2026-04-05T17:22:03.518Z'
+        rootRevisionId: a0Ag8000000Ab01EAC
+        sourceTimePoint: '2026-01-15T00:00:00.000Z'
+        rows:
+          - edgeId: a1Eg8000000AbD1EAK
+            edgeKey: a0Bg8000000Ab10EAC
+            detail:
+              ciKind: assembly-edge
+              parentItemId: a02g8000000Ab01EAC
+              childItemId: a02g8000000Ab20EAC
+              childItemRevisionId: a0Ag8000000Ab41EAC
+              quantity: 4
+              findNumber: 10
+            provenance: claiming
+            governingTimestamp: '2026-04-05T17:22:03.518Z'
+            sourceId: a1Cg8000000AbCeEAK
+            isClaimed: true
+            isExcluded: false
+            isReplaced: false
+            isEditable: true
+            isPinned: true
+            wasClaimed: false
+            pinnedById: null
+            pinnedAt: null
+            childRows: []
+          - edgeId: a1Eg8000000AbD2EAK
+            edgeKey: a0Bg8000000Ab11EAC
+            detail:
+              ciKind: assembly-edge
+              parentItemId: a02g8000000Ab01EAC
+              childItemId: a02g8000000Ab21EAC
+              childItemRevisionId: a0Ag8000000Ab31EAC
+              quantity: 3
+              findNumber: 20
+            provenance: claiming
+            governingTimestamp: '2026-04-05T17:22:03.518Z'
+            sourceId: a1Cg8000000AbCeEAK
+            isClaimed: true
+            isExcluded: false
+            isReplaced: false
+            isEditable: true
+            isPinned: false
+            wasClaimed: false
+            pinnedById: null
+            pinnedAt: null
+            childRows: []
+          - edgeId: a1Eg8000000AbD9EAK
+            edgeKey: 'new-a1Bg8000000AbCdEAK-a02g8000000Ab01EAC-a02g8000000Ab90EAC'
+            detail:
+              ciKind: assembly-edge
+              parentItemId: a02g8000000Ab01EAC
+              childItemId: a02g8000000Ab90EAC
+              childItemRevisionId: a0Ag8000000Ab95EAC
+              quantity: 1
+              findNumber: 90
+            provenance: new
+            governingTimestamp: '2026-04-05T17:22:03.518Z'
+            sourceId: null
+            isClaimed: false
+            isExcluded: false
+            isReplaced: false
+            isEditable: true
+            isPinned: false
+            wasClaimed: false
+            pinnedById: null
+            pinnedAt: null
+            childRows: []
+          - edgeId: a1Eg8000000AbD3EAK
+            edgeKey: a0Bg8000000Ab12EAC
+            detail:
+              ciKind: assembly-edge
+              parentItemId: a02g8000000Ab01EAC
+              childItemId: a02g8000000Ab22EAC
+              childItemRevisionId: a0Ag8000000Ab61EAC
+              quantity: 3
+              findNumber: 30
+            provenance: new
+            governingTimestamp: '2026-04-05T17:22:03.518Z'
+            sourceId: null
+            isClaimed: false
+            isExcluded: false
+            isReplaced: false
+            isEditable: true
+            isPinned: true
+            wasClaimed: true
+            pinnedById: null
+            pinnedAt: null
+            childRows: []
+        warnings: []
+
+    BranchTreeRetiredStoredRevision:
+      summary: '🚧 MVP-30376 (planned) — a pinned claim whose chosen revision was cancelled'
+      description: |
+        **🚧 Planned — MVP-30376, not yet implemented.** The claim was pinned to Motor-002 rev-1,
+        and rev-1 was later cancelled. The row still renders rev-1. The warning names the row's
+        child item and the dead revision.
+      x-planned: { ticket: MVP-30376, assumptions: [A-30376-1, A-30376-3] }
+      value:
+        asOf: '2026-04-05T17:22:03.518Z'
+        rootRevisionId: a0Ag8000000Ab01EAC
+        sourceTimePoint: '2026-01-15T00:00:00.000Z'
+        rows:
+          - edgeId: a1Eg8000000AbD1EAK
+            edgeKey: a0Bg8000000Ab10EAC
+            detail:
+              ciKind: assembly-edge
+              parentItemId: a02g8000000Ab01EAC
+              childItemId: a02g8000000Ab20EAC
+              childItemRevisionId: a0Ag8000000Ab41EAC
+              quantity: 4
+              findNumber: 10
+            provenance: claiming
+            governingTimestamp: '2026-04-05T17:22:03.518Z'
+            sourceId: a1Cg8000000AbCeEAK
+            isClaimed: true
+            isExcluded: false
+            isReplaced: false
+            isEditable: true
+            childRows: []
+        warnings:
+          - warningCode: STORED_REVISION_RETIRED
+            message: 'This line is set to a specific revision that has since been cancelled or expired. It is still shown, because nobody chose to replace it — review whether it should now point at a different revision.'
+            itemId: a02g8000000Ab20EAC
+            itemRevisionIds: [a0Ag8000000Ab41EAC]
+            governingTimestamps: []
+
     SourceTree:
       value:
         asOf: '2026-04-05T17:22:03.518Z'
@@ -3543,6 +4441,55 @@ components:
             edgeId: a1Eg8000000AbD1EAK
             forked: true
 
+    DeltaBatchAutoClaimed:
+      summary: '🚧 MVP-30377 (planned) — update with autoClaim on a base line'
+      description: |
+        **🚧 Planned — MVP-30377, not yet implemented.** One operation claimed the line and revised
+        its quantity. `claimed: true` is the after-the-fact disclosure. `forked` is null because
+        nothing was forked: a claim mints its first revision.
+      x-planned: { ticket: MVP-30377, assumptions: [A-30377-2, A-30377-3] }
+      value:
+        branchId: a1Bg8000000AbCdEAK
+        atomic: true
+        asOf: '2026-04-05T17:24:40.220Z'
+        applied: 1
+        failed: 0
+        results:
+          - index: 0
+            clientRef: qty-in-one
+            op: update
+            success: true
+            errorCode: null
+            message: null
+            ciId: a1Gg8000000AbF2EAK
+            edgeId: a1Eg8000000AbD2EAK
+            forked: null
+            claimed: true
+
+    DeltaBatchRevisionSet:
+      summary: '🚧 MVP-30378 (planned) — set-revision on a claiming edge'
+      description: |
+        **🚧 Planned — MVP-30378, not yet implemented.** A new payload revision was appended, with
+        the row's quantity and find number carried forward. `forked` is null because
+        `set-revision` never edits in place, so there is no in-place alternative to report against.
+      x-planned: { ticket: MVP-30378, assumptions: [A-30378-1, A-30378-8] }
+      value:
+        branchId: a1Bg8000000AbCdEAK
+        atomic: true
+        asOf: '2026-04-06T15:10:00.000Z'
+        applied: 1
+        failed: 0
+        results:
+          - index: 0
+            clientRef: take-rev-2
+            op: set-revision
+            success: true
+            errorCode: null
+            message: null
+            ciId: a1Gg8000000AbF1EAK
+            edgeId: a1Eg8000000AbD1EAK
+            forked: null
+
     DeltaBatchAtomicFailure:
       value:
         code: CLAIM_REQUIRED
@@ -3638,6 +4585,59 @@ components:
         warnings:
           - warningCode: BASELINE_COUNT_DRIFT
             message: 'This baseline now resolves to a different number of rows than when it was cut. Something it depends on has changed. Cut recorded 4; this read resolved 5.'
+            itemId: null
+            itemRevisionIds: []
+            governingTimestamps: []
+
+    BaselineTreePinnedAuthor:
+      summary: '🚧 MVP-30375 (planned) — a pinned baseline row names who pinned it, and when'
+      description: |
+        **🚧 Planned — MVP-30375, not yet implemented.** `pinnedById` / `pinnedAt` come from the
+        payload revision that carries the row's current value.
+      x-planned: { ticket: MVP-30375, assumptions: [A-30375-4] }
+      value:
+        baselineId: a1Fg8000000AbE1EAK
+        label: Pilot build 1
+        resolutionTimePoint: '2026-04-06T14:31:02.000Z'
+        rows:
+          - edgeId: null
+            edgeKey: null
+            detail:
+              ciKind: assembly-edge
+              parentItemId: a02g8000000Ab01EAC
+              childItemId: a02g8000000Ab20EAC
+              childItemRevisionId: a0Ag8000000Ab41EAC
+              quantity: 4
+              findNumber: 10
+            provenance: claiming
+            governingTimestamp: '2026-04-06T14:31:02.000Z'
+            sourceId: a1Cg8000000AbCeEAK
+            isClaimed: true
+            isExcluded: false
+            isReplaced: false
+            isEditable: true
+            isPinned: true
+            wasClaimed: false
+            pinnedById: 005g8000000AbZ1AAK
+            pinnedAt: '2026-04-05T17:22:04.000Z'
+            childRows: []
+        warnings: []
+
+    BaselineTreePinDrift:
+      summary: '🚧 MVP-30375 (planned) — BASELINE_PIN_DRIFT'
+      description: |
+        **🚧 Planned — MVP-30375, not yet implemented.** The cut recorded one pinned row. The
+        re-derived read finds none, while the row and claim counts still match. `rows` is omitted
+        here.
+      x-planned: { ticket: MVP-30375, assumptions: [A-30375-5] }
+      value:
+        baselineId: a1Fg8000000AbE1EAK
+        label: Pilot build 1
+        resolutionTimePoint: '2026-04-06T14:31:02.000Z'
+        rows: []
+        warnings:
+          - warningCode: BASELINE_PIN_DRIFT
+            message: 'This baseline recorded a different number of rows with a chosen revision than it now re-derives. The rows shown are still the honest answer for the stored timepoint, but something the resolution depends on has changed since the baseline was taken.'
             itemId: null
             itemRevisionIds: []
             governingTimestamps: []
@@ -3886,6 +4886,336 @@ components:
         diffFingerprint: 'sha256:9f2c41ab7e08d3b6'
         generatedAt: '2026-04-05T17:22:03.518Z'
 
+    PullPreviewRevisionMoves:
+      summary: '🚧 MVP-30378 (planned) — a pinned claim offered accept-source-revision, and a tracking claim flagged revisionAdvances'
+      description: |
+        **🚧 Planned — MVP-30378, not yet implemented.** Assy-100 moves from rev-1 to rev-2, and
+        upstream re-revs two lines the branch claimed:
+
+        - **Motor-002**, claimed *pinned* to rev-1. The candidate would resolve rev-2, so the entry
+          is `claim-retained` with `retargeted: true`, and it offers the optional
+          `accept-source-revision`. `decision` stays `informational`.
+        - **Bracket-005**, claimed *tracking* with its quantity unchanged. It is
+          `claim-superseded`, since only quantity and find number decide that. It carries
+          `revisionAdvances: true` because after the commit it renders rev-4.
+
+        `candidate` is the raw upstream line.
+      x-planned: { ticket: MVP-30378, assumptions: [A-30378-3, A-30378-4, A-30378-10] }
+      value:
+        sourceId: a1Cg8000000AbCeEAK
+        branchId: a1Bg8000000AbCdEAK
+        branchLabel: MBOM-GDL
+        sourceType: Ebom
+        currentSourceVersion:
+          sourceRevisionId: a1Dg8000000AbCfEAK
+          rootItemRevisionId: a0Ag8000000Ab01EAC
+          rootItemNumber: Assy-100
+          rootRevisionLabel: rev-1
+          resolutionTimestamp: '2026-01-15T00:00:00.000Z'
+          acceptedAt: '2026-01-15T09:12:44.000Z'
+        candidateSourceVersion:
+          sourceRevisionId: null
+          rootItemRevisionId: a0Ag8000000Ab02EAC
+          rootItemNumber: Assy-100
+          rootRevisionLabel: rev-2
+          resolutionTimestamp: '2026-04-02T00:00:00.000Z'
+          acceptedAt: null
+        hasChanges: true
+        summary:
+          total: 3
+          informational: 3
+          required: 0
+          byKind:
+            source-version-advance: 1
+            claim-retained: 1
+            claim-superseded: 1
+        entries:
+          - entryId: '5c1e0a77f9b34d20'
+            kind: source-version-advance
+            decision: informational
+            availableActions: []
+            retargeted: null
+            revisionAdvances: null
+            claimKind: null
+            message: 'The source assembly moves to a newer released revision.'
+            target:
+              ciKind: source
+              edgeId: null
+              edgeKey: null
+              label: Assy-100
+              path:
+                - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
+            current: null
+            candidate: null
+          - entryId: '8a3e5f09c2d71b64'
+            kind: claim-retained
+            decision: informational
+            availableActions: [accept-source-revision]
+            retargeted: true
+            revisionAdvances: false
+            claimKind: claim
+            message: "Your change to this member is kept, and the newer revision's version of it is suppressed."
+            target:
+              ciKind: assembly-edge
+              edgeId: a1Eg8000000AbD1EAK
+              edgeKey: a0Bg8000000Ab10EAC
+              label: Motor-002
+              path:
+                - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
+            current:
+              provenance: claiming
+              governingClock: branch
+              governingTimestamp: '2026-04-05T17:22:03.518Z'
+              detail:
+                ciKind: assembly-edge
+                parentItemId: a02g8000000Ab01EAC
+                parentItemNumber: Assy-100
+                childItemId: a02g8000000Ab20EAC
+                childItemNumber: Motor-002
+                childItemRevisionId: a0Ag8000000Ab41EAC
+                childRevisionLabel: rev-1
+                quantity: 4
+                findNumber: 10
+            candidate:
+              provenance: base
+              governingClock: source
+              governingTimestamp: '2026-04-02T00:00:00.000Z'
+              detail:
+                ciKind: assembly-edge
+                parentItemId: a02g8000000Ab01EAC
+                parentItemNumber: Assy-100
+                childItemId: a02g8000000Ab20EAC
+                childItemNumber: Motor-002
+                childItemRevisionId: a0Ag8000000Ab42EAC
+                childRevisionLabel: rev-2
+                quantity: 4
+                findNumber: 10
+          - entryId: '3b91c7e0d5a2f846'
+            kind: claim-superseded
+            decision: informational
+            availableActions: []
+            retargeted: null
+            revisionAdvances: true
+            claimKind: claim
+            message: 'The newer revision now matches your change to this member, so your change no longer alters anything.'
+            target:
+              ciKind: assembly-edge
+              edgeId: a1Eg8000000AbD2EAK
+              edgeKey: a0Bg8000000Ab11EAC
+              label: Bracket-005
+              path:
+                - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
+            current:
+              provenance: claiming
+              governingClock: branch
+              governingTimestamp: '2026-04-05T17:22:03.518Z'
+              detail:
+                ciKind: assembly-edge
+                parentItemId: a02g8000000Ab01EAC
+                parentItemNumber: Assy-100
+                childItemId: a02g8000000Ab21EAC
+                childItemNumber: Bracket-005
+                childItemRevisionId: a0Ag8000000Ab31EAC
+                childRevisionLabel: rev-3
+                quantity: 2
+                findNumber: 20
+            candidate:
+              provenance: base
+              governingClock: source
+              governingTimestamp: '2026-04-02T00:00:00.000Z'
+              detail:
+                ciKind: assembly-edge
+                parentItemId: a02g8000000Ab01EAC
+                parentItemNumber: Assy-100
+                childItemId: a02g8000000Ab21EAC
+                childItemNumber: Bracket-005
+                childItemRevisionId: a0Ag8000000Ab32EAC
+                childRevisionLabel: rev-4
+                quantity: 2
+                findNumber: 20
+        warnings: []
+        truncated: false
+        entriesLimit: 200
+        diffFingerprint: 'sha256:4c0d9e72b1a83f56'
+        generatedAt: '2026-04-05T17:22:03.518Z'
+
+    PullPreviewPerFieldDecisions:
+      summary: '🚧 MVP-30379 (planned) — the three kinds that offer optional per-field decisions'
+      description: |
+        **🚧 Planned — MVP-30379, not yet implemented.** Three entries, none of them required:
+
+        - **Motor-002**, `claim-retained`. It is pinned to rev-1 while upstream moved to rev-2,
+          and its quantity 4 differs from upstream's 6. It offers `accept-fields` and, being
+          retargeted, `accept-source-revision`.
+        - **Label-400**, `member-add-collision`. It is a branch `add` at quantity 1, where upstream
+          now supplies quantity 2. It offers `accept-fields`.
+        - **Bracket-005**, `claim-superseded`. It is a tracking claim that matches upstream. It
+          offers `release`, which would revert it to `base`.
+      x-planned: { ticket: MVP-30379, assumptions: [A-30379-3, A-30379-7] }
+      value:
+        sourceId: a1Cg8000000AbCeEAK
+        branchId: a1Bg8000000AbCdEAK
+        branchLabel: MBOM-GDL
+        sourceType: Ebom
+        currentSourceVersion:
+          sourceRevisionId: a1Dg8000000AbCfEAK
+          rootItemRevisionId: a0Ag8000000Ab01EAC
+          rootItemNumber: Assy-100
+          rootRevisionLabel: rev-1
+          resolutionTimestamp: '2026-01-15T00:00:00.000Z'
+          acceptedAt: '2026-01-15T09:12:44.000Z'
+        candidateSourceVersion:
+          sourceRevisionId: null
+          rootItemRevisionId: a0Ag8000000Ab02EAC
+          rootItemNumber: Assy-100
+          rootRevisionLabel: rev-2
+          resolutionTimestamp: '2026-04-02T00:00:00.000Z'
+          acceptedAt: null
+        hasChanges: true
+        summary:
+          total: 3
+          informational: 3
+          required: 0
+          byKind:
+            claim-retained: 1
+            member-add-collision: 1
+            claim-superseded: 1
+        entries:
+          - entryId: '8a3e5f09c2d71b64'
+            kind: claim-retained
+            decision: informational
+            availableActions: [accept-fields, accept-source-revision]
+            retargeted: true
+            revisionAdvances: false
+            claimKind: claim
+            message: "Your change to this member is kept, and the newer revision's version of it is suppressed."
+            target:
+              ciKind: assembly-edge
+              edgeId: a1Eg8000000AbD1EAK
+              edgeKey: a0Bg8000000Ab10EAC
+              label: Motor-002
+              path:
+                - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
+            current:
+              provenance: claiming
+              governingClock: branch
+              governingTimestamp: '2026-04-05T17:22:03.518Z'
+              detail:
+                ciKind: assembly-edge
+                parentItemId: a02g8000000Ab01EAC
+                parentItemNumber: Assy-100
+                childItemId: a02g8000000Ab20EAC
+                childItemNumber: Motor-002
+                childItemRevisionId: a0Ag8000000Ab41EAC
+                childRevisionLabel: rev-1
+                quantity: 4
+                findNumber: 10
+            candidate:
+              provenance: base
+              governingClock: source
+              governingTimestamp: '2026-04-02T00:00:00.000Z'
+              detail:
+                ciKind: assembly-edge
+                parentItemId: a02g8000000Ab01EAC
+                parentItemNumber: Assy-100
+                childItemId: a02g8000000Ab20EAC
+                childItemNumber: Motor-002
+                childItemRevisionId: a0Ag8000000Ab42EAC
+                childRevisionLabel: rev-2
+                quantity: 6
+                findNumber: 10
+          - entryId: 'c7d42a9e0b15f386'
+            kind: member-add-collision
+            decision: informational
+            availableActions: [accept-fields]
+            retargeted: null
+            revisionAdvances: null
+            claimKind: null
+            message: 'The newer revision adds a member this branch already provides itself. Your own version is kept.'
+            target:
+              ciKind: assembly-edge
+              edgeId: a1Eg8000000AbD5EAK
+              edgeKey: 'new-a1Bg8000000AbCdEAK-a02g8000000Ab01EAC-a02g8000000Ab24EAC'
+              label: Label-400
+              path:
+                - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
+            current:
+              provenance: new
+              governingClock: branch
+              governingTimestamp: '2026-04-05T17:22:03.518Z'
+              detail:
+                ciKind: assembly-edge
+                parentItemId: a02g8000000Ab01EAC
+                parentItemNumber: Assy-100
+                childItemId: a02g8000000Ab24EAC
+                childItemNumber: Label-400
+                childItemRevisionId: a0Ag8000000Ab71EAC
+                childRevisionLabel: rev-1
+                quantity: 1
+                findNumber: 60
+            candidate:
+              provenance: base
+              governingClock: source
+              governingTimestamp: '2026-04-02T00:00:00.000Z'
+              detail:
+                ciKind: assembly-edge
+                parentItemId: a02g8000000Ab01EAC
+                parentItemNumber: Assy-100
+                childItemId: a02g8000000Ab24EAC
+                childItemNumber: Label-400
+                childItemRevisionId: a0Ag8000000Ab71EAC
+                childRevisionLabel: rev-1
+                quantity: 2
+                findNumber: 60
+          - entryId: '3b91c7e0d5a2f846'
+            kind: claim-superseded
+            decision: informational
+            availableActions: [release]
+            retargeted: null
+            revisionAdvances: false
+            claimKind: claim
+            message: 'The newer revision now matches your change to this member, so your change no longer alters anything.'
+            target:
+              ciKind: assembly-edge
+              edgeId: a1Eg8000000AbD2EAK
+              edgeKey: a0Bg8000000Ab11EAC
+              label: Bracket-005
+              path:
+                - { ciKind: source, label: Assy-100, edgeId: null, edgeKey: null }
+            current:
+              provenance: claiming
+              governingClock: branch
+              governingTimestamp: '2026-04-05T17:22:03.518Z'
+              detail:
+                ciKind: assembly-edge
+                parentItemId: a02g8000000Ab01EAC
+                parentItemNumber: Assy-100
+                childItemId: a02g8000000Ab21EAC
+                childItemNumber: Bracket-005
+                childItemRevisionId: a0Ag8000000Ab31EAC
+                childRevisionLabel: rev-3
+                quantity: 2
+                findNumber: 20
+            candidate:
+              provenance: base
+              governingClock: source
+              governingTimestamp: '2026-04-02T00:00:00.000Z'
+              detail:
+                ciKind: assembly-edge
+                parentItemId: a02g8000000Ab01EAC
+                parentItemNumber: Assy-100
+                childItemId: a02g8000000Ab21EAC
+                childItemNumber: Bracket-005
+                childItemRevisionId: a0Ag8000000Ab31EAC
+                childRevisionLabel: rev-3
+                quantity: 2
+                findNumber: 20
+        warnings: []
+        truncated: false
+        entriesLimit: 200
+        diffFingerprint: 'sha256:b5e81c3a9f04d267'
+        generatedAt: '2026-04-05T17:22:03.518Z'
+
     PullPreviewNoChanges:
       value:
         sourceId: a1Cg8000000AbCeEAK
@@ -3992,6 +5322,59 @@ components:
             kind: member-add-converged
             action: retired
             edgeId: a1Eg8000000AbD5EAK
+
+    PullCommitAcceptedSourceRevision:
+      summary: '🚧 MVP-30378 (planned) — the pinned claim now holds the candidate revision'
+      description: |
+        **🚧 Planned — MVP-30378, not yet implemented.** The commit that follows
+        `PullPreviewRevisionMoves` with one `accept-source-revision` decision. The superseded
+        tracking claim reports `action: null` as today. Nothing was written for it, and it renders
+        rev-4 because it follows T_R.
+      x-planned: { ticket: MVP-30378, assumptions: [A-30378-11] }
+      value:
+        sourceId: a1Cg8000000AbCeEAK
+        newSourceRevisionId: a1Dg8000000AbChEAK
+        acceptedRootRevisionId: a0Ag8000000Ab02EAC
+        acceptedAt: '2026-04-06T14:02:51.317Z'
+        applied:
+          - entryId: '8a3e5f09c2d71b64'
+            kind: claim-retained
+            action: accept-source-revision
+            edgeId: a1Eg8000000AbD1EAK
+          - entryId: '3b91c7e0d5a2f846'
+            kind: claim-superseded
+            action: null
+            edgeId: a1Eg8000000AbD2EAK
+
+    PullCommitAcceptedFields:
+      summary: '🚧 MVP-30379 (planned) — per-field decisions applied'
+      description: |
+        **🚧 Planned — MVP-30379, not yet implemented.** The commit that follows
+        `PullPreviewPerFieldDecisions`:
+
+        - Motor-002 took the revision (`childItemRevisionId: candidate`, a pin to rev-2) and kept
+          quantity 4.
+        - Label-400 took upstream's quantity.
+        - Bracket-005's claim was released, and the row is `base` from now on.
+      x-planned: { ticket: MVP-30379, assumptions: [A-30379-3, A-30379-8] }
+      value:
+        sourceId: a1Cg8000000AbCeEAK
+        newSourceRevisionId: a1Dg8000000AbChEAK
+        acceptedRootRevisionId: a0Ag8000000Ab02EAC
+        acceptedAt: '2026-04-06T14:02:51.317Z'
+        applied:
+          - entryId: '8a3e5f09c2d71b64'
+            kind: claim-retained
+            action: accept-fields
+            edgeId: a1Eg8000000AbD1EAK
+          - entryId: 'c7d42a9e0b15f386'
+            kind: member-add-collision
+            action: accept-fields
+            edgeId: a1Eg8000000AbD5EAK
+          - entryId: '3b91c7e0d5a2f846'
+            kind: claim-superseded
+            action: release
+            edgeId: a1Eg8000000AbD2EAK
 
     PullCommitAlreadyCurrent:
       value:
