@@ -1814,7 +1814,7 @@ paths:
 
         The two traversals are correlated on the BOM line's **`(Parent_Item__c, Item__c,
         Secondary_Unique_Key__c)`** — the parent *item*, not the parent revision. **Not** on the
-        line's `Assembly__c` Id (a tree row's `targetKey`, a diff target's `edgeKey`).
+        line's `Assembly__c` Id (a tree row's `targetKey`, a comparison or pull entry's `target.targetKey`).
 
         This is the load-bearing decision of the whole feature. When a parent item revs, Propel
         clones its entire BOM into new `Assembly__c` rows with new ids — so a branch that claimed a
@@ -4285,7 +4285,7 @@ components:
         ciId:
           oneOf: [{ $ref: '#/components/schemas/SalesforceId' }, { type: 'null' }]
           description: The `Branch_CI__c` for this member (the same value as a tree row's `ciId`). Null for `base` content, which has no branch-owned record until something claims it.
-        edgeKey:
+        targetKey:
           oneOf: [{ type: string }, { type: 'null' }]
           description: |
             The **display** key — the eBOM `Assembly__c` line id, or the synthetic key of
@@ -4322,7 +4322,7 @@ components:
         label: { type: string, examples: ['Assy-100'] }
         ciId:
           oneOf: [{ $ref: '#/components/schemas/SalesforceId' }, { type: 'null' }]
-        edgeKey:
+        targetKey:
           oneOf: [{ type: string }, { type: 'null' }]
 
     MemberState:
@@ -6581,11 +6581,11 @@ components:
             target:
               ciKind: assembly-edge
               ciId: a1Gg8000000AbF3EAK
-              edgeKey: a0Bg8000000Ab12EAC
+              targetKey: a0Bg8000000Ab12EAC
               label: Harness-011
               rowKey: a0Bg8000000Ab12
               path:
-                - { ciKind: source, label: Assy-100, ciId: null, edgeKey: null }
+                - { ciKind: source, label: Assy-100, ciId: null, targetKey: null }
             current:
               provenance: claiming
               governingClock: branch
@@ -6614,11 +6614,11 @@ components:
             target:
               ciKind: source
               ciId: null
-              edgeKey: null
+              targetKey: null
               label: Assy-100
               rowKey: null
               path:
-                - { ciKind: source, label: Assy-100, ciId: null, edgeKey: null }
+                - { ciKind: source, label: Assy-100, ciId: null, targetKey: null }
             current: null
             candidate: null
 
@@ -6633,11 +6633,11 @@ components:
             target:
               ciKind: assembly-edge
               ciId: null
-              edgeKey: a0Bg8000000Ab11EAC
+              targetKey: a0Bg8000000Ab11EAC
               label: Bracket-005
               rowKey: a0Bg8000000Ab11
               path:
-                - { ciKind: source, label: Assy-100, ciId: null, edgeKey: null }
+                - { ciKind: source, label: Assy-100, ciId: null, targetKey: null }
             current:
               provenance: base
               governingClock: source
@@ -6680,11 +6680,11 @@ components:
             target:
               ciKind: assembly-edge
               ciId: a1Gg8000000AbF1EAK
-              edgeKey: a0Bg8000000Ab10EAC
+              targetKey: a0Bg8000000Ab10EAC
               label: Motor-002
               rowKey: a0Bg8000000Ab10
               path:
-                - { ciKind: source, label: Assy-100, ciId: null, edgeKey: null }
+                - { ciKind: source, label: Assy-100, ciId: null, targetKey: null }
             current:
               provenance: claiming
               governingClock: branch
@@ -6727,11 +6727,11 @@ components:
             target:
               ciKind: assembly-edge
               ciId: null
-              edgeKey: a0Bg8000000Ab13EAC
+              targetKey: a0Bg8000000Ab13EAC
               label: Panel-300
               rowKey: null
               path:
-                - { ciKind: source, label: Assy-100, ciId: null, edgeKey: null }
+                - { ciKind: source, label: Assy-100, ciId: null, targetKey: null }
             current: null
             candidate:
               provenance: base
@@ -6760,11 +6760,11 @@ components:
             target:
               ciKind: assembly-edge
               ciId: a1Gg8000000AbF5EAK
-              edgeKey: 'ci-a1Gg8000000AbF5EAK'
+              targetKey: 'ci-a1Gg8000000AbF5EAK'
               label: Label-400
               rowKey: Hb3nYc8Pf1sJ6uWe
               path:
-                - { ciKind: source, label: Assy-100, ciId: null, edgeKey: null }
+                - { ciKind: source, label: Assy-100, ciId: null, targetKey: null }
             current:
               provenance: new
               governingClock: branch
@@ -6860,11 +6860,11 @@ components:
             target:
               ciKind: source
               ciId: null
-              edgeKey: null
+              targetKey: null
               label: Assy-100
               rowKey: null
               path:
-                - { ciKind: source, label: Assy-100, ciId: null, edgeKey: null }
+                - { ciKind: source, label: Assy-100, ciId: null, targetKey: null }
             current: null
             candidate: null
           - entryId: '8a3e5f09c2d71b64'
@@ -6878,11 +6878,11 @@ components:
             target:
               ciKind: assembly-edge
               ciId: a1Gg8000000AbF1EAK
-              edgeKey: a0Bg8000000Ab10EAC
+              targetKey: a0Bg8000000Ab10EAC
               label: Motor-002
               rowKey: a0Bg8000000Ab10
               path:
-                - { ciKind: source, label: Assy-100, ciId: null, edgeKey: null }
+                - { ciKind: source, label: Assy-100, ciId: null, targetKey: null }
             current:
               provenance: claiming
               governingClock: branch
@@ -6924,11 +6924,11 @@ components:
             target:
               ciKind: assembly-edge
               ciId: a1Gg8000000AbF2EAK
-              edgeKey: a0Bg8000000Ab11EAC
+              targetKey: a0Bg8000000Ab11EAC
               label: Bracket-005
               rowKey: a0Bg8000000Ab11
               path:
-                - { ciKind: source, label: Assy-100, ciId: null, edgeKey: null }
+                - { ciKind: source, label: Assy-100, ciId: null, targetKey: null }
             current:
               provenance: claiming
               governingClock: branch
@@ -7022,11 +7022,11 @@ components:
             target:
               ciKind: assembly-edge
               ciId: a1Gg8000000AbF1EAK
-              edgeKey: a0Bg8000000Ab10EAC
+              targetKey: a0Bg8000000Ab10EAC
               label: Motor-002
               rowKey: a0Bg8000000Ab10
               path:
-                - { ciKind: source, label: Assy-100, ciId: null, edgeKey: null }
+                - { ciKind: source, label: Assy-100, ciId: null, targetKey: null }
             current:
               provenance: claiming
               governingClock: branch
@@ -7068,11 +7068,11 @@ components:
             target:
               ciKind: assembly-edge
               ciId: a1Gg8000000AbF5EAK
-              edgeKey: 'ci-a1Gg8000000AbF5EAK'
+              targetKey: 'ci-a1Gg8000000AbF5EAK'
               label: Label-400
               rowKey: Hb3nYc8Pf1sJ6uWe
               path:
-                - { ciKind: source, label: Assy-100, ciId: null, edgeKey: null }
+                - { ciKind: source, label: Assy-100, ciId: null, targetKey: null }
             current:
               provenance: new
               governingClock: branch
@@ -7114,11 +7114,11 @@ components:
             target:
               ciKind: assembly-edge
               ciId: a1Gg8000000AbF2EAK
-              edgeKey: a0Bg8000000Ab11EAC
+              targetKey: a0Bg8000000Ab11EAC
               label: Bracket-005
               rowKey: a0Bg8000000Ab11
               path:
-                - { ciKind: source, label: Assy-100, ciId: null, edgeKey: null }
+                - { ciKind: source, label: Assy-100, ciId: null, targetKey: null }
             current:
               provenance: claiming
               governingClock: branch
@@ -7240,10 +7240,10 @@ components:
             target:
               ciKind: assembly-edge
               ciId: a1Gg8000000AbF3EAK
-              edgeKey: a0Bg8000000Ab12EAC
+              targetKey: a0Bg8000000Ab12EAC
               label: Harness-011
               rowKey: a0Bg8000000Ab12
-              path: [{ ciKind: source, label: Assy-100, ciId: null, edgeKey: null }]
+              path: [{ ciKind: source, label: Assy-100, ciId: null, targetKey: null }]
           - entryId: '5c1e0a77f9b34d20'
             kind: source-version-advance
             decision: informational
@@ -7253,7 +7253,7 @@ components:
               ciKind: source
               label: Assy-100
               rowKey: null
-              path: [{ ciKind: source, label: Assy-100, ciId: null, edgeKey: null }]
+              path: [{ ciKind: source, label: Assy-100, ciId: null, targetKey: null }]
         warnings: []
         page:
           limit: 2
@@ -7433,11 +7433,11 @@ components:
             target:
               ciKind: source
               ciId: null
-              edgeKey: null
+              targetKey: null
               label: Assy-100
               rowKey: null
               path:
-                - { ciKind: source, label: Assy-100, ciId: null, edgeKey: null }
+                - { ciKind: source, label: Assy-100, ciId: null, targetKey: null }
             left:
               provenance: base
               governingClock: source
@@ -7476,11 +7476,11 @@ components:
             target:
               ciKind: assembly-edge
               ciId: a1Gg8000000AbF1EAK
-              edgeKey: a0Bg8000000Ab10EAC
+              targetKey: a0Bg8000000Ab10EAC
               label: Motor-002
               rowKey: a0Bg8000000Ab10
               path:
-                - { ciKind: source, label: Assy-100, ciId: null, edgeKey: null }
+                - { ciKind: source, label: Assy-100, ciId: null, targetKey: null }
             left:
               # Claimed, so the branch has spoken about this edge and it answers to the BRANCH
               # clock from then on — which is what `governingClock: branch` states here.
@@ -7521,11 +7521,11 @@ components:
             target:
               ciKind: assembly-edge
               ciId: null
-              edgeKey: a0Bg8000000Ab12EAC
+              targetKey: a0Bg8000000Ab12EAC
               label: Harness-011
               rowKey: a0Bg8000000Ab12
               path:
-                - { ciKind: source, label: Assy-100, ciId: null, edgeKey: null }
+                - { ciKind: source, label: Assy-100, ciId: null, targetKey: null }
             left:
               provenance: base
               governingClock: source
@@ -7550,11 +7550,11 @@ components:
             target:
               ciKind: assembly-edge
               ciId: null
-              edgeKey: a0Bg8000000Ab13EAC
+              targetKey: a0Bg8000000Ab13EAC
               label: Panel-300
               rowKey: null
               path:
-                - { ciKind: source, label: Assy-100, ciId: null, edgeKey: null }
+                - { ciKind: source, label: Assy-100, ciId: null, targetKey: null }
             left: null
             right:
               provenance: base
@@ -7627,11 +7627,11 @@ components:
             target:
               ciKind: source
               ciId: null
-              edgeKey: null
+              targetKey: null
               label: Assy-100
               rowKey: null
               path:
-                - { ciKind: source, label: Assy-100, ciId: null, edgeKey: null }
+                - { ciKind: source, label: Assy-100, ciId: null, targetKey: null }
             left:
               provenance: base
               governingClock: source
@@ -7670,11 +7670,11 @@ components:
             target:
               ciKind: assembly-edge
               ciId: a1Gg8000000AbF1EAK
-              edgeKey: a0Bg8000000Ab10EAC
+              targetKey: a0Bg8000000Ab10EAC
               label: Motor-002
               rowKey: a0Bg8000000Ab10
               path:
-                - { ciKind: source, label: Assy-100, ciId: null, edgeKey: null }
+                - { ciKind: source, label: Assy-100, ciId: null, targetKey: null }
             left:
               provenance: claiming
               governingClock: branch
@@ -7716,11 +7716,11 @@ components:
             target:
               ciKind: assembly-edge
               ciId: null
-              edgeKey: a0Bg8000000Ab11EAC
+              targetKey: a0Bg8000000Ab11EAC
               label: Bracket-005
               rowKey: a0Bg8000000Ab11
               path:
-                - { ciKind: source, label: Assy-100, ciId: null, edgeKey: null }
+                - { ciKind: source, label: Assy-100, ciId: null, targetKey: null }
             left:
               provenance: base
               governingClock: source
@@ -7759,11 +7759,11 @@ components:
             target:
               ciKind: assembly-edge
               ciId: null
-              edgeKey: a0Bg8000000Ab12EAC
+              targetKey: a0Bg8000000Ab12EAC
               label: Harness-011
               rowKey: a0Bg8000000Ab12
               path:
-                - { ciKind: source, label: Assy-100, ciId: null, edgeKey: null }
+                - { ciKind: source, label: Assy-100, ciId: null, targetKey: null }
             left:
               provenance: base
               governingClock: source
@@ -7788,11 +7788,11 @@ components:
             target:
               ciKind: assembly-edge
               ciId: null
-              edgeKey: a0Bg8000000Ab13EAC
+              targetKey: a0Bg8000000Ab13EAC
               label: Panel-300
               rowKey: null
               path:
-                - { ciKind: source, label: Assy-100, ciId: null, edgeKey: null }
+                - { ciKind: source, label: Assy-100, ciId: null, targetKey: null }
             left: null
             right:
               provenance: base
@@ -7863,11 +7863,11 @@ components:
             target:
               ciKind: source
               ciId: null
-              edgeKey: null
+              targetKey: null
               label: Assy-100
               rowKey: null
               path:
-                - { ciKind: source, label: Assy-100, ciId: null, edgeKey: null }
+                - { ciKind: source, label: Assy-100, ciId: null, targetKey: null }
             left:
               provenance: base
               governingClock: source
@@ -7906,11 +7906,11 @@ components:
             target:
               ciKind: assembly-edge
               ciId: a1Gg8000000AbF1EAK
-              edgeKey: a0Bg8000000Ab10EAC
+              targetKey: a0Bg8000000Ab10EAC
               label: Motor-002
               rowKey: a0Bg8000000Ab10
               path:
-                - { ciKind: source, label: Assy-100, ciId: null, edgeKey: null }
+                - { ciKind: source, label: Assy-100, ciId: null, targetKey: null }
             left:
               provenance: claiming
               governingClock: branch
