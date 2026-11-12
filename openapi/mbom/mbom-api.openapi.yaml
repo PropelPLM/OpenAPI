@@ -401,7 +401,10 @@ paths:
           `MIXED_REVISION` is still reported, on the
           [findings](#operation/getBranchFindings), never blocking. A branch `add` under such an
           item binds to the item, not to one rendering: it appears under **every** occurrence,
-          with no warning of its own, and survives the parent advancing to a newer revision. Each
+          with no warning of its own, and survives the parent advancing to a newer revision. Where
+          an occurrence's own structure has a line at the same position as the `add` (same parent
+          item, child item and discriminator), only the `add` renders there, so the occurrence
+          never shows two identical rows. Each
           occurrence, and each of its children, has its own `rowKey`, so a client places every row
           under the right occurrence by `parentRowKey`.
         - **A row whose source line is gone renders only where the source's structure does
@@ -411,6 +414,12 @@ paths:
           inside a locally added or substituted assembly's `nested` copy of the item at another
           revision, a different structure renders, so the row does not appear there. A copy at
           the very revision the source renders is the same structure and shows it too.
+        - **An edit on a revision nothing renders does not appear.** A claim sits on its line's
+          parent revision. If no occurrence renders that revision any more, for example because
+          the branch excluded the parent's own line and added the parent item back, floating to a
+          later revision, the claim renders nowhere. No warning is raised, because no pin hid it.
+          It is still the branch's: it is addressable as below, and a pull whose candidate drops
+          its line still reports it as `claim-orphaned`.
         - **A substitute never absorbs another line of its new child.** When a
           `replace` substitute's child item also has its own, unrelated eBOM line under the same
           parent, both render. The substitute is its own row with its own
@@ -1128,7 +1137,9 @@ paths:
         - `replace` only works on eBOM-derived rows. A `new` row has a synthetic `new-…` edge
           key and no `Assembly__c` line, so replacing branch-added content is `update`, or
           `exclude` plus `add`.
-        - A row **hidden behind a pin** (see `PINNED_SUBTREE_HIDES_EDITS`) is addressable by
+        - A row **hidden behind a pin** (see `PINNED_SUBTREE_HIDES_EDITS`), or on a parent
+          revision nothing renders any more (see the [branch tree read](#operation/getBranchTree)),
+          is addressable by
           `ciId` for `exclude`, `restore`, `revert` and `convert-to-native`, and by `assemblyCiId`
           for `update` (its new quantity / find number render once the pin no longer
           hides the row). An `update` addressed by `ebomAssemblyId` still answers `NOT_FOUND`
