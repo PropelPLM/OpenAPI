@@ -17,7 +17,7 @@ import { argv, env, exit } from 'node:process';
 // hand, and re-serialising with the wrong one rewrites all ~4k lines as a single noise diff.
 // Tab is what Postman's own UI export emits.
 export const TARGETS = {
-  // Use the uid of the FORK of Propel APIs, not the upstream collection's. Feature folders (MBOM,
+  // Use the uid of the FORK of Propel APIs, not the upstream collection's. Feature folders (Site BOM,
   // and anything after it) are added in the fork, so pulling the parent would erase them here.
   propel: {
     uid: '46943044-f2d0b231-0ce9-4794-9296-3b01b4694111',
