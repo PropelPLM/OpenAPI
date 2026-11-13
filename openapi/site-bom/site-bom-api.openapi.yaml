@@ -195,9 +195,11 @@ info:
       nothing at or below that position changes. Snapshots begin `s2.`. A token in an older
       format, or one this API did not issue, is refused `400 INVALID_REQUEST`; start the read
       again without it.
-    - **Writes check what the caller read.** A delta batch refuses a line that another save
-      changed after the batch read the branch, with `409 STALE_REVISION` (see the
-      [delta endpoint](#operation/applyDeltaBatch)). No write silently overwrites another.
+    - **Writes check what the caller read.** A delta batch is refused `409 STALE_REVISION`
+      when the branch changed under it: a batch without `asOf` when any other save committed
+      while it was being validated, a batch with a past `asOf` when another save changed one of
+      its lines since (see the [delta endpoint](#operation/applyDeltaBatch)). The server never
+      retries; the client sends the batch again. No write silently overwrites another.
     - **Page size.** A page holds at most `limit` rows, and also at most about 2,000,000
       characters of line values, so a page can hold fewer rows than `limit` even when `hasMore`
       is true. It always holds at least one row. The cursor resumes after the last row returned.
@@ -1059,7 +1061,11 @@ paths:
         |---|---|---|
         | **Per operation**, against what the caller saw | an `update` that sends `expectInherited`, `expectedQuantity`, `expectedFindNumber`, `expectTrackedRevision`, `expectedChildItemRevisionId` or `expectedFields`, and the line no longer matches | `409 STALE_REVISION` for that operation, in `results[]` or `failures[]` |
         | **Per line**, under the branch lock | a batch sent with a past `asOf`, where another save changed one of its lines after that `asOf` | `409 STALE_REVISION` for the whole batch, with no `failures[]`; nothing is written |
-        | **Branch moved**, under the branch lock | a batch sent without `asOf`, where another save committed between this batch's read and its write | the batch is validated again against the branch as it now is, and applied if it still passes. If the branch moves a second time, `409 CONCURRENT_WRITE` |
+        | **Branch moved**, under the branch lock | a batch sent without `asOf`, where another save committed between this batch's read of the branch and its write, whichever lines that save changed | `409 STALE_REVISION` for the whole batch, with no `failures[]`; nothing is written. The server does not retry it: send it again, and it validates against the branch as it now is |
+
+        A rule that spans lines, such as the cycle check, was validated against a branch that is no
+        longer the one the batch would write to, which is why a live batch is refused whenever the
+        branch moved, not only when one of its own lines did.
 
         A save stamped in the same whole second as a past `asOf` counts as changed since: a false
         conflict that a retry resolves, never a lost update. To be told when a line you showed
@@ -1150,7 +1156,8 @@ paths:
         8. `INVALID_REQUEST`: an earlier operation in the batch already changes this line.
 
         After validation, under the branch lock: `STALE_REVISION` for the whole batch when it was
-        sent with a past `asOf` and another save changed the row since.
+        sent with a past `asOf` and another save changed the row since, or when it was sent without
+        `asOf` and another save committed to the branch while it was being validated.
 
         ### Choosing a child revision
 
@@ -1467,9 +1474,9 @@ paths:
             | `ALREADY_PRESENT` | `add` of a (parent, child) the branch already holds a row for — its own earlier `add`, or a claim of an eBOM line with no secondary unique key; or an op on a **replaced** row | edit the existing row with `update`; or act on the substitute |
             | `NO_CLAIM` | `revert` on a row the branch asserts nothing about; `convert-to-native` on a row that is already `new` | nothing to undo or sever |
             | `NOT_SUPPLIED` | `revert` on a row no source supplies — falling back would make it vanish | `exclude` instead |
-            | `STALE_REVISION` | an `update` whose `expect*` values no longer match the line (per operation); or a batch sent with a past `asOf` whose line another save changed since (whole batch, no `failures[]`) | reload and retry |
+            | `STALE_REVISION` | an `update` whose `expect*` values no longer match the line (per operation); a batch sent with a past `asOf` whose line another save changed since; or a batch sent without `asOf` while another save committed to the branch (whole batch, no `failures[]`) | reload and send again; the server does not retry |
             | `NOT_EDITABLE` | the target is inside the subtree of a locally added or substituted assembly, or of a row holding a revision other than its source line's | only source-supplied content is editable |
-            | `CONCURRENT_WRITE` | another transaction holds this branch's write lock, or the branch moved twice while this batch was being applied | send the same request again |
+            | `CONCURRENT_WRITE` | another transaction held this branch's write lock for the whole wait (about 10 seconds); the server does not retry | send the same request again |
           content:
             application/json:
               schema: { $ref: '#/components/schemas/RestError' }
@@ -2180,7 +2187,10 @@ paths:
         The limit is what one transaction can process. When the pull's resolutions and writes
         would exceed it, the commit is refused whole with `413 STRUCTURE_TOO_LARGE`, and nothing
         is written. Splitting the decisions does not help, because a pull commit is atomic and an
-        undecided `claim-orphaned` entry blocks it. A later version may answer such a commit
+        undecided `claim-orphaned` entry blocks it. A commit does more work than a read: it
+        re-runs the preview and then applies its decisions in the same transaction. So a commit
+        with decisions may be refused from about 5,000 lines (an estimate, not a measurement),
+        below the 8,000-line cap that a read of the same Site BOM passes. A later version may answer such a commit
         `202 Accepted` instead, taking the same request body.
 
         Pull preview and commit support structures up to 15 levels deep. A deeper structure may
@@ -3529,7 +3539,8 @@ components:
             Defaults to the server clock; never accepted in the future. A **past** value means
             "validate against the configuration as it stood then" — it never dates the write — and a
             line another save changed since then is refused `409 STALE_REVISION` for the whole
-            batch. Several operations refuse any supplied value, even one equal to now; see the
+            batch. Without it, the batch is refused `409 STALE_REVISION` when any other save
+            commits to the branch while it is being validated. Several operations refuse any supplied value, even one equal to now; see the
             endpoint description.
         operations:
           type: array
@@ -4473,7 +4484,8 @@ components:
             entry does not offer in `availableActions` is `400 INVALID_REQUEST`.
 
             There is **no fixed limit**: send every decision in one commit. A commit too
-            large for one transaction is refused whole with `413 STRUCTURE_TOO_LARGE`.
+            large for one transaction is refused whole with `413 STRUCTURE_TOO_LARGE`, which a
+            commit with decisions may reach from about 5,000 lines, below the 8,000-line cap.
           items:
             type: object
             required: [entryId, action]
@@ -5006,7 +5018,9 @@ components:
         Below the cap, the server checks the platform limits it has actually consumed (CPU time, memory, rows read,
         queries, rows written) as it resolves, and stops with this answer before it would run out,
         rather than failing with an unhandled error or returning a partial structure. It never
-        returns part of a structure as if it were the whole.
+        returns part of a structure as if it were the whole. A pull commit with decisions does
+        more work than a read and may answer this from about 5,000 lines (estimated, not
+        measured), so a Site BOM that reads fine can still be too large to commit a pull into.
 
         A smaller page does not help: the limit is about the configuration, not the response.
         Depth counts as well as size: pull preview and commit support structures up to 15 levels
@@ -5072,7 +5086,7 @@ components:
         | `STALE_REVISION` | `diffFingerprint` or `previewId` mismatch (a `previewId` in an older format included), or an `entryId` that no longer names an entry in the freshly re-resolved diff | re-run `pull-preview` and resubmit |
         | `DISPOSITION_REQUIRED` | a `claim-orphaned` entry has no decision — the only kind that can raise it. (A live `replace` substitute whose superseded line upstream keeps is `claim-retained` and never raises it.) | supply one for every required entry |
         | `NOT_RELEASED` / `CANDIDATE_NOT_NEWER` | revalidated at commit time and no longer qualifies | pick another candidate |
-        | `CONCURRENT_WRITE` | another transaction holds the branch's write lock — a delta batch or another commit | send the same request again |
+        | `CONCURRENT_WRITE` | another transaction — a delta batch or another commit — held the branch's write lock for the whole wait (about 10 seconds); the server does not retry | send the same request again |
       content:
         application/json:
           schema: { $ref: '#/components/schemas/RestError' }
