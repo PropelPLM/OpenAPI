@@ -157,15 +157,20 @@ info:
     | Custom permission | Needed for | Without it |
     |---|---|---|
     | `Propel_Configuration_Management` | Every `/site-bom` path, read or write | `403 FORBIDDEN`, before anything is read |
-    | `Propel_Configuration_Management_Edit` | Creating a Site BOM, a delta batch, a pull preview, a pull commit and a baseline cut | `403 FORBIDDEN` with the message *"You do not have permission to change configurations…"*, refused before the request body is read |
+    | `Propel_Configuration_Management_Edit` | Creating a Site BOM, a delta batch, a pull preview, a pull commit and a baseline cut | `403 FORBIDDEN` whose message carries *"You do not have permission to change configurations…"*, refused before the request body is read |
 
     A pull preview is gated like the pull commit it prepares. A comparison is a read and needs only
     the use permission.
 
     The writes also check record access: a caller who can see a branch but not edit it is refused
-    `403 FORBIDDEN` with the message *"You do not have edit access to this configuration, so it
+    `403 FORBIDDEN` whose message carries *"You do not have edit access to this configuration, so it
     cannot be changed."* A branch the caller cannot see at all answers `404 NOT_FOUND`, the same as
     one that does not exist. A `403` body never names the object that was denied.
+
+    These two write refusals put their reason in parentheses after the general `FORBIDDEN` text,
+    so the whole message reads *"You do not have permission to perform this action. (You do not
+    have edit access to this configuration, so it cannot be changed.)"*. Match on the reason, not
+    on the whole message.
 
     ---
 
@@ -486,9 +491,11 @@ paths:
           to that one line, and both occurrences show it with the same `ciId`. The same holds for
           two lines that share a line key. A delta batch can change such a line only once (see
           the [delta endpoint](#operation/applyDeltaBatch)).
-        - **Item display fields the caller cannot read are blank.** A field on the child item or
-          revision that field-level security hides from the caller is returned null rather than
-          failing the read.
+        - **An item description the caller cannot read is blank.** When field-level security hides
+          `Item__c.Description__c`, `childItemName` is returned null rather than failing the read.
+          The other display fields come from fields that field-level security cannot hide (the
+          item's `Name`, and the revision's required `Revision__c` and master-detail
+          `Master_Item__c`), so they are blank only on a row whose record the caller cannot see.
         - **Unreachable rows are dropped.** A delta can name a parent item that is not in the tree —
           a subassembly whose item had nothing released at T_R drops out, and a claim beneath it
           survives the overlay as a row with an absent parent. This read walks down from the root and
@@ -1059,9 +1066,9 @@ paths:
 
         | Check | When | Answer |
         |---|---|---|
-        | **Per operation**, against what the caller saw | an `update` that sends `expectInherited`, `expectedQuantity`, `expectedFindNumber`, `expectTrackedRevision`, `expectedChildItemRevisionId` or `expectedFields`, and the line no longer matches | `409 STALE_REVISION` for that operation, in `results[]` or `failures[]` |
+        | **Per operation**, against what the caller saw | an `update` that sends `expectInherited`, `expectedQuantity`, `expectedFindNumber`, `expectTrackedRevision`, `expectedChildItemRevisionId` or `expectedFields` (of which only the `Quantity__c` and `Find_Number__c` pairs are compared), and the line no longer matches | `409 STALE_REVISION` for that operation, in `results[]` or `failures[]` |
         | **Per line**, under the branch lock | a batch sent with a past `asOf`, where another save changed one of its lines after that `asOf` | `409 STALE_REVISION` for the whole batch, with no `failures[]`; nothing is written |
-        | **Branch moved**, under the branch lock | a batch sent without `asOf`, where another save committed between this batch's read of the branch and its write, whichever lines that save changed | `409 STALE_REVISION` for the whole batch, with no `failures[]`; nothing is written. The server does not retry it: send it again, and it validates against the branch as it now is |
+        | **Branch moved**, under the branch lock | a batch sent without `asOf` that would write at least one row, where another save committed between this batch's read of the branch and its write, whichever lines that save changed | `409 STALE_REVISION` for the whole batch, with no `failures[]`; nothing is written. The server does not retry it: send it again, and it validates against the branch as it now is. A batch with nothing to write (for example, `operations` is empty, or every operation failed under `atomic: false`) claims no log position and is never refused this way |
 
         A rule that spans lines, such as the cycle check, was validated against a branch that is no
         longer the one the batch would write to, which is why a live batch is refused whenever the
@@ -1100,10 +1107,10 @@ paths:
         |---|---|---|
         | `claim` | `targetKey`, and **exactly one of** `childItemRevisionId` \| `trackChildRevision: true` | Takes one live eBOM line into the branch as a copy-on-write claim, so the branch can diverge from it. Copies quantity and find number as they stand; the child revision is the caller's choice — a chosen revision **pins** it, `trackChildRevision: true` **tracks** the source line at T_R. Writes the line's branch row (`Branch_CI__c`) and one log row. |
         | `update` | `targetKey`; **at least one of** `quantity`, `findNumber`, a `fields` pair, `childItemRevisionId`, `trackChildRevision: true`; optional `autoClaim` and the `expect*` fields | Revises a branch-owned edge. Omitted fields keep the row's value. It appends a new log row that supersedes the row's current one. A `childItemRevisionId` different from the one the row **stores** pins it to that revision; `trackChildRevision: true` clears a stored revision. With `autoClaim: true` it also claims a `base` edge first (see `DeltaOperation.autoClaim`). |
-        | `add` | `parentItemId`, `childItemId`, `quantity`, `findNumber`; optional `childItemRevisionId`, `fields` | Adds a part the eBOM never supplied — packaging, fixtures, consumables. Provenance `new`. The child **floats** at `asOf`, unless `childItemRevisionId` pins it. A line cannot appear twice under one parent: if the branch already holds a row for the pair (its own earlier `add`, or a claim or exclusion of an eBOM line with no secondary unique key), the add is refused `409 ALREADY_PRESENT` (change it with `update`) or, when that row is excluded, `409 ALREADY_EXCLUDED` (`restore` it). |
+        | `add` | `parentItemId`, `childItemId`, `quantity` (positive); optional `findNumber`, `childItemRevisionId`, `fields` | Adds a part the eBOM never supplied — packaging, fixtures, consumables. Provenance `new`. Without `findNumber` the line has no find number. The child **floats** at `asOf`, unless `childItemRevisionId` pins it. A line cannot appear twice under one parent: if the branch already holds a row for the pair (its own earlier `add`, or a claim or exclusion of an eBOM line with no secondary unique key), the add is refused `409 ALREADY_PRESENT` (change it with `update`) or, when that row is excluded, `409 ALREADY_EXCLUDED` (`restore` it). |
         | `exclude` | `targetKey` | Tombstones a row. **No cascade is written** — the descendant prune is computed at read time, because a descendant still supplied through another path must survive. |
         | `restore` | `targetKey` | Lifts an exclusion. When the exclusion superseded a branch row, `restore` appends a row that copies that row's values, claim and chosen revision, so the line renders as it did before. When it superseded none (a `base` row excluded without being claimed), it appends a revert, and the line falls back to what its source supplies. |
-        | `replace` | `targetKey`, `newChildItemId`, `quantity`, `findNumber`; optional `childItemRevisionId`, `fields` | Substitutes a different child for the one a source line supplies, **recording that it is a substitution**, so the pair does not read as an unrelated removal plus an unrelated addition. The substitute floats at `asOf` unless `childItemRevisionId` pins it. `targetKey` names a `base` or claimed row, including a claimed row whose eBOM line a pull removed (rendered under `ci-<Branch_CI__c Id>`). A row the branch added, or a substitute, is refused `400 INVALID_REQUEST`. |
+        | `replace` | `targetKey`, `newChildItemId`, `quantity` (positive); optional `findNumber`, `childItemRevisionId`, `fields` | Substitutes a different child for the one a source line supplies, **recording that it is a substitution**, so the pair does not read as an unrelated removal plus an unrelated addition. Without `findNumber` the substitute keeps the replaced line's find number. The substitute floats at `asOf` unless `childItemRevisionId` pins it. `targetKey` names a `base` or claimed row, including a claimed row whose eBOM line a pull removed (rendered under `ci-<Branch_CI__c Id>`). A row the branch added, or a substitute, is refused `400 INVALID_REQUEST`. |
         | `revert` | `targetKey` | Discards the branch's claim so the row falls back to what its source supplies. Nothing is deleted: the revert is recorded in the branch log, and the branch content for the row stops applying. |
         | `convert-to-native` | `targetKey`, and **exactly one of** `childItemRevisionId` \| `trackChildRevision: true` | Severs a claiming edge's link to the source it claims: same quantity and find number, but now branch-owned in its own right (`provenance` flips `claiming` → `new`). The child revision is the caller's choice — a chosen revision is stamped on, `trackChildRevision: true` floats at `asOf`. |
 
@@ -1233,8 +1240,12 @@ paths:
           *"You do not have Edit access to {field}."*). The value must fit the field: length,
           precision and scale, restricted picklist values, a readable lookup target
           (`INVALID_REQUEST`). One line's values must fit in 131,072 characters.
-        - `expectedFields` on an `update` carries what the caller saw for the fields it writes, as
-          `expectedQuantity` and `expectedFindNumber` do; a mismatch is `409 STALE_REVISION`.
+        - `expectedFields` on an `update` carries what the caller saw, as `expectedQuantity` and
+          `expectedFindNumber` do. **Only the `Quantity__c` and `Find_Number__c` pairs are
+          compared**, and each only when the same operation writes that field; a mismatch is
+          `409 STALE_REVISION`. A pair for any other line field is checked to be a line field
+          (`INVALID_REQUEST` if not) and is otherwise not compared, so it cannot catch a
+          concurrent change to that field.
         - Validation rules, triggers and flows on `Assembly__c` do not run on branch values,
           because no `Assembly__c` record is saved.
 
@@ -1323,7 +1334,10 @@ paths:
                       targetKey: a0Bg8000000Ab10EAC
                       trackChildRevision: true
               updateLineValues:
-                summary: Change a line's notes and quantity, refusing the save if either moved since it was shown
+                summary: Change a line's notes and quantity, refusing the save if the quantity moved since it was shown
+                description: |
+                  `expectedFields` compares only `Quantity__c` and `Find_Number__c`, so it guards the
+                  quantity here. A `Notes__c` pair in it would be accepted and check nothing.
                 value:
                   operations:
                     - op: update
@@ -1334,7 +1348,6 @@ paths:
                         - { field: PDLM__Notes__c, value: Torque to 2.5 Nm }
                       expectedFields:
                         - { field: PDLM__Quantity__c, value: '2' }
-                        - { field: PDLM__Notes__c, value: null }
               addLocal:
                 summary: Add a part the eBOM never supplied
                 value:
@@ -1594,8 +1607,10 @@ paths:
 
         ## Excluded rows are not members
 
-        `memberCount` counts what the configuration *contains*, so tombstoned rows are not counted —
-        which means it is **not** the number of rows the tree endpoint renders. The baseline read
+        `memberCount` counts what the configuration *contains*, so tombstoned rows are not counted,
+        and neither are `nested` rows (the structure beneath a locally added or pinned assembly,
+        which floats at the read clock by design). It is therefore **not** the number of rows the
+        tree endpoint renders, though nested rows are still in the baseline's tree. The baseline read
         filters on the same rule, so the stored count stays comparable to a later read.
 
         ## Immutable from the insert
@@ -2402,8 +2417,8 @@ paths:
       summary: Compare a branch against another configuration
       description: |
         The structural difference between two configurations: which members each holds, and where
-        the two disagree on a line value (quantity, find number or any other field in the line
-        field set the caller can read) or on the child revision they resolve to.
+        the two disagree on a line value (quantity, find number or any other line field the read
+        returns in `detail.fields`) or on the child revision they resolve to.
 
         The **left** side is the branch the path names. The **right** side is named by
         `rightKind` + `rightId`, and may be another branch, a baseline, a source, or a released
@@ -3195,7 +3210,8 @@ components:
           type: array
           description: |
             On `modified`, which values differ: `quantity`, `findNumber` and `childRevision` by
-            those names, in that order, then any other line field by its API name. Empty otherwise.
+            those names, in that order, then any other line field in `detail.fields` (the readable
+            fields a branch can override, and formulas) by its API name. Empty otherwise.
           items:
             type: string
           examples:
@@ -3520,7 +3536,6 @@ components:
 
     DeltaBatchRequest:
       type: object
-      required: [operations]
       properties:
         atomic:
           type: boolean
@@ -3539,13 +3554,16 @@ components:
             Defaults to the server clock; never accepted in the future. A **past** value means
             "validate against the configuration as it stood then" — it never dates the write — and a
             line another save changed since then is refused `409 STALE_REVISION` for the whole
-            batch. Without it, the batch is refused `409 STALE_REVISION` when any other save
-            commits to the branch while it is being validated. Several operations refuse any supplied value, even one equal to now; see the
+            batch. Without it, a batch that writes at least one row is refused
+            `409 STALE_REVISION` when any other save commits to the branch while it is being
+            validated. Several operations refuse any supplied value, even one equal to now; see the
             endpoint description.
         operations:
           type: array
           maxItems: 200
-          description: At most 200 — beyond that, `BATCH_TOO_LARGE` (413), refused before anything is resolved.
+          description: |
+            At most 200 — beyond that, `BATCH_TOO_LARGE` (413), refused before anything is resolved.
+            Omitted, null or empty, the batch writes nothing and answers `200` with `applied: 0`.
           items: { $ref: '#/components/schemas/DeltaOperation' }
 
     DeltaOperation:
@@ -3655,9 +3673,11 @@ components:
         expectedFields:
           type: array
           description: |
-            `update` only. The values the caller saw, as `{field, value}` pairs, for the fields it
-            writes. A field the operation does not write is not checked; a name that is not a line
-            field is `INVALID_REQUEST`. A value that no longer matches is `409 STALE_REVISION`.
+            `update` only. The values the caller saw, as `{field, value}` pairs. **Only the
+            `Quantity__c` and `Find_Number__c` pairs are compared**, and each only when the
+            operation writes that field; a value that no longer matches is `409 STALE_REVISION`.
+            A pair for any other line field is accepted and not compared, and a null value is not
+            checked. A name that is not a line field is `INVALID_REQUEST`.
           items: { $ref: '#/components/schemas/FieldValue' }
         childItemRevisionId:
           oneOf: [{ $ref: '#/components/schemas/SalesforceId' }, { type: 'null' }]
@@ -3877,7 +3897,7 @@ components:
           type: integer
           minimum: 0
           description: |
-            How many rows the cut resolved, **excluding tombstones**. This is the count of what the
+            How many rows the cut resolved, **excluding tombstones and `nested` rows**. This is the count of what the
             configuration *contains*, not the count of rows the tree endpoint renders. Also the
             canary behind `BASELINE_COUNT_DRIFT`; `BASELINE_PROVENANCE_DRIFT` is fed by the
             `claiming`-row count recorded alongside it.
@@ -4367,14 +4387,24 @@ components:
         `parentItemNumber`, `childItemNumber`, `childItemName` and `childRevisionLabel` are
         populated on every read. They are looked
         up once per page, never once per row. They are display values: null where the record is
-        not visible to the caller, or where field-level security hides the field from the caller
-        (the read is not refused), so never treat a null as evidence that an item has no number.
+        not visible to the caller, so never treat a null as evidence that an item has no number.
+        `childItemName` is also null where field-level security hides `Item__c.Description__c`
+        (the read is not refused). The other three come from fields field-level security cannot
+        hide: the item's `Name`, and the revision's required `Revision__c`.
 
         ## Line values
 
-        `fields` carries the line's values for every field in the configuration management line
-        field set that the caller can read, formulas included and recalculated with the branch's
-        values. `quantity` and `findNumber` repeat the `Quantity__c` and `Find_Number__c` values.
+        `fields` carries the line's values for the fields of the configuration management line
+        field set that the caller can read and that a branch can override, plus the field set's
+        formulas, recalculated with the branch's values. `quantity` and `findNumber` repeat the
+        `Quantity__c` and `Find_Number__c` values.
+
+        A field set member a branch cannot override is **not returned**, even when the caller can
+        read it: a standard field (`CurrencyIsoCode` aside), an auto-number, an encrypted, rich
+        text or required custom field, a field of a type the codec does not support, a field that
+        identifies the line, or a cross-object path. The same set bounds `differingFields` on a
+        comparison and `changedFields` on a pull preview. In a multi-currency org with a currency
+        field in the set, `CurrencyIsoCode` is included.
       required: [ciKind]
       properties:
         ciKind: { type: string, const: assembly-edge }
@@ -4440,7 +4470,8 @@ components:
               items: { $ref: '#/components/schemas/FieldValue' }
             - type: 'null'
           description: |
-            Every line field set field the caller may read, by API name, in field set order: the
+            Every line field set field the caller may read that a branch can override, plus the
+            set's formulas (see the schema description for what is left out), by API name, in field set order: the
             eBOM line's values with this row's own values on top, formulas recalculated, then
             field-level security applied. A field the caller cannot read is absent; a readable
             empty field is present with a null value. A row the branch added carries only its own
@@ -4478,8 +4509,8 @@ components:
             had no required entries.
 
             It may also carry **optional** decisions: `accept-fields` (with
-            `acceptedFields`) on `claim-retained` / `member-add-collision`, and `release` on
-            `claim-superseded`. An entry left undecided keeps the branch's value.
+            `acceptedFields`) on `claim-retained` / `member-add-collision`, `use-source-line` on a
+            `member-add-collision` that offers it, and `release` on `claim-superseded`. An entry left undecided keeps the branch's value.
             `DISPOSITION_REQUIRED` keys on `claim-orphaned` alone. A decision whose `action` its
             entry does not offer in `availableActions` is `400 INVALID_REQUEST`.
 
@@ -4821,7 +4852,8 @@ components:
           description: |
             Which values disagree, in a fixed order so two calls produce byte-identical lists:
             `quantity`, `findNumber` and `childRevision` by those names, in that order, then any
-            other line field the caller can read, by its API name, in field set order. Populated on
+            other line field in `detail.fields` (the readable fields a branch can override, and
+            formulas), by its API name, in field set order. Populated on
             `member-differs`; **empty on every other kind** — empty rather than null, so a client
             can iterate unconditionally. Each side's `detail.fields` holds the values.
 
@@ -4977,12 +5009,12 @@ components:
               summary: A write without the configuration management edit permission
               value:
                 code: FORBIDDEN
-                message: 'You do not have permission to change configurations. Ask your administrator for the Propel Configuration Management Edit permission.'
+                message: 'You do not have permission to perform this action. (You do not have permission to change configurations. Ask your administrator for the Propel Configuration Management Edit permission.)'
             branchNotEditable:
               summary: A write to a branch the caller can see but not edit
               value:
                 code: FORBIDDEN
-                message: 'You do not have edit access to this configuration, so it cannot be changed.'
+                message: 'You do not have permission to perform this action. (You do not have edit access to this configuration, so it cannot be changed.)'
             notEnabled:
               value:
                 code: FEATURE_NOT_ENABLED
@@ -5818,7 +5850,7 @@ components:
             redline: null
         warnings:
           - warningCode: PINNED_SUBTREE_HIDES_EDITS
-            message: 'Some edits on this branch will not take effect. A row is pinned to a revision whose own structure replaces the lines those edits were made on, so they are not part of this configuration.'
+            message: 'Some edits on this branch will not take effect. A row shows a revision whose own structure replaces the lines those edits were made on, either because the row is pinned to that revision or because it follows its item''s latest released revision. Those edits are not part of this configuration.'
             rowKey: a0Bg8000000Ab14
             itemId: a02g8000000Ab32EAC
             itemRevisionIds: [a0Ag8000000Ab73EAC]
