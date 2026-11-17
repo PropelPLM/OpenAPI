@@ -8,9 +8,9 @@ This repository contains the [OpenAPI Specifications][openapi] for Propel APIs a
 
 | Path | Contents |
 |---|---|
-| `openapi/collections/` | The main **Propel APIs** Postman collection — every feature is a folder inside it, including **MBOM** |
+| `openapi/collections/` | The main **Propel APIs** Postman collection — every feature is a folder inside it, including **Site BOM** |
 | `openapi/pim/` | PIM Postman collection |
-| `openapi/mbom/` | MBOM (Manufacturing BOM) spec — OpenAPI 3.1, whole-document. Spec only; its requests live in the main collection |
+| `openapi/site-bom/` | Site BOM spec — OpenAPI 3.1, whole-document. Spec only; its requests live in the main collection |
 | `openapi/schemas/` | Per-endpoint schema fragments, each committed as both `.yml`/`.yaml` and `.json` |
 
 Specs are committed in **both YAML and JSON**. The YAML is the file to edit; regenerate its twin
@@ -47,12 +47,17 @@ live in Postman without re-typing it.
 ```bash
 POSTMAN_API_KEY=<key> node scripts/push-postman-collection.mjs <target> <folderName>
 # e.g.:
-POSTMAN_API_KEY=<key> node scripts/push-postman-collection.mjs propel MBOM
+POSTMAN_API_KEY=<key> node scripts/push-postman-collection.mjs propel "Site BOM"
 ```
 
 It only touches the named folder: it fetches your live fork, replaces just that one folder with
 the local version, and sends the merged collection back. Other folders in your fork — including
 any edits you haven't pulled down yet — are left alone.
+
+After renaming a folder and its collection variables locally, add `--replace <oldFolderName>` so the
+fork's old folder is replaced in place, and `--rename-vars <oldPrefix>:<newPrefix>` so the fork's
+variables are renamed with their values kept. Any variable the folder uses that the fork lacks is
+added on every push.
 
 Pulling and pushing are both one-way. Neither script merges automatically — whichever side you
 run last for a given folder wins, so pull before you push if you're not sure which side is
