@@ -374,8 +374,8 @@ paths:
                     sourceRevisionId: a1Dg8000000AbCfEAK
         '400':
           description: |
-            `INVALID_REQUEST` — the body was empty or unreadable; `siteBomName` or `branchLabel` was
-            blank; either exceeded its field length (`siteBomName` ≤ 80, `branchLabel` ≤ 80); or
+            `INVALID_REQUEST` — the body was empty or unreadable; `branchLabel` was blank, or
+            `siteBomName` was blank and no category autonumber names the Site BOM; either exceeded its field length (`siteBomName` ≤ 80, `branchLabel` ≤ 80); or
             `categoryId` names a category whose type is not Baseline, or one that is inactive.
 
             A malformed id in the **body** is a 400 while one in the **URI** is a 404, and that is
@@ -3063,7 +3063,7 @@ components:
 
     SiteBomCreateRequest:
       type: object
-      required: [rootItemRevisionId, siteBomName, branchLabel]
+      required: [rootItemRevisionId, branchLabel]
       properties:
         rootItemRevisionId:
           allOf: [{ $ref: '#/components/schemas/SalesforceId' }]
@@ -3071,12 +3071,15 @@ components:
             The **released** `Item_Revision__c` the Site BOM is built over. Its `Released_Date_Time__c`
             becomes T_R.
         siteBomName:
-          type: string
+          type: [string, 'null']
           maxLength: 80
           description: |
-            `Site_BOM__c.Name`. Required: a blank value is refused with `INVALID_REQUEST`, because an
-            Site BOM with a blank name would be named after its own record id, which nobody can search
-            for.
+            `Site_BOM__c.Name`. Required unless `categoryId` names a category with an autonumber: a
+            blank value is then assigned the autonumber's next number. Otherwise a blank value is
+            refused with `INVALID_REQUEST`, because a Site BOM with a blank name would be named after
+            its own record id, which nobody can search for. When the category restricts overriding its
+            autonumber and the caller lacks the `Override_Restricted_Autonumber` permission, a supplied
+            name is replaced by the next number.
           examples: ['Assy-100 Site BOM']
         branchLabel:
           type: string
