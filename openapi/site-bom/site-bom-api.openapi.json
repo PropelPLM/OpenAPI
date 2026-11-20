@@ -53,7 +53,7 @@
     },
     {
       "name": "Baselines",
-      "description": "Recording and replaying a configuration. A baseline stores a log position and re-resolves on read.\n"
+      "description": "Recording and replaying a configuration. A baseline stores a log position and re-resolves on read.\nIt also carries its standing in its branch's lifecycle: its phase, whether it is released, and\nthe open change it is on.\n"
     },
     {
       "name": "Pull",
@@ -1189,7 +1189,7 @@
         ],
         "operationId": "cutBaseline",
         "summary": "Cut a baseline over a branch",
-        "description": "Records the branch's full effective structure at one point in its history — **as that\npoint**.\n\n## A baseline stores a log position, not rows\n\nThe cut writes one `Baseline__c` record carrying the branch log position it read, its\nresolution timepoint (`resolutionTimePoint`) and the source acceptance in effect there, and\nnothing else about the content. An undated cut reads the branch's latest committed\nposition; a cut with `cutDateTime` reads the last position recorded by then. Reading the\nbaseline back **replays the resolution** at that position, which is exact because every\nsave appends rows above the latest position and nothing at or below it ever changes.\n\nStoring the rows instead would cost one record per edge per cut — roughly 36 MB for an\n18,000-edge BOM.\n\nNothing is frozen: no row is edited in place, so there is nothing a later edit could\nchange underneath the baseline. An `update` after the cut behaves exactly as before it.\nThe cut takes no lock either: a save in progress writes above the position the cut reads,\nso the cut never waits for it.\n\n## Two timestamps, and why they are not one\n\n`resolutionTimePoint` is what the content was resolved at; `takenAt` is the wall-clock moment\nof the cut. Kept apart, a correction to the server clock cannot change what a baseline\nresolves to. The request names the timepoint `cutDateTime`; the response reports it as\n`resolutionTimePoint`.\n\nBoth are reported **to the whole second** (milliseconds `.000`), matching what a later read\nof the same record returns.\n\n## Stored canary counts\n\nThe cut also stores how many rows are `claiming` and how many hold a chosen revision\n(`hasChosenRevision`). Neither is returned here — there is no `pinnedCount` —\nand both feed the baseline read's drift warnings.\n\n## Excluded rows are not members\n\n`memberCount` counts what the configuration *contains*, so tombstoned rows are not counted,\nand neither are `nested` rows (the structure beneath a locally added or pinned assembly,\nwhich floats at the read clock by design). It is therefore **not** the number of rows the\ntree endpoint renders, though nested rows are still in the baseline's tree. The baseline read\nfilters on the same rule, so the stored count stays comparable to a later read.\n\n## Immutable from the insert\n\nThere is no draft-baseline state and no lock step: every update to a `Baseline__c` is refused\noutright, and every hard delete too.\n\n## Access\n\nRequires both configuration management custom permissions (see\n[Permissions](#section/Permissions)), checked before the body is read, and edit access to\nthe branch record: a caller who can see the branch but not edit it is refused\n`403 FORBIDDEN`.\n",
+        "description": "Records the branch's full effective structure at one point in its history — **as that\npoint**.\n\n## A baseline stores a log position, not rows\n\nThe cut writes one `Baseline__c` record carrying the branch log position it read, its\nresolution timepoint (`resolutionTimePoint`) and the source acceptance in effect there, and\nnothing else about the content. An undated cut reads the branch's latest committed\nposition; a cut with `cutDateTime` reads the last position recorded by then. Reading the\nbaseline back **replays the resolution** at that position, which is exact because every\nsave appends rows above the latest position and nothing at or below it ever changes.\n\nStoring the rows instead would cost one record per edge per cut — roughly 36 MB for an\n18,000-edge BOM.\n\nNothing is frozen: no row is edited in place, so there is nothing a later edit could\nchange underneath the baseline. An `update` after the cut behaves exactly as before it.\nThe cut takes no lock either: a save in progress writes above the position the cut reads,\nso the cut never waits for it.\n\n## Two timestamps, and why they are not one\n\n`resolutionTimePoint` is what the content was resolved at; `takenAt` is the wall-clock moment\nof the cut. Kept apart, a correction to the server clock cannot change what a baseline\nresolves to. The request names the timepoint `cutDateTime`; the response reports it as\n`resolutionTimePoint`.\n\nBoth are reported **to the whole second** (milliseconds `.000`), matching what a later read\nof the same record returns.\n\n## Stored canary counts\n\nThe cut also stores how many rows are `claiming` and how many hold a chosen revision\n(`hasChosenRevision`). Neither is returned here — there is no `pinnedCount` —\nand both feed the baseline read's drift warnings.\n\n## Excluded rows are not members\n\n`memberCount` counts what the configuration *contains*, so tombstoned rows are not counted,\nand neither are `nested` rows (the structure beneath a locally added or pinned assembly,\nwhich floats at the read clock by design). It is therefore **not** the number of rows the\ntree endpoint renders, though nested rows are still in the baseline's tree. The baseline read\nfilters on the same rule, so the stored count stays comparable to a later read.\n\n## Immutable from the insert\n\nThere is no draft-baseline state and no lock step. Every field that defines what a baseline\nresolves to (its branch, its log position and timepoint, its source acceptance, its stored\ncounts, its label and its owner) refuses any update, and every hard delete is refused too.\nOnly the baseline's standing in its lifecycle changes after the cut: its phase, whether it is\nreleased and since when, and the open change it is on. Configuration management alone writes\nthose; a direct write of any of them is refused with `409 IMMUTABLE_FIELD`, as a change to a\ndefining field is.\n\n## The first phase\n\nWhen the branch's category has a lifecycle with a first phase, the new baseline starts in\nthat phase, and the response reports it as `lifecyclePhase`. A branch with no category, a\ncategory with no lifecycle, or a lifecycle with no first phase leaves the baseline with no\nphase (`lifecyclePhase` is null), and giving the branch a category later does not give a\nphase to the baselines already cut.\n\nThe phase is held by name, so the first phase must also be a value of the baseline's\nLifecycle Phase picklist (`Baseline__c.Lifecycle_Phase__c`), spelled exactly as the phase is.\nAn administrator adds a value for each phase of a Baseline lifecycle. When the first phase\nis not a value, the cut is refused with `400 INVALID_REQUEST`, whose detail names the\nphase, and nothing is written: the baseline the cut inserted is rolled back.\n\n## Access\n\nRequires both configuration management custom permissions (see\n[Permissions](#section/Permissions)), checked before the body is read, and edit access to\nthe branch record: a caller who can see the branch but not edit it is refused\n`403 FORBIDDEN`.\n",
         "parameters": [
           {
             "$ref": "#/components/parameters/BranchId"
@@ -1235,7 +1235,19 @@
                       "label": "Pilot build 1",
                       "resolutionTimePoint": "2026-04-06T14:31:02.000Z",
                       "takenAt": "2026-04-06T14:31:02.000Z",
-                      "memberCount": 4
+                      "memberCount": 4,
+                      "lifecyclePhase": "Initial"
+                    }
+                  },
+                  "noLifecycle": {
+                    "summary": "A branch with no category, so the baseline has no phase",
+                    "value": {
+                      "baselineId": "a1Fg8000000AbE2EAK",
+                      "label": "Pilot build 2",
+                      "resolutionTimePoint": "2026-04-07T09:12:45.000Z",
+                      "takenAt": "2026-04-07T09:12:45.000Z",
+                      "memberCount": 4,
+                      "lifecyclePhase": null
                     }
                   }
                 }
@@ -1243,7 +1255,7 @@
             }
           },
           "400": {
-            "description": "`INVALID_REQUEST` — an unreadable body (a `cutDateTime` that is not a valid date-time\nincluded, since it fails the body parse), or a `label` that is missing, blank or longer\nthan 80 characters.\n`ASOF_IN_FUTURE` — `cutDateTime` is later than now; a baseline of content that does not\nexist yet is not a baseline.\n",
+            "description": "`INVALID_REQUEST` — an unreadable body (a `cutDateTime` that is not a valid date-time\nincluded, since it fails the body parse), or a `label` that is missing, blank or longer\nthan 80 characters. Also `INVALID_REQUEST` when the first phase of the branch's lifecycle\nis not a value of the baseline's Lifecycle Phase picklist; the detail names the phase and\ntells the administrator to add it, and nothing is written (see\n[The first phase](#operation/cutBaseline)).\n`ASOF_IN_FUTURE` — `cutDateTime` is later than now; a baseline of content that does not\nexist yet is not a baseline.\n",
             "content": {
               "application/json": {
                 "schema": {
@@ -1254,6 +1266,12 @@
                     "value": {
                       "code": "ASOF_IN_FUTURE",
                       "message": "A timepoint cannot be in the future. Use now or an earlier moment. (2027-01-01T00:00:00Z)"
+                    }
+                  },
+                  "phaseNotAPicklistValue": {
+                    "value": {
+                      "code": "INVALID_REQUEST",
+                      "message": "That request could not be read. Check that the body is valid JSON and that every required value is supplied. (The phase Draft is not a value of the Lifecycle Phase field on Baseline, so no baseline can enter it. An administrator must add Draft to that field as a picklist value, spelled exactly as the phase is.)"
                     }
                   }
                 }
@@ -1292,7 +1310,7 @@
         ],
         "operationId": "getBaselineTree",
         "summary": "Read the rows a baseline captured",
-        "description": "Re-resolves the branch at the baseline's stored log position and `resolutionTimePoint`, and\nreturns the rows.\n\n## `asOf` is refused, not ignored\n\nEvery other tree read on this API takes one, and a client that has been sending it to\n`/branches/{id}/tree` will send it here. A baseline **pins its own timepoint**, so a second\none has nothing to answer — accepting it would give the same rows to every value and let a\ncaller believe they had asked a temporal question and got a temporal answer. Sending `asOf`\nis a `400 INVALID_REQUEST`.\n\nPaging, `rowKey`s, `snapshot` and `compare` work exactly as on the\n[branch tree read](#operation/getBranchTree). A baseline never changes, so `snapshot` only\nmatters with `compare`, where it pins the target.\n\n## Differences from the branch read\n\n- **Excluded rows are filtered out.** A tree read renders a tombstone so the editor can see\n  what was removed; a baseline is the record of what the branch *contained*.\n- **`targetKey` and `ciId` are null, and the per-row governing clock is\n  collapsed** — every row's `governingTimestamp` is the baseline's own\n  `resolutionTimePoint`, never null. A baseline row does not pretend to answer questions it\n  cannot, and cannot be edited. `isReplaced` **is** populated: leaving it null would render\n  a substituted part identically to an ordinary one.\n- **No advice warnings.** A `MIXED_REVISION`, `PINNED_SUBTREE_HIDES_EDITS`,\n  `MEMBER_ADD_COLLISION` or `STORED_REVISION_RETIRED` warning is advice about a branch\n  someone is still editing; a baseline is a record of a decision already taken, so none is\n  raised here. `warnings` is empty except for `REDLINE_AMBIGUOUS` under `compare`.\n- **Pinned rows reproduce exactly.** A row pinned to another revision re-resolves with that\n  revision's `nested` structure beneath it and the source's lines suppressed, just as the\n  branch read rendered it at the cut.\n- **Pinned rows name who chose the revision.** A row with\n  `hasChosenRevision: true` carries `revisionChosenById` and `revisionChosenAt`: who\n  chose the revision and when — populated exactly as on the branch read. `wasClaimed` is evaluated as of the baseline's\n  own timepoint.\n\n## The drift canaries — reported by the findings\n\nA drift canary compares counts over the **whole** baseline, which no page computes, so the\ncanaries are reported by [`GET /baselines/{baselineId}/findings`](#operation/getBaselineFindings),\nnot by this read.\n\n| warningCode | What moved |\n|---|---|\n| `BASELINE_COUNT_DRIFT` | the baseline re-derived a **different number of rows** than its cut recorded — a corrected release date, an edit to an already-released BOM |\n| `BASELINE_PROVENANCE_DRIFT` | the same rows came back with a **different number of them `claiming`** — a claim severed or added since the cut. The row count cannot see this, because severing one moves no row |\n| `BASELINE_PIN_DRIFT` | the same rows came back with a **different number of them holding a chosen revision** (`hasChosenRevision`) — a revision decision moved where neither the row count nor the claim count did |\n\nAll three **warn rather than throw**: the rows returned are still the honest answer for the\nstored timepoint. The same canaries are raised on a comparison's baseline side.\n\nNone is complete, and the response does not pretend otherwise. An edit that changes only\na line's own fields, such as its quantity, moves no count.\n",
+        "description": "Re-resolves the branch at the baseline's stored log position and `resolutionTimePoint`, and\nreturns the rows.\n\n## `asOf` is refused, not ignored\n\nEvery other tree read on this API takes one, and a client that has been sending it to\n`/branches/{id}/tree` will send it here. A baseline **pins its own timepoint**, so a second\none has nothing to answer — accepting it would give the same rows to every value and let a\ncaller believe they had asked a temporal question and got a temporal answer. Sending `asOf`\nis a `400 INVALID_REQUEST`.\n\nPaging, `rowKey`s, `snapshot` and `compare` work exactly as on the\n[branch tree read](#operation/getBranchTree). A baseline never changes, so `snapshot` only\nmatters with `compare`, where it pins the target.\n\n## Differences from the branch read\n\n- **Excluded rows are filtered out.** A tree read renders a tombstone so the editor can see\n  what was removed; a baseline is the record of what the branch *contained*.\n- **`targetKey` and `ciId` are null, and the per-row governing clock is\n  collapsed** — every row's `governingTimestamp` is the baseline's own\n  `resolutionTimePoint`, never null. A baseline row does not pretend to answer questions it\n  cannot, and cannot be edited. `isReplaced` **is** populated: leaving it null would render\n  a substituted part identically to an ordinary one.\n- **No advice warnings.** A `MIXED_REVISION`, `PINNED_SUBTREE_HIDES_EDITS`,\n  `MEMBER_ADD_COLLISION` or `STORED_REVISION_RETIRED` warning is advice about a branch\n  someone is still editing; a baseline is a record of a decision already taken, so none is\n  raised here. `warnings` is empty except for `REDLINE_AMBIGUOUS` under `compare`.\n- **Pinned rows reproduce exactly.** A row pinned to another revision re-resolves with that\n  revision's `nested` structure beneath it and the source's lines suppressed, just as the\n  branch read rendered it at the cut.\n- **Pinned rows name who chose the revision.** A row with\n  `hasChosenRevision: true` carries `revisionChosenById` and `revisionChosenAt`: who\n  chose the revision and when — populated exactly as on the branch read. `wasClaimed` is evaluated as of the baseline's\n  own timepoint.\n\n## The baseline's standing in its lifecycle\n\nEvery page carries the baseline's phase and released state, read from the baseline:\n\n- `lifecyclePhase` — the phase of its branch category's lifecycle that the baseline is in;\n  null for a baseline cut when its branch had no lifecycle.\n- `released` and `releasedAt` — whether an approved change has released the baseline, and\n  when it was last released. `released` is never null. Entering an obsolete phase clears\n  `released` and keeps `releasedAt`; a baseline already released keeps its `releasedAt`\n  when it moves to another phase that is not obsolete.\n- `pendingChangeId` — the open change the baseline is on. A change that has been closed or\n  cancelled counts as no change, so the field is null then, as it is when the baseline is\n  on no change. It is also null for a caller who cannot read changes (`Change__c`): the\n  read still succeeds, without it.\n\nA baseline's phase moves through a configuration change (`Change__c`), never through this\nAPI.\n\n## What a released baseline guarantees\n\nA baseline is frozen when it is cut, and is read from its freeze once the freeze is\ncomplete; until then it is resolved again at its stored position, which gives the same rows.\nA baseline can join a configuration change only once its freeze is complete, so a released\nbaseline shows the content its approvers signed off, on every later read. Display data is\nread live: an item's number, name and description and a revision's label show their current\nvalues, as they do on a released eBOM revision.\n\n## The drift canaries — reported by the findings\n\nA drift canary compares counts over the **whole** baseline, which no page computes, so the\ncanaries are reported by [`GET /baselines/{baselineId}/findings`](#operation/getBaselineFindings),\nnot by this read.\n\n| warningCode | What moved |\n|---|---|\n| `BASELINE_COUNT_DRIFT` | the baseline re-derived a **different number of rows** than its cut recorded — a corrected release date, an edit to an already-released BOM |\n| `BASELINE_PROVENANCE_DRIFT` | the same rows came back with a **different number of them `claiming`** — a claim severed or added since the cut. The row count cannot see this, because severing one moves no row |\n| `BASELINE_PIN_DRIFT` | the same rows came back with a **different number of them holding a chosen revision** (`hasChosenRevision`) — a revision decision moved where neither the row count nor the claim count did |\n\nAll three **warn rather than throw**: the rows returned are still the honest answer for the\nstored timepoint. The same canaries are raised on a comparison's baseline side.\n\nNone is complete, and the response does not pretend otherwise. An edit that changes only\na line's own fields, such as its quantity, moves no count.\n",
         "parameters": [
           {
             "$ref": "#/components/parameters/BaselineId"
@@ -3120,7 +3138,8 @@
           "baselineId",
           "resolutionTimePoint",
           "takenAt",
-          "memberCount"
+          "memberCount",
+          "lifecyclePhase"
         ],
         "properties": {
           "baselineId": {
@@ -3143,6 +3162,16 @@
             "type": "integer",
             "minimum": 0,
             "description": "How many rows the cut resolved, **excluding tombstones and `nested` rows**. This is the count of what the\nconfiguration *contains*, not the count of rows the tree endpoint renders. Also the\ncanary behind `BASELINE_COUNT_DRIFT`; `BASELINE_PROVENANCE_DRIFT` is fed by the\n`claiming`-row count recorded alongside it.\n\nThe cut also records a count of rows holding a chosen revision, feeding\n`BASELINE_PIN_DRIFT`. Like the `claiming` count, it is stored and **not**\nreturned here: there is no `pinnedCount`.\n"
+          },
+          "lifecyclePhase": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The phase the baseline starts in: the first phase of the lifecycle of the branch's\ncategory. Null when the branch has no category, the category no lifecycle, or the\nlifecycle no first phase. Always present.\n",
+            "examples": [
+              "Initial"
+            ]
           }
         }
       },
@@ -3155,7 +3184,11 @@
           "parentRowKey",
           "rows",
           "warnings",
-          "page"
+          "page",
+          "lifecyclePhase",
+          "released",
+          "releasedAt",
+          "pendingChangeId"
         ],
         "properties": {
           "baselineId": {
@@ -3194,6 +3227,39 @@
               }
             ],
             "description": "What `compare` compared against. Null without `compare`."
+          },
+          "lifecyclePhase": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "The phase of its branch category's lifecycle that the baseline is in, by name. Null for a\nbaseline cut when its branch had no lifecycle; such a baseline never gains a phase. The\nsame on every page.\n",
+            "examples": [
+              "Released"
+            ]
+          },
+          "released": {
+            "type": "boolean",
+            "description": "Whether an approved change has released the baseline. Never null: a baseline never\nreleased is `false`. Entering an obsolete phase clears it.\n"
+          },
+          "releasedAt": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the baseline was last released. Null for a baseline never released. A baseline\nalready released keeps this time when it moves to another phase that is not obsolete,\nand keeps it when an obsolete phase clears `released`; it is stamped again only when the\nbaseline is released from the unreleased state.\n"
+          },
+          "pendingChangeId": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/SalesforceId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The open change (`Change__c`) the baseline is on. Null when it is on no change, when the\nchange it names has been closed or cancelled (such a change counts as none), and for a\ncaller who cannot read changes, whose read succeeds without it.\n"
           },
           "rows": {
             "type": "array",
@@ -6234,6 +6300,10 @@
           "snapshot": "s2.YmFzZWxpbmV8YTFGZzgwMDAwMDBBYkUx",
           "parentRowKey": null,
           "compareTarget": null,
+          "lifecyclePhase": "Released",
+          "released": true,
+          "releasedAt": "2026-04-20T16:05:00.000Z",
+          "pendingChangeId": null,
           "rows": [
             {
               "rowKey": "a0Bg8000000Ab10",
@@ -6288,6 +6358,10 @@
           "snapshot": "s2.YmFzZWxpbmV8YTFGZzgwMDAwMDBBYkUx",
           "parentRowKey": null,
           "compareTarget": null,
+          "lifecyclePhase": "Released",
+          "released": true,
+          "releasedAt": "2026-04-20T16:05:00.000Z",
+          "pendingChangeId": null,
           "rows": [
             {
               "rowKey": "a0Bg8000000Ab10",
