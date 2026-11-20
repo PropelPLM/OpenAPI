@@ -3079,7 +3079,11 @@ components:
             refused with `INVALID_REQUEST`, because a Site BOM with a blank name would be named after
             its own record id, which nobody can search for. When the category restricts overriding its
             autonumber and the caller lacks the `Override_Restricted_Autonumber` permission, a supplied
-            name is replaced by the next number.
+            name is replaced by the next number. As with an eBOM item's number, a supplied name is
+            also replaced by the next number when it equals that number (a client that previewed the
+            next number keeps the preview only if nobody took it meanwhile) or when it collides with
+            an existing name of the autonumber's pattern. The 201 body does not carry the final name;
+            read the Site BOM for it.
           examples: ['Assy-100 Site BOM']
         branchLabel:
           type: string
