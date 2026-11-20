@@ -271,6 +271,8 @@ tags:
   - name: Baselines
     description: |
       Recording and replaying a configuration. A baseline stores a log position and re-resolves on read.
+      It also carries its standing in its branch's lifecycle: its phase, whether it is released, and
+      the open change it is on.
   - name: Pull
     description: |
       Reconciling a Site BOM branch against a newer version of the eBOM source it inherits from —
@@ -1640,8 +1642,27 @@ paths:
 
         ## Immutable from the insert
 
-        There is no draft-baseline state and no lock step: every update to a `Baseline__c` is refused
-        outright, and every hard delete too.
+        There is no draft-baseline state and no lock step. Every field that defines what a baseline
+        resolves to (its branch, its log position and timepoint, its source acceptance, its stored
+        counts, its label and its owner) refuses any update, and every hard delete is refused too.
+        Only the baseline's standing in its lifecycle changes after the cut: its phase, whether it is
+        released and since when, and the open change it is on. Configuration management alone writes
+        those; a direct write of any of them is refused with `409 IMMUTABLE_FIELD`, as a change to a
+        defining field is.
+
+        ## The first phase
+
+        When the branch's category has a lifecycle with a first phase, the new baseline starts in
+        that phase, and the response reports it as `lifecyclePhase`. A branch with no category, a
+        category with no lifecycle, or a lifecycle with no first phase leaves the baseline with no
+        phase (`lifecyclePhase` is null), and giving the branch a category later does not give a
+        phase to the baselines already cut.
+
+        The phase is held by name, so the first phase must also be a value of the baseline's
+        Lifecycle Phase picklist (`Baseline__c.Lifecycle_Phase__c`), spelled exactly as the phase is.
+        An administrator adds a value for each phase of a Baseline lifecycle. When the first phase
+        is not a value, the cut is refused with `400 INVALID_REQUEST`, whose detail names the
+        phase, and nothing is written: the baseline the cut inserted is rolled back.
 
         ## Access
 
@@ -1683,11 +1704,24 @@ paths:
                     resolutionTimePoint: '2026-04-06T14:31:02.000Z'
                     takenAt: '2026-04-06T14:31:02.000Z'
                     memberCount: 4
+                    lifecyclePhase: Initial
+                noLifecycle:
+                  summary: A branch with no category, so the baseline has no phase
+                  value:
+                    baselineId: a1Fg8000000AbE2EAK
+                    label: Pilot build 2
+                    resolutionTimePoint: '2026-04-07T09:12:45.000Z'
+                    takenAt: '2026-04-07T09:12:45.000Z'
+                    memberCount: 4
+                    lifecyclePhase: null
         '400':
           description: |
             `INVALID_REQUEST` — an unreadable body (a `cutDateTime` that is not a valid date-time
             included, since it fails the body parse), or a `label` that is missing, blank or longer
-            than 80 characters.
+            than 80 characters. Also `INVALID_REQUEST` when the first phase of the branch's lifecycle
+            is not a value of the baseline's Lifecycle Phase picklist; the detail names the phase and
+            tells the administrator to add it, and nothing is written (see
+            [The first phase](#operation/cutBaseline)).
             `ASOF_IN_FUTURE` — `cutDateTime` is later than now; a baseline of content that does not
             exist yet is not a baseline.
           content:
@@ -1698,6 +1732,10 @@ paths:
                   value:
                     code: ASOF_IN_FUTURE
                     message: 'A timepoint cannot be in the future. Use now or an earlier moment. (2027-01-01T00:00:00Z)'
+                phaseNotAPicklistValue:
+                  value:
+                    code: INVALID_REQUEST
+                    message: 'That request could not be read. Check that the body is valid JSON and that every required value is supplied. (The phase Draft is not a value of the Lifecycle Phase field on Baseline, so no baseline can enter it. An administrator must add Draft to that field as a picklist value, spelled exactly as the phase is.)'
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFoundPath' }
         '413': { $ref: '#/components/responses/StructureTooLarge' }
@@ -1757,6 +1795,33 @@ paths:
           `hasChosenRevision: true` carries `revisionChosenById` and `revisionChosenAt`: who
           chose the revision and when — populated exactly as on the branch read. `wasClaimed` is evaluated as of the baseline's
           own timepoint.
+
+        ## The baseline's standing in its lifecycle
+
+        Every page carries the baseline's phase and released state, read from the baseline:
+
+        - `lifecyclePhase` — the phase of its branch category's lifecycle that the baseline is in;
+          null for a baseline cut when its branch had no lifecycle.
+        - `released` and `releasedAt` — whether an approved change has released the baseline, and
+          when it was last released. `released` is never null. Entering an obsolete phase clears
+          `released` and keeps `releasedAt`; a baseline already released keeps its `releasedAt`
+          when it moves to another phase that is not obsolete.
+        - `pendingChangeId` — the open change the baseline is on. A change that has been closed or
+          cancelled counts as no change, so the field is null then, as it is when the baseline is
+          on no change. It is also null for a caller who cannot read changes (`Change__c`): the
+          read still succeeds, without it.
+
+        A baseline's phase moves through a configuration change (`Change__c`), never through this
+        API.
+
+        ## What a released baseline guarantees
+
+        A baseline is frozen when it is cut, and is read from its freeze once the freeze is
+        complete; until then it is resolved again at its stored position, which gives the same rows.
+        A baseline can join a configuration change only once its freeze is complete, so a released
+        baseline shows the content its approvers signed off, on every later read. Display data is
+        read live: an item's number, name and description and a revision's label show their current
+        values, as they do on a released eBOM revision.
 
         ## The drift canaries — reported by the findings
 
@@ -3922,7 +3987,7 @@ components:
 
     Baseline:
       type: object
-      required: [baselineId, resolutionTimePoint, takenAt, memberCount]
+      required: [baselineId, resolutionTimePoint, takenAt, memberCount, lifecyclePhase]
       properties:
         baselineId: { $ref: '#/components/schemas/SalesforceId' }
         label: { type: string }
@@ -3946,10 +4011,18 @@ components:
             The cut also records a count of rows holding a chosen revision, feeding
             `BASELINE_PIN_DRIFT`. Like the `claiming` count, it is stored and **not**
             returned here: there is no `pinnedCount`.
+        lifecyclePhase:
+          type: [string, 'null']
+          description: |
+            The phase the baseline starts in: the first phase of the lifecycle of the branch's
+            category. Null when the branch has no category, the category no lifecycle, or the
+            lifecycle no first phase. Always present.
+          examples: ['Initial']
 
     BaselineTree:
       type: object
-      required: [baselineId, resolutionTimePoint, snapshot, parentRowKey, rows, warnings, page]
+      required: [baselineId, resolutionTimePoint, snapshot, parentRowKey, rows, warnings, page,
+                 lifecyclePhase, released, releasedAt, pendingChangeId]
       properties:
         baselineId: { $ref: '#/components/schemas/SalesforceId' }
         label: { type: string }
@@ -3966,6 +4039,32 @@ components:
         compareTarget:
           oneOf: [{ $ref: '#/components/schemas/ComparisonSide' }, { type: 'null' }]
           description: What `compare` compared against. Null without `compare`.
+        lifecyclePhase:
+          type: [string, 'null']
+          description: |
+            The phase of its branch category's lifecycle that the baseline is in, by name. Null for a
+            baseline cut when its branch had no lifecycle; such a baseline never gains a phase. The
+            same on every page.
+          examples: ['Released']
+        released:
+          type: boolean
+          description: |
+            Whether an approved change has released the baseline. Never null: a baseline never
+            released is `false`. Entering an obsolete phase clears it.
+        releasedAt:
+          type: [string, 'null']
+          format: date-time
+          description: |
+            When the baseline was last released. Null for a baseline never released. A baseline
+            already released keeps this time when it moves to another phase that is not obsolete,
+            and keeps it when an obsolete phase clears `released`; it is stamped again only when the
+            baseline is released from the unreleased state.
+        pendingChangeId:
+          oneOf: [{ $ref: '#/components/schemas/SalesforceId' }, { type: 'null' }]
+          description: |
+            The open change (`Change__c`) the baseline is on. Null when it is on no change, when the
+            change it names has been closed or cancelled (such a change counts as none), and for a
+            caller who cannot read changes, whose read succeeds without it.
         rows:
           type: array
           description: |
@@ -6483,6 +6582,10 @@ components:
         snapshot: 's2.YmFzZWxpbmV8YTFGZzgwMDAwMDBBYkUx'
         parentRowKey: null
         compareTarget: null
+        lifecyclePhase: Released
+        released: true
+        releasedAt: '2026-04-20T16:05:00.000Z'
+        pendingChangeId: null
         rows:
           - rowKey: a0Bg8000000Ab10
             parentRowKey: null
@@ -6533,6 +6636,10 @@ components:
         snapshot: 's2.YmFzZWxpbmV8YTFGZzgwMDAwMDBBYkUx'
         parentRowKey: null
         compareTarget: null
+        lifecyclePhase: Released
+        released: true
+        releasedAt: '2026-04-20T16:05:00.000Z'
+        pendingChangeId: null
         rows:
           - rowKey: a0Bg8000000Ab10
             parentRowKey: null
