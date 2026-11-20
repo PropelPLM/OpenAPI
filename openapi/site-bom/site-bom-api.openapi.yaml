@@ -327,6 +327,14 @@ paths:
         create also requires create on `Site_BOM__c`, `Branch__c`, `Branch_Source__c` and
         `Branch_Source_Rev__c`, plus read on `Item_Revision__c`. All five are checked up front, so a
         partial grant is a clean 403 rather than a 500 partway through the create.
+
+        ## The branch's category
+
+        `categoryId` is optional. When it is sent, the new branch takes that category, which picks
+        the lifecycle of the branch's baselines. It must name a category the caller can read, of
+        type **Baseline**, not inactive, and, when the category names a Create Allow Group, one the
+        caller belongs to. A refused category is answered before anything is written, so nothing is
+        created. Omitted or null, the branch has no category; there is no default.
       requestBody:
         required: true
         content:
@@ -340,6 +348,13 @@ paths:
                   rootItemRevisionId: a0Ag8000000Ab01EAC
                   siteBomName: Assy-100 Site BOM
                   branchLabel: Site BOM-GDL
+              withCategory:
+                summary: The same, with a Baseline category
+                value:
+                  rootItemRevisionId: a0Ag8000000Ab01EAC
+                  siteBomName: Assy-100 Site BOM
+                  branchLabel: Site BOM-GDL
+                  categoryId: a0Cg8000000Ab05EAC
       responses:
         '201':
           description: |
@@ -359,8 +374,9 @@ paths:
                     sourceRevisionId: a1Dg8000000AbCfEAK
         '400':
           description: |
-            `INVALID_REQUEST` — the body was empty or unreadable; `siteBomName` or `branchLabel` was
-            blank; or either exceeded its field length (`siteBomName` ≤ 80, `branchLabel` ≤ 80).
+            `INVALID_REQUEST` — the body was empty or unreadable; `branchLabel` was blank, or
+            `siteBomName` was blank and no category autonumber names the Site BOM; either exceeded its field length (`siteBomName` ≤ 80, `branchLabel` ≤ 80); or
+            `categoryId` names a category whose type is not Baseline, or one that is inactive.
 
             A malformed id in the **body** is a 400 while one in the **URI** is a 404, and that is
             not an inconsistency: the URI is what *names* the resource, so a path naming nothing is
@@ -373,12 +389,17 @@ paths:
                   value:
                     code: INVALID_REQUEST
                     message: 'That request could not be read. Check that the body is valid JSON and that every required value is supplied. (siteBomName is required)'
+                notABaselineCategory:
+                  value:
+                    code: INVALID_REQUEST
+                    message: 'That request could not be read. Check that the body is valid JSON and that every required value is supplied. (The category Fasteners is not a Baseline category. Choose a category whose type is Baseline.)'
         '403': { $ref: '#/components/responses/Forbidden' }
         '404':
           description: |
             `NOT_FOUND` — `rootItemRevisionId` was null, is not an `Item_Revision__c` id, or names
             no visible row. The three are not distinguished on purpose: separating "malformed" from
-            "absent" would tell an unauthorised caller which ids exist.
+            "absent" would tell an unauthorised caller which ids exist. Also `NOT_FOUND` when
+            `categoryId` names no category the caller can read; the message then names the category id.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/RestError' }
@@ -387,6 +408,10 @@ paths:
                   value:
                     code: NOT_FOUND
                     message: 'That record does not exist, or you do not have access to it. (a0Bg8000000Ab10EAC is not an Item_Revision__c)'
+                unknownCategory:
+                  value:
+                    code: NOT_FOUND
+                    message: 'That record does not exist, or you do not have access to it. (No category with the id a0Cg8000000Ab99EAC exists, or you do not have access to it.)'
         '409':
           description: |
             `NOT_RELEASED` — the root revision is unreleased, Cancelled, Expired, or has no release
@@ -3038,7 +3063,7 @@ components:
 
     SiteBomCreateRequest:
       type: object
-      required: [rootItemRevisionId, siteBomName, branchLabel]
+      required: [rootItemRevisionId, branchLabel]
       properties:
         rootItemRevisionId:
           allOf: [{ $ref: '#/components/schemas/SalesforceId' }]
@@ -3046,12 +3071,19 @@ components:
             The **released** `Item_Revision__c` the Site BOM is built over. Its `Released_Date_Time__c`
             becomes T_R.
         siteBomName:
-          type: string
+          type: [string, 'null']
           maxLength: 80
           description: |
-            `Site_BOM__c.Name`. Required: a blank value is refused with `INVALID_REQUEST`, because an
-            Site BOM with a blank name would be named after its own record id, which nobody can search
-            for.
+            `Site_BOM__c.Name`. Required unless `categoryId` names a category with an autonumber: a
+            blank value is then assigned the autonumber's next number. Otherwise a blank value is
+            refused with `INVALID_REQUEST`, because a Site BOM with a blank name would be named after
+            its own record id, which nobody can search for. When the category restricts overriding its
+            autonumber and the caller lacks the `Override_Restricted_Autonumber` permission, a supplied
+            name is replaced by the next number. As with an eBOM item's number, a supplied name is
+            also replaced by the next number when it equals that number (a client that previewed the
+            next number keeps the preview only if nobody took it meanwhile) or when it collides with
+            an existing name of the autonumber's pattern. The 201 body does not carry the final name;
+            read the Site BOM for it.
           examples: ['Assy-100 Site BOM']
         branchLabel:
           type: string
@@ -3059,6 +3091,15 @@ components:
           description: |
             The branch's name, shown in every Salesforce list view and lookup, and its label.
           examples: ['Site BOM-GDL']
+        categoryId:
+          oneOf: [{ $ref: '#/components/schemas/SalesforceId' }, { type: 'null' }]
+          description: |
+            Optional. The new branch's `Category__c`: an active category of type **Baseline** that the
+            caller can read and, when it names a Create Allow Group, belongs to. It picks the
+            lifecycle of the branch's baselines. Omitted or null, the branch has no category. Refused
+            with `NOT_FOUND` (no such category the caller can read), `INVALID_REQUEST` (not a
+            Baseline category, or inactive) or `FORBIDDEN` (not in its Create Allow Group), before
+            anything is written.
 
     SiteBomCreateResult:
       type: object
@@ -4992,6 +5033,7 @@ components:
         | `FORBIDDEN` | a write to a branch the caller can see but not edit |
         | `FORBIDDEN` | a line value written to an `Assembly__c` field the caller has no field-level Edit on (per operation) |
         | `FORBIDDEN` | an object or field read grant this endpoint requires is missing |
+        | `FORBIDDEN` | on Site BOM create, `categoryId` names a category whose Create Allow Group the caller is not in |
 
         A field-level denial on a read is also answered 403: every read on this path uses a fixed
         set of fields, so when a query fails, missing field access is far and away the likeliest
