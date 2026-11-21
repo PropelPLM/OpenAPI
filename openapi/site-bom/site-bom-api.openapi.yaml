@@ -330,11 +330,18 @@ paths:
 
         ## The branch's category
 
-        `categoryId` is optional. When it is sent, the new branch takes that category, which picks
-        the lifecycle of the branch's baselines. It must name a category the caller can read, of
-        type **Baseline**, not inactive, and, when the category names a Create Allow Group, one the
-        caller belongs to. A refused category is answered before anything is written, so nothing is
-        created. Omitted or null, the branch has no category; there is no default.
+        `categoryId` names the new branch's category, which picks the lifecycle of the branch's
+        baselines. It must name a category the caller can read, of type **Baseline**, not inactive,
+        and, when the category names a Create Allow Group, one the caller belongs to.
+
+        As shipped, a Site BOM **requires** a category, and the category must have a lifecycle: an
+        omitted or null `categoryId`, or a category without a lifecycle, is refused with
+        `INVALID_REQUEST`. The requirement comes from the org's *CM Header Type Setting* record for
+        the Site BOM header type, whose **Category Required** an administrator may clear; the
+        category is then optional, and omitted or null leaves the branch without one. The setting's
+        **Default Category** is only where the create screen starts: the API never fills in a
+        category the request did not send. A refused category is answered before anything is
+        written, so nothing is created.
       requestBody:
         required: true
         content:
@@ -343,18 +350,18 @@ paths:
               $ref: '#/components/schemas/SiteBomCreateRequest'
             examples:
               standard:
-                summary: A Site BOM over Assy-100 rev-1
-                value:
-                  rootItemRevisionId: a0Ag8000000Ab01EAC
-                  siteBomName: Assy-100 Site BOM
-                  branchLabel: Site BOM-GDL
-              withCategory:
-                summary: The same, with a Baseline category
+                summary: A Site BOM over Assy-100 rev-1, with its Baseline category
                 value:
                   rootItemRevisionId: a0Ag8000000Ab01EAC
                   siteBomName: Assy-100 Site BOM
                   branchLabel: Site BOM-GDL
                   categoryId: a0Cg8000000Ab05EAC
+              withoutCategory:
+                summary: The same without a category, only where an administrator has cleared Category Required
+                value:
+                  rootItemRevisionId: a0Ag8000000Ab01EAC
+                  siteBomName: Assy-100 Site BOM
+                  branchLabel: Site BOM-GDL
       responses:
         '201':
           description: |
@@ -376,7 +383,9 @@ paths:
           description: |
             `INVALID_REQUEST` — the body was empty or unreadable; `branchLabel` was blank, or
             `siteBomName` was blank and no category autonumber names the Site BOM; either exceeded its field length (`siteBomName` ≤ 80, `branchLabel` ≤ 80); or
-            `categoryId` names a category whose type is not Baseline, or one that is inactive.
+            `categoryId` names a category whose type is not Baseline, one that is inactive, or one
+            without a lifecycle where a category is required; or `categoryId` was omitted or null
+            where a category is required (as shipped, always).
 
             A malformed id in the **body** is a 400 while one in the **URI** is a 404, and that is
             not an inconsistency: the URI is what *names* the resource, so a path naming nothing is
@@ -393,6 +402,14 @@ paths:
                   value:
                     code: INVALID_REQUEST
                     message: 'That request could not be read. Check that the body is valid JSON and that every required value is supplied. (The category Fasteners is not a Baseline category. Choose a category whose type is Baseline.)'
+                noCategory:
+                  value:
+                    code: INVALID_REQUEST
+                    message: 'That request could not be read. Check that the body is valid JSON and that every required value is supplied. (A category is required. Choose an active Baseline category that has a lifecycle.)'
+                categoryWithoutLifecycle:
+                  value:
+                    code: INVALID_REQUEST
+                    message: 'That request could not be read. Check that the body is valid JSON and that every required value is supplied. (The category Plant Baseline has no lifecycle. Choose a category that has one.)'
         '403': { $ref: '#/components/responses/Forbidden' }
         '404':
           description: |
@@ -3094,12 +3111,14 @@ components:
         categoryId:
           oneOf: [{ $ref: '#/components/schemas/SalesforceId' }, { type: 'null' }]
           description: |
-            Optional. The new branch's `Category__c`: an active category of type **Baseline** that the
-            caller can read and, when it names a Create Allow Group, belongs to. It picks the
-            lifecycle of the branch's baselines. Omitted or null, the branch has no category. Refused
-            with `NOT_FOUND` (no such category the caller can read), `INVALID_REQUEST` (not a
-            Baseline category, or inactive) or `FORBIDDEN` (not in its Create Allow Group), before
-            anything is written.
+            The new branch's `Category__c`: an active category of type **Baseline** that the caller
+            can read and, when it names a Create Allow Group, belongs to. It picks the lifecycle of the
+            branch's baselines. Required as shipped, with a lifecycle (see "The branch's category");
+            optional only where an administrator has cleared Category Required, and then omitted or
+            null leaves the branch without one. Refused with `NOT_FOUND` (no such category the caller
+            can read), `INVALID_REQUEST` (missing where required, not a Baseline category, inactive,
+            or without a lifecycle where required) or `FORBIDDEN` (not in its Create Allow Group),
+            before anything is written.
 
     SiteBomCreateResult:
       type: object
