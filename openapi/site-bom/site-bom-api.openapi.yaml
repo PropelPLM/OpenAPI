@@ -1825,8 +1825,7 @@ paths:
           when it moves to another phase that is not obsolete.
         - `pendingChangeId` — the open change the baseline is on. A change that has been closed or
           cancelled counts as no change, so the field is null then, as it is when the baseline is
-          on no change. It is also null for a caller who cannot read changes (`Change__c`): the
-          read still succeeds, without it.
+          on no change.
 
         A baseline's phase moves through a configuration change (`Change__c`), never through this
         API.
@@ -4081,9 +4080,8 @@ components:
         pendingChangeId:
           oneOf: [{ $ref: '#/components/schemas/SalesforceId' }, { type: 'null' }]
           description: |
-            The open change (`Change__c`) the baseline is on. Null when it is on no change, when the
-            change it names has been closed or cancelled (such a change counts as none), and for a
-            caller who cannot read changes, whose read succeeds without it.
+            The open change (`Change__c`) the baseline is on. Null when it is on no change, and when
+            the change it names has been closed or cancelled (such a change counts as none).
         rows:
           type: array
           description: |
