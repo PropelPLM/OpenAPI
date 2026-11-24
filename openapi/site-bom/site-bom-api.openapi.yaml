@@ -1825,7 +1825,8 @@ paths:
           when it moves to another phase that is not obsolete.
         - `phaseEnteredAt` — when the baseline entered the phase it is in. Never null: a baseline no
           change has moved has been in its phase since it was cut. On a baseline that is no longer
-          released, with `releasedAt`, it says when it was released and when it left released.
+          released, with `releasedAt`, it says when it was released and, until it moves again, when it
+          left released.
         - `pendingChangeId` — the open change the baseline is on. It counts only while the change is
           neither closed nor cancelled and the baseline is one of its affected baselines with the
           outcome Proposed or Applied; otherwise the field is null, as it is when the baseline is
@@ -4091,8 +4092,8 @@ components:
           description: |
             When the baseline entered the phase it is in: the approval of the change that moved it
             there. Never null: a baseline no change has moved reads the time it was cut. On a
-            baseline that an obsolete phase has cleared `released` on, it is when it left released,
-            while `releasedAt` keeps when it was released. A reversal of the change restores the
+            baseline that an obsolete phase has cleared `released` on, it is when it left released
+            until the baseline moves again, while `releasedAt` keeps when it was released. A reversal of the change restores the
             time the baseline had before.
         pendingChangeId:
           oneOf: [{ $ref: '#/components/schemas/SalesforceId' }, { type: 'null' }]
@@ -4106,14 +4107,15 @@ components:
           type: [string, 'null']
           description: |
             The phase the pending change moves the baseline from, by name, as its affected
-            baseline records it. Null when `pendingChangeId` is null. An applied move still shows
-            while its change is open, so the read says which change moved the baseline.
+            baseline records it. Null when `pendingChangeId` is null, and when that affected
+            baseline names no phase. An applied move still shows while its change is open, so the
+            read says which change moved the baseline.
           examples: ['Initial']
         pendingToPhase:
           type: [string, 'null']
           description: |
             The phase the pending change moves the baseline to, by name. Null when
-            `pendingChangeId` is null.
+            `pendingChangeId` is null, and when that affected baseline names no phase.
           examples: ['Released']
         rows:
           type: array
@@ -5143,13 +5145,19 @@ components:
               never deletes or edits them.
             - `PROVENANCE_INVALID` is raised only by a baseline cut of a branch with more than one
               source, which this version cannot create.
+            - `BASELINE_ON_OPEN_CHANGE` (409), `TRANSITION_NOT_ALLOWED` (422) and
+              `CHANGE_TOO_LARGE` (422) are raised when baselines are added to a configuration
+              change, which no route of this version does: a baseline is already on another open
+              change; a baseline phase move that its lifecycle or its change does not allow; and a
+              change that would hold more than 1,000 baselines.
           enum:
             [CLAIM_REQUIRED, ALREADY_CLAIMED, ALREADY_EXCLUDED, NOT_EXCLUDED, NOT_SUPPLIED, NO_CLAIM,
              HARD_DELETE_BLOCKED, IMMUTABLE_FIELD, NOT_RELEASED, STALE_REVISION, CONCURRENT_WRITE,
-             ALREADY_PRESENT,
+             ALREADY_PRESENT, BASELINE_ON_OPEN_CHANGE,
              CANDIDATE_NOT_NEWER, DISPOSITION_REQUIRED, CYCLE_DETECTED, EBOM_CYCLE,
              PARENT_NOT_IN_BRANCH, UNSUPPORTED_CI_TYPE, PROVENANCE_INVALID, CANDIDATE_ROOT_MISMATCH,
              AMBIGUOUS_CORRELATION, REVISION_ITEM_MISMATCH, REVISION_CHOICE_REQUIRED,
+             TRANSITION_NOT_ALLOWED, CHANGE_TOO_LARGE,
              BATCH_TOO_LARGE, STRUCTURE_TOO_LARGE, ASOF_IN_FUTURE, ASOF_INVALID, NOT_EDITABLE,
              INVALID_REQUEST, NOT_FOUND, FORBIDDEN, FEATURE_NOT_ENABLED, INTERNAL_ERROR]
           examples: ['NOT_RELEASED']
