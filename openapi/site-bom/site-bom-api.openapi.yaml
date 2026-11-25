@@ -1829,8 +1829,8 @@ paths:
           left released.
         - `pendingChangeId` — the open change the baseline is on. It counts only while the change is
           neither closed nor cancelled and the baseline is one of its affected baselines with the
-          outcome Proposed or Applied; otherwise the field is null, as it is when the baseline is
-          on no change.
+          outcome Proposed, Applied or Reversed; otherwise the field is null, as it is when the
+          baseline is on no change.
         - `pendingFromPhase` and `pendingToPhase` — the phases that change moves the baseline from
           and to, by name. Both null when `pendingChangeId` is. An applied move still shows while
           its change is open.
@@ -4099,10 +4099,10 @@ components:
           oneOf: [{ $ref: '#/components/schemas/SalesforceId' }, { type: 'null' }]
           description: |
             The open change (`Change__c`) the baseline is on. It counts only while the baseline is
-            one of the change's affected baselines with the outcome Proposed or Applied and the
-            change is neither closed nor cancelled. Null when it is on no change, when the change it
-            names has been closed or cancelled, and when no such affected baseline backs it (each
-            counts as none).
+            one of the change's affected baselines with the outcome Proposed, Applied or Reversed
+            and the change is neither closed nor cancelled. Null when it is on no change, when the
+            change it names has been closed or cancelled, and when no such affected baseline backs
+            it (each counts as none).
         pendingFromPhase:
           type: [string, 'null']
           description: |
