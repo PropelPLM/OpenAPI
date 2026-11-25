@@ -1662,8 +1662,8 @@ paths:
         There is no draft-baseline state and no lock step. Every field that defines what a baseline
         resolves to (its branch, its log position and timepoint, its source acceptance, its stored
         counts, its label and its owner) refuses any update, and every hard delete is refused too.
-        Only the baseline's standing in its lifecycle changes after the cut: its phase, whether it is
-        released and since when, and the open change it is on. Configuration management alone writes
+        Only the baseline's standing in its lifecycle changes after the cut: its phase and when it
+        entered it, whether it is released and since when, and the open change it is on. Configuration management alone writes
         those; a direct write of any of them is refused with `409 IMMUTABLE_FIELD`, as a change to a
         defining field is.
 
@@ -1823,9 +1823,17 @@ paths:
           when it was last released. `released` is never null. Entering an obsolete phase clears
           `released` and keeps `releasedAt`; a baseline already released keeps its `releasedAt`
           when it moves to another phase that is not obsolete.
-        - `pendingChangeId` — the open change the baseline is on. A change that has been closed or
-          cancelled counts as no change, so the field is null then, as it is when the baseline is
-          on no change.
+        - `phaseEnteredAt` — when the baseline entered the phase it is in. Never null: a baseline no
+          change has moved has been in its phase since it was cut. On a baseline that is no longer
+          released, with `releasedAt`, it says when it was released and, until it moves again, when it
+          left released.
+        - `pendingChangeId` — the open change the baseline is on. It counts only while the change is
+          neither closed nor cancelled and the baseline is one of its affected baselines with the
+          outcome Proposed, Applied or Reversed; otherwise the field is null, as it is when the
+          baseline is on no change.
+        - `pendingFromPhase` and `pendingToPhase` — the phases that change moves the baseline from
+          and to, by name. Both null when `pendingChangeId` is. An applied move still shows while
+          its change is open.
 
         A baseline's phase moves through a configuration change (`Change__c`), never through this
         API.
@@ -4040,7 +4048,8 @@ components:
     BaselineTree:
       type: object
       required: [baselineId, resolutionTimePoint, snapshot, parentRowKey, rows, warnings, page,
-                 lifecyclePhase, released, releasedAt, pendingChangeId]
+                 lifecyclePhase, released, releasedAt, phaseEnteredAt, pendingChangeId,
+                 pendingFromPhase, pendingToPhase]
       properties:
         baselineId: { $ref: '#/components/schemas/SalesforceId' }
         label: { type: string }
@@ -4077,11 +4086,37 @@ components:
             already released keeps this time when it moves to another phase that is not obsolete,
             and keeps it when an obsolete phase clears `released`; it is stamped again only when the
             baseline is released from the unreleased state.
+        phaseEnteredAt:
+          type: string
+          format: date-time
+          description: |
+            When the baseline entered the phase it is in: the approval of the change that moved it
+            there. Never null: a baseline no change has moved reads the time it was cut. On a
+            baseline that an obsolete phase has cleared `released` on, it is when it left released
+            until the baseline moves again, while `releasedAt` keeps when it was released. A reversal of the change restores the
+            time the baseline had before.
         pendingChangeId:
           oneOf: [{ $ref: '#/components/schemas/SalesforceId' }, { type: 'null' }]
           description: |
-            The open change (`Change__c`) the baseline is on. Null when it is on no change, and when
-            the change it names has been closed or cancelled (such a change counts as none).
+            The open change (`Change__c`) the baseline is on. It counts only while the baseline is
+            one of the change's affected baselines with the outcome Proposed, Applied or Reversed
+            and the change is neither closed nor cancelled. Null when it is on no change, when the
+            change it names has been closed or cancelled, and when no such affected baseline backs
+            it (each counts as none).
+        pendingFromPhase:
+          type: [string, 'null']
+          description: |
+            The phase the pending change moves the baseline from, by name, as its affected
+            baseline records it. Null when `pendingChangeId` is null, and when that affected
+            baseline names no phase. An applied move still shows while its change is open, so the
+            read says which change moved the baseline.
+          examples: ['Initial']
+        pendingToPhase:
+          type: [string, 'null']
+          description: |
+            The phase the pending change moves the baseline to, by name. Null when
+            `pendingChangeId` is null, and when that affected baseline names no phase.
+          examples: ['Released']
         rows:
           type: array
           description: |
@@ -5110,13 +5145,19 @@ components:
               never deletes or edits them.
             - `PROVENANCE_INVALID` is raised only by a baseline cut of a branch with more than one
               source, which this version cannot create.
+            - `BASELINE_ON_OPEN_CHANGE` (409), `TRANSITION_NOT_ALLOWED` (422) and
+              `CHANGE_TOO_LARGE` (422) are raised when baselines are added to a configuration
+              change, which no route of this version does: a baseline is already on another open
+              change; a baseline phase move that its lifecycle or its change does not allow; and a
+              change that would hold more than 1,000 baselines.
           enum:
             [CLAIM_REQUIRED, ALREADY_CLAIMED, ALREADY_EXCLUDED, NOT_EXCLUDED, NOT_SUPPLIED, NO_CLAIM,
              HARD_DELETE_BLOCKED, IMMUTABLE_FIELD, NOT_RELEASED, STALE_REVISION, CONCURRENT_WRITE,
-             ALREADY_PRESENT,
+             ALREADY_PRESENT, BASELINE_ON_OPEN_CHANGE,
              CANDIDATE_NOT_NEWER, DISPOSITION_REQUIRED, CYCLE_DETECTED, EBOM_CYCLE,
              PARENT_NOT_IN_BRANCH, UNSUPPORTED_CI_TYPE, PROVENANCE_INVALID, CANDIDATE_ROOT_MISMATCH,
              AMBIGUOUS_CORRELATION, REVISION_ITEM_MISMATCH, REVISION_CHOICE_REQUIRED,
+             TRANSITION_NOT_ALLOWED, CHANGE_TOO_LARGE,
              BATCH_TOO_LARGE, STRUCTURE_TOO_LARGE, ASOF_IN_FUTURE, ASOF_INVALID, NOT_EDITABLE,
              INVALID_REQUEST, NOT_FOUND, FORBIDDEN, FEATURE_NOT_ENABLED, INTERNAL_ERROR]
           examples: ['NOT_RELEASED']
@@ -6602,7 +6643,10 @@ components:
         lifecyclePhase: Released
         released: true
         releasedAt: '2026-04-20T16:05:00.000Z'
+        phaseEnteredAt: '2026-04-20T16:05:00.000Z'
         pendingChangeId: null
+        pendingFromPhase: null
+        pendingToPhase: null
         rows:
           - rowKey: a0Bg8000000Ab10
             parentRowKey: null
@@ -6656,7 +6700,10 @@ components:
         lifecyclePhase: Released
         released: true
         releasedAt: '2026-04-20T16:05:00.000Z'
+        phaseEnteredAt: '2026-04-20T16:05:00.000Z'
         pendingChangeId: null
+        pendingFromPhase: null
+        pendingToPhase: null
         rows:
           - rowKey: a0Bg8000000Ab10
             parentRowKey: null
